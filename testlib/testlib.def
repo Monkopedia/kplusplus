@@ -1,0 +1,5 @@
+headers = desired_wrapper.h
+compilerOpts = -I/home/jmonk/kplusplus/testlib/
+staticLibraries = libtestlib.a libtestwrapper.a
+libraryPaths = /home/jmonk/kplusplus/testlib
+package = testlib
