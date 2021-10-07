@@ -3,6 +3,8 @@
 **/build
 **/.idea
 testlib/testlib-build
+**/testout
+**/gen
 
 # Ignore Gradle GUI config
 gradle-app.setting
