@@ -16,20 +16,26 @@
 package com.monkopedia.krapper.generator
 
 import clang.CXType
-import com.monkopedia.krapper.generator.model.MethodType
-import com.monkopedia.krapper.generator.model.WrappedArgument
+import com.monkopedia.krapper.generator.model.MethodType.CONSTRUCTOR
+import com.monkopedia.krapper.generator.model.MethodType.DESTRUCTOR
+import com.monkopedia.krapper.generator.model.MethodType.METHOD
+import com.monkopedia.krapper.generator.model.MethodType.STATIC_OP
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTemplateArgument
+import com.monkopedia.krapper.generator.model.WrappedTemplateMethod
+import com.monkopedia.krapper.generator.model.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.WrappedTemplatedReference
+import com.monkopedia.krapper.generator.model.WrappedType
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
 import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.VOID
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.referenceTo
 import kotlinx.cinterop.CValue
 
 private typealias WrappedClassFactory =
     (ResolverBuilder, Array<WrappedTypeReference>) -> WrappedClass
 
 object StdPopulator {
+    val template = WrappedTemplateType("T")
 
     private val wrappedClassGen: Map<String, WrappedClassFactory> =
         mapOf(
@@ -43,11 +49,18 @@ object StdPopulator {
         type: CValue<CXType>,
         resolverBuilder: ResolverBuilder
     ): WrappedClass {
-        return wrappedClassGen[cls.fullyQualified]?.invoke(
-            resolverBuilder,
-            extractTypes(type, resolverBuilder)
-        ) ?: cls
+        val fullyQualified = cls.fullyQualified
+        return maybeCreate(fullyQualified, type, resolverBuilder) ?: cls
     }
+
+    fun maybeCreate(
+        fullyQualified: String,
+        type: CValue<CXType>,
+        resolverBuilder: ResolverBuilder
+    ): WrappedClass? = wrappedClassGen[fullyQualified]?.invoke(
+        resolverBuilder,
+        extractTypes(type, resolverBuilder)
+    )
 
     fun maybePopulate(cls: WrappedTypeReference, resolverBuilder: ResolverBuilder): WrappedClass? {
         return wrappedClassGen[baseName(cls.name)]?.invoke(
@@ -79,6 +92,71 @@ object StdPopulator {
         }.also { println("Extracted ${type.spelling.toKString()} as ${it.toList()}") }
     }
 
+    val vectorIterator by lazy {
+        val templateList = listOf(template)
+        val selfReference = WrappedTemplatedReference("std::vector<T>::iterator", templateList)
+        WrappedTemplate(
+            selfReference.fullyQualifiedTemplate,
+            null,
+            listOf(),
+            listOf(
+                WrappedTemplateMethod(
+                    "iterator",
+                    selfReference,
+                    emptyList(),
+                    false,
+                    CONSTRUCTOR
+                ),
+                WrappedTemplateMethod(
+                    "operator++",
+                    selfReference,
+                    emptyList(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "operator++",
+                    selfReference,
+                    listOf(WrappedTemplateArgument("dummy", WrappedTypeReference("int"))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "operator==",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator!=",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator*",
+                    WrappedType.referenceTo(template),
+                    listOf(),
+                    false,
+                    METHOD
+                )
+            ),
+            templateList
+        )
+    }
+
     fun stdIterator(
         resolverBuilder: ResolverBuilder,
         vararg types: WrappedTypeReference
@@ -87,57 +165,76 @@ object StdPopulator {
             "Wrong number of type arguments for std::vector::iterator, not sure how to handle"
         }
         val type = types[0]
-        val fullyQualified = "std::vector<${type.name}>::iterator"
 
-        return WrappedClass(
-            fullyQualified,
+        return vectorIterator.typedWith(resolverBuilder, template to type)
+            .also { println("Declaring ${it.fullyQualified}") }
+    }
+
+    val vectorReverseIterator by lazy {
+        val templateList = listOf(template)
+        val selfReference =
+            WrappedTemplatedReference("std::vector<T>::reverse_iterator", templateList)
+        WrappedTemplate(
+            selfReference.fullyQualifiedTemplate,
             null,
             listOf(),
             listOf(
-                WrappedMethod(
-                    "iterator",
-                    WrappedTypeReference(fullyQualified),
+                WrappedTemplateMethod(
+                    "reverse_iterator",
+                    selfReference,
                     emptyList(),
                     false,
-                    MethodType.CONSTRUCTOR
+                    CONSTRUCTOR
                 ),
-                WrappedMethod(
+                WrappedTemplateMethod(
                     "operator++",
-                    WrappedTypeReference(fullyQualified),
+                    selfReference,
                     emptyList(),
                     false,
-                    MethodType.METHOD
+                    METHOD
                 ),
-                WrappedMethod(
+                WrappedTemplateMethod(
                     "operator++",
-                    WrappedTypeReference(fullyQualified),
-                    listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
+                    selfReference,
+                    listOf(WrappedTemplateArgument("dummy", WrappedTypeReference("int"))),
                     false,
-                    MethodType.METHOD
+                    METHOD
                 ),
-                WrappedMethod(
+                WrappedTemplateMethod(
                     "operator==",
                     WrappedTypeReference("bool"),
-                    listOf(WrappedArgument("other", WrappedTypeReference("$fullyQualified &"))),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
                     false,
-                    MethodType.STATIC_OP
+                    STATIC_OP
                 ),
-                WrappedMethod(
+                WrappedTemplateMethod(
                     "operator!=",
                     WrappedTypeReference("bool"),
-                    listOf(WrappedArgument("other", WrappedTypeReference("$fullyQualified &"))),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
                     false,
-                    MethodType.STATIC_OP
+                    STATIC_OP
                 ),
-                WrappedMethod(
+                WrappedTemplateMethod(
                     "operator*",
-                    referenceTo(type),
+                    WrappedType.referenceTo(template),
                     listOf(),
                     false,
-                    MethodType.METHOD
+                    METHOD
                 )
-            )
-        ).also { println("Declaring $fullyQualified") }
+
+            ),
+            templateList
+        )
     }
 
     fun stdReverseIterator(
@@ -149,57 +246,278 @@ object StdPopulator {
                 "not sure how to handle"
         }
         val type = types[0]
-        val fullyQualified = "std::vector<${type.name}>::reverse_iterator"
 
-        return WrappedClass(
-            fullyQualified,
+        return vectorReverseIterator.typedWith(resolverBuilder, template to type)
+            .also { println("Declaring ${it.fullyQualified}") }
+    }
+
+    val vectorTemplate by lazy {
+        val templateList = listOf(template)
+        val selfReference = WrappedTemplatedReference("std::vector<T>", templateList)
+        val iterator = WrappedTemplatedReference("std::vector<T>::iterator", templateList)
+        val reverseIterator =
+            WrappedTemplatedReference("std::vector<T>::reverse_iterator", templateList)
+        WrappedTemplate(
+            selfReference.fullyQualifiedTemplate,
             null,
             listOf(),
             listOf(
-                WrappedMethod(
-                    "reverse_iterator",
-                    WrappedTypeReference(fullyQualified),
+                WrappedTemplateMethod(
+                    selfReference.fullyQualifiedTemplate,
+                    VOID,
                     emptyList(),
                     false,
-                    MethodType.CONSTRUCTOR
+                    CONSTRUCTOR
                 ),
-                WrappedMethod(
-                    "operator++",
-                    WrappedTypeReference(fullyQualified),
-                    emptyList(),
+                WrappedTemplateMethod(
+                    selfReference.fullyQualifiedTemplate,
+                    VOID,
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
                     false,
-                    MethodType.METHOD
+                    CONSTRUCTOR
                 ),
-                WrappedMethod(
-                    "operator++",
-                    WrappedTypeReference(fullyQualified),
-                    listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "operator==",
-                    WrappedTypeReference("bool"),
-                    listOf(WrappedArgument("other", WrappedTypeReference("$fullyQualified &"))),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator!=",
-                    WrappedTypeReference("bool"),
-                    listOf(WrappedArgument("other", WrappedTypeReference("$fullyQualified &"))),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator*",
-                    referenceTo(type),
+                WrappedTemplateMethod(
+                    selfReference.fullyQualifiedTemplate,
+                    VOID,
                     listOf(),
                     false,
-                    MethodType.METHOD
+                    DESTRUCTOR
+                ),
+                WrappedTemplateMethod(
+                    "at",
+                    WrappedType.referenceTo(template),
+                    listOf(WrappedTemplateArgument("pos", WrappedTypeReference("std::size_t"))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "operator[]",
+                    WrappedType.referenceTo(template),
+                    listOf(WrappedTemplateArgument("pos", WrappedTypeReference("std::size_t"))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "front",
+                    WrappedType.referenceTo(template),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "back",
+                    WrappedType.referenceTo(template),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "data",
+                    WrappedType.pointerTo(template),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "begin",
+                    iterator,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "end",
+                    iterator,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "rbegin",
+                    reverseIterator,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "rend",
+                    reverseIterator,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "empty",
+                    WrappedTypeReference("bool"),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "size",
+                    WrappedTypeReference("std::size_t"),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "max_size",
+                    WrappedTypeReference("std::size_t"),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "reserve",
+                    VOID,
+                    listOf(WrappedTemplateArgument("new_cap", WrappedTypeReference("std::size_t"))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "capacity",
+                    WrappedTypeReference("std::size_t"),
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "shrink_to_fit",
+                    VOID,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "clear",
+                    VOID,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "insert",
+                    iterator,
+                    listOf(
+                        WrappedTemplateArgument("pos", iterator),
+                        WrappedTemplateArgument("value", WrappedType.referenceTo(template))
+                    ),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "push_back",
+                    VOID,
+                    listOf(WrappedTemplateArgument("value", WrappedType.referenceTo(template))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "pop_back",
+                    VOID,
+                    listOf(),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "resize",
+                    VOID,
+                    listOf(WrappedTemplateArgument("count", WrappedTypeReference("std::size_t"))),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "swap",
+                    VOID,
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    METHOD
+                ),
+                WrappedTemplateMethod(
+                    "operator==",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator!=",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator<",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator<=",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator>",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
+                ),
+                WrappedTemplateMethod(
+                    "operator>=",
+                    WrappedTypeReference("bool"),
+                    listOf(
+                        WrappedTemplateArgument(
+                            "other",
+                            WrappedType.referenceTo(selfReference)
+                        )
+                    ),
+                    false,
+                    STATIC_OP
                 )
-            )
-        ).also { println("Declaring $fullyQualified") }
+            ),
+            templateList
+        )
     }
 
     fun stdVector(
@@ -210,264 +528,9 @@ object StdPopulator {
             "Wrong number of type arguments for std::vector, not sure how to handle"
         }
         val type = types[0]
-        val fullyQualified = "std::vector<${type.name}>"
-        val iterator = resolverBuilder.type("std::vector<$type>::iterator")
-        val reverseIterator = resolverBuilder.type("std::vector<$type>::reverse_iterator")
-        return WrappedClass(
-            fullyQualified,
-            null,
-            listOf(),
-            listOf(
-                WrappedMethod(
-                    fullyQualified,
-                    VOID,
-                    emptyList(),
-                    false,
-                    MethodType.CONSTRUCTOR
-                ),
-                WrappedMethod(
-                    fullyQualified,
-                    VOID,
-                    listOf(WrappedArgument("other", WrappedTypeReference("$fullyQualified &"))),
-                    false,
-                    MethodType.CONSTRUCTOR
-                ),
-                WrappedMethod(
-                    fullyQualified,
-                    VOID,
-                    listOf(),
-                    false,
-                    MethodType.DESTRUCTOR
-                ),
-                WrappedMethod(
-                    "at",
-                    referenceTo(type),
-                    listOf(WrappedArgument("pos", resolverBuilder.type("std::size_t"))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "operator[]",
-                    referenceTo(type),
-                    listOf(WrappedArgument("pos", resolverBuilder.type("std::size_t"))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "front",
-                    referenceTo(type),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "back",
-                    referenceTo(type),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "data",
-                    pointerTo(type),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "begin",
-                    iterator,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "end",
-                    iterator,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "rbegin",
-                    reverseIterator,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "rend",
-                    reverseIterator,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "empty",
-                    resolverBuilder.type("bool"),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "size",
-                    resolverBuilder.type("std::size_t"),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "max_size",
-                    resolverBuilder.type("std::size_t"),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "reserve",
-                    VOID,
-                    listOf(WrappedArgument("new_cap", resolverBuilder.type("std::size_t"))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "capacity",
-                    resolverBuilder.type("std::size_t"),
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "shrink_to_fit",
-                    VOID,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "clear",
-                    VOID,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "insert",
-                    iterator,
-                    listOf(
-                        WrappedArgument("pos", iterator),
-                        WrappedArgument("value", referenceTo(type))
-                    ),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "push_back",
-                    VOID,
-                    listOf(WrappedArgument("value", referenceTo(type))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "pop_back",
-                    VOID,
-                    listOf(),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "resize",
-                    VOID,
-                    listOf(WrappedArgument("count", resolverBuilder.type("std::size_t"))),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "swap",
-                    VOID,
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.METHOD
-                ),
-                WrappedMethod(
-                    "operator==",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator!=",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator<",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator<=",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator>",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                ),
-                WrappedMethod(
-                    "operator>=",
-                    WrappedTypeReference("bool"),
-                    listOf(
-                        WrappedArgument(
-                            "other",
-                            referenceTo(WrappedTypeReference(fullyQualified))
-                        )
-                    ),
-                    false,
-                    MethodType.STATIC_OP
-                )
-            )
-        ).also { println("Declaring $fullyQualified") }
+        return vectorTemplate.typedWith(resolverBuilder, template to type).also {
+            println("Declaring ${it.fullyQualified}")
+        }
     }
 
     private fun ResolverBuilder.type(s: String): WrappedTypeReference {

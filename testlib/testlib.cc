@@ -413,4 +413,12 @@ void OtherClass::appendText(std::vector<std::string> text) {
     this->privateString.append(line);
 }
 
+MyPair<OtherClass*>* OtherClass::copies() {
+    return new MyPair<OtherClass*>(this, this);
+}
+
+MyPair<int>* OtherClass::ints() {
+    return new MyPair<int>(5, 0);
+}
+
 }

@@ -15,15 +15,23 @@
  */
 import VectorString.Companion.asVector
 import kotlinx.cinterop.MemScope
+import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toKString
+import testlib.TestLib_MyPair__OtherClass__P
 import testlib.TestLib_OtherClass
 import testlib.TestLib_OtherClass_appendText
+import testlib.TestLib_OtherClass_copies
 import testlib.TestLib_OtherClass_dispose
 import testlib.TestLib_OtherClass_getPrivateString
+import testlib.TestLib_OtherClass_ints
 import testlib.TestLib_OtherClass_new
 import testlib.TestLib_OtherClass_setPrivateString
 
-value class OtherClass private constructor(val source: Pair<TestLib_OtherClass, MemScope>) {
+value class OtherClass constructor(val source: Pair<TestLib_OtherClass, MemScope>) {
+    val ptr: TestLib_MyPair__OtherClass__P
+        inline get() = source.first
+    val memScope: MemScope
+        inline get() = source.second
 
     var privateString: String?
         get() = TestLib_OtherClass_getPrivateString(source.first)?.toKString()
@@ -35,6 +43,16 @@ value class OtherClass private constructor(val source: Pair<TestLib_OtherClass, 
         text.asVector { vector ->
             TestLib_OtherClass_appendText(source.first, vector.source.first)
         }
+    }
+
+    inline fun copies(): MyPair_OtherClass_P? {
+        val ptr = TestLib_OtherClass_copies(ptr) ?: return null
+        return MyPair_OtherClass_P(ptr to memScope)
+    }
+
+    inline fun ints(): MyPair_int? {
+        val ptr = TestLib_OtherClass_ints(ptr) ?: return null
+        return MyPair_int(ptr to memScope)
     }
 
     companion object {

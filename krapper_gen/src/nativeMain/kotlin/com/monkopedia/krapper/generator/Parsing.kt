@@ -16,6 +16,7 @@
 package com.monkopedia.krapper.generator
 
 import clang.CXCursorKind
+import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXIndex
 import clang.CXTranslationUnit
 import clang.CXType
@@ -27,6 +28,7 @@ import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
@@ -96,7 +98,7 @@ fun generateIncludes() = memScoped {
     }
     return@memScoped lines.subList(start + 1, end).toList().map { it.trim() }.also {
         println("Found include locations $it")
-    }
+    } + "."
 }
 
 fun find(s: String): String? {
@@ -114,7 +116,8 @@ fun find(s: String): String? {
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
 val INCLUDE_PATHS = generateIncludes()
 
-private class ParsedResolver(classes: List<WrappedClass>) : Resolver {
+private class ParsedResolver(classes: List<WrappedClass>, templates: List<WrappedTemplate>) :
+    Resolver {
     private val classMap = classes.associateBy { it.fullyQualified }
 
     override fun resolve(fullyQualified: String): WrappedClass {
@@ -127,27 +130,45 @@ private class ParsedResolver(classes: List<WrappedClass>) : Resolver {
 }
 
 private class ResolverBuilderImpl : ResolverBuilder {
-    private val seenNames = mutableSetOf<String>()
+    private val seenNames = mutableMapOf<String, CValue<CXType>>()
     val classes = mutableListOf<WrappedClass>()
+    val desiredTemplates = mutableListOf<CValue<CXType>>()
 
-    override fun visit(type: CValue<CXType>) {
-        val strType = type.spelling.toKString()?.trim() ?: return
-        if (!seenNames.add(strType)) return
-
-        val declaration = type.declaration
-        if (declaration.kind == CXCursorKind.CXCursor_ClassDecl) {
-            println("Checking $strType ${declaration.kind} ${declaration.spelling.toKString()}")
-            classes.add(
-                WrappedClass(declaration, this).let {
-                    StdPopulator.maybePopulate(it, type, this)
+    override fun visit(type: CValue<CXType>): CValue<CXType> {
+        val strType = type.spelling.toKString()?.trim() ?: return type
+        return seenNames.getOrPut(strType) {
+            val declaration = type.typeDeclaration
+            when (declaration.kind) {
+                CXCursorKind.CXCursor_ClassDecl -> {
+                    val fullyQualified = declaration.fullyQualified
+                    seenNames[strType] = type
+                    val std = StdPopulator.maybeCreate(fullyQualified, type, this)
+                    if (std != null) {
+                        classes.add(std)
+                    } else {
+                        if (type.numTemplateArguments <= 0) {
+                            classes.add(WrappedClass(declaration, this))
+                        } else {
+                            desiredTemplates.add(type)
+                        }
+                    }
+                    type
                 }
-            )
+                CXCursor_TypedefDecl -> {
+                    println("Typedef ${declaration.prettyPrinted.toKString()}")
+                    visit(type.typeDeclaration.typedefDeclUnderlyingType)
+                }
+                else -> {
+                    println("Not sure how to handle $strType with kind ${declaration.kind}")
+                    type
+                }
+            }
         }
     }
 
     override fun visit(type: WrappedTypeReference) {
         val strType = type.name
-        if (!seenNames.add(strType)) return
+//        if (!seenNames.add(strType)) return
 
         classes.add(
             StdPopulator.maybePopulate(type, this) ?: return
@@ -158,30 +179,50 @@ private class ResolverBuilderImpl : ResolverBuilder {
 fun MemScope.parseHeader(
     index: CXIndex,
     file: List<String>,
-    args: Array<String> = arrayOf("-xc++", "--std=c++11") + INCLUDE_PATHS.map { "-I$it" }
+    args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
         .toTypedArray()
 ): Resolver {
     val builder = ResolverBuilderImpl()
-    val expected = file.flatMap { parseHeader(index, it, builder, args) }
-    return ParsedResolver(expected + builder.classes)
+    val (expected, templates) = file.map { parseHeader(index, it, builder, args) }
+        .reduceRight { (f1, s1), (f2, s2) ->
+            (f1 + f2) to (s1 + s2)
+        }
+    return ParsedResolver(expected + builder.classes, templates)
 }
 
 private fun MemScope.parseHeader(
     index: CXIndex,
     file: String,
     resolverBuilder: ResolverBuilder,
-    args: Array<String> = arrayOf("-xc++", "--std=c++11") + INCLUDE_PATHS.map { "-I$it" }
+    args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
         .toTypedArray(),
-): List<WrappedClass> {
+): Pair<List<WrappedClass>, List<WrappedTemplate>> {
     val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
     tu.printDiagnostics()
     defer {
         tu.dispose()
     }
     val cursor = tu.cursor
-    return cursor.filterChildrenRecursive {
+    val classes = cursor.filterChildrenRecursive {
         it.kind == CXCursorKind.CXCursor_ClassDecl
     }.map { WrappedClass(it, resolverBuilder) }
+    val templates = cursor.filterChildrenRecursive {
+        it.kind == CXCursorKind.CXCursor_ClassTemplate
+    }.map {
+//        if (it.fullyQualified.startsWith("std::vector")) {
+//            val info = CursorTreeInfo(it)
+// //            println(Json.encodeToString(info))
+//            File("/tmp/std_vector.json").writeText(Json.encodeToString(info))
+//        }
+//        if (it.fullyQualified.startsWith("std::_Vector_base")) {
+//            val info = CursorTreeInfo(it)
+//            File("/tmp/std_vector_base.json").writeText(Json.encodeToString(info))
+//        }
+        WrappedTemplate(it, resolverBuilder).also {
+//            println("Created template $it")
+        }
+    }
+    return classes to templates
 }
 
 fun CXTranslationUnit.printDiagnostics() {

@@ -20,6 +20,78 @@ void std_vector_string_push_back(std_vector_string thiz, const char* str) {
     thiz_cast->push_back(str);
 }
 
+TestLib_MyPair__OtherClass__P TestLib_MyPair__OtherClass__P_new(TestLib_OtherClass first, TestLib_OtherClass second) {
+    OtherClass* first_cast = reinterpret_cast<OtherClass*>(first);
+    OtherClass* second_cast = reinterpret_cast<OtherClass*>(second);
+    return new MyPair<OtherClass*>(first_cast, second_cast);
+}
+
+void TestLib_MyPair__OtherClass__P_a_set(TestLib_MyPair__OtherClass__P thiz, TestLib_OtherClass value) {
+    MyPair<OtherClass*>* thiz_cast = reinterpret_cast<MyPair<OtherClass*>*>(thiz);
+    OtherClass* value_cast = reinterpret_cast<OtherClass*>(value);
+    thiz_cast->a = value_cast;
+}
+
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_a_get(TestLib_MyPair__OtherClass__P thiz) {
+    MyPair<OtherClass*>* thiz_cast = reinterpret_cast<MyPair<OtherClass*>*>(thiz);
+    return thiz_cast->a;
+}
+
+void TestLib_MyPair__OtherClass__P_b_set(TestLib_MyPair__OtherClass__P thiz, TestLib_OtherClass value) {
+    MyPair<OtherClass*>* thiz_cast = reinterpret_cast<MyPair<OtherClass*>*>(thiz);
+    OtherClass* value_cast = reinterpret_cast<OtherClass*>(value);
+    thiz_cast->b = value_cast;
+}
+
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_b_get(TestLib_MyPair__OtherClass__P thiz) {
+    MyPair<OtherClass*>* thiz_cast = reinterpret_cast<MyPair<OtherClass*>*>(thiz);
+    return thiz_cast->b;
+}
+
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_get_max(TestLib_MyPair__OtherClass__P thiz) {
+    MyPair<OtherClass*>* thiz_cast = reinterpret_cast<MyPair<OtherClass*>*>(thiz);
+    return thiz_cast->getMax();
+}
+
+TestLib_MyPair__int TestLib_MyPair__int_new(int first, int second) {
+    return new MyPair<int>(first, second);
+}
+
+void TestLib_MyPair__int_a_set(TestLib_MyPair__int thiz, int value) {
+    MyPair<int>* thiz_cast = reinterpret_cast<MyPair<int>*>(thiz);
+    thiz_cast->a = value;
+}
+
+int TestLib_MyPair__int_a_get(TestLib_MyPair__int thiz) {
+    MyPair<int>* thiz_cast = reinterpret_cast<MyPair<int>*>(thiz);
+    return thiz_cast->a;
+}
+
+void TestLib_MyPair__int_b_set(TestLib_MyPair__int thiz, int value) {
+    MyPair<int>* thiz_cast = reinterpret_cast<MyPair<int>*>(thiz);
+    thiz_cast->b = value;
+}
+
+int TestLib_MyPair__int_b_get(TestLib_MyPair__int thiz) {
+    MyPair<int>* thiz_cast = reinterpret_cast<MyPair<int>*>(thiz);
+    return thiz_cast->b;
+}
+
+int TestLib_MyPair__int_get_max(TestLib_MyPair__int thiz) {
+    MyPair<int>* thiz_cast = reinterpret_cast<MyPair<int>*>(thiz);
+    return thiz_cast->getMax();
+}
+
+TestLib_MyPair__OtherClass__P TestLib_OtherClass_copies(TestLib_OtherClass thiz) {
+    OtherClass* thiz_cast = reinterpret_cast<OtherClass*>(thiz);
+    return thiz_cast->copies();
+}
+
+TestLib_MyPair__int TestLib_OtherClass_ints(TestLib_OtherClass thiz) {
+    OtherClass* thiz_cast = reinterpret_cast<OtherClass*>(thiz);
+    return thiz_cast->ints();
+}
+
 TestLib_OtherClass TestLib_OtherClass_new() {
     return new OtherClass();
 }
@@ -32,9 +104,9 @@ void TestLib_OtherClass_dispose(TestLib_OtherClass thiz) {
 const char* TestLib_OtherClass_getPrivateString(TestLib_OtherClass thiz) {
     OtherClass* thiz_cast = reinterpret_cast<OtherClass*>(thiz);
     string str = thiz_cast->getPrivateString();
-    //char* buffer = new char[str.length() + 1];
-    //str.copy(buffer, str.length(), 0);
-    return &str[0];
+    char* buffer = new char[str.length() + 1];
+    str.copy(buffer, str.length(), 0);
+    return buffer;
 }
 
 void TestLib_OtherClass_setPrivateString(TestLib_OtherClass thiz, const char* value) {

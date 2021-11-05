@@ -15,6 +15,10 @@
  */
 package com.monkopedia.krapper.generator
 
+import clang.CXCursor
+import clang.CXCursorKind
+import kotlinx.cinterop.CValue
+import kotlinx.serialization.Serializable
 import platform.posix.fflush
 import platform.posix.fprintf
 
@@ -24,5 +28,22 @@ object Utils {
     fun printerrln(message: String) {
         fprintf(STDERR, message + "\n")
         fflush(STDERR)
+    }
+
+    @Serializable
+    data class CursorTreeInfo(
+        val spelling: String?,
+        val type: String?,
+        val kind: CXCursorKind,
+        val prettyPrint: String,
+        val children: List<CursorTreeInfo>,
+    ) {
+        constructor(cursor: CValue<CXCursor>): this(
+            cursor.spelling.toKString() ?: "UKN",
+            cursor.type.spelling.toKString() ?: "UKN",
+            cursor.kind,
+            cursor.prettyPrinted.toKString() ?: "NOINFO",
+            cursor.filterChildren { true }.map { CursorTreeInfo(it) }
+        )
     }
 }

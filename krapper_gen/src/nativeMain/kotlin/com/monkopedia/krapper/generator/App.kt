@@ -18,6 +18,16 @@ package com.monkopedia.krapper.generator
 import clang.CXChildVisitResult
 import clang.CXCursor
 import clang.CXCursorKind
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Declaration
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Expression
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Integral
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Invalid
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Null
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_NullPtr
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Pack
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Template
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_TemplateExpansion
+import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Type
 import clang.clang_visitChildren
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
@@ -153,14 +163,34 @@ class KrapperGen : CliktCommand() {
     }
 }
 
+private val CValue<CXCursor>.templatedName: String
+    get() {
+//        if (numTemplateArguments != 0) {
+//            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
+//                when (getTemplateArgumentKind(it.toUInt())) {
+//                    CXTemplateArgumentKind_Null -> "__NULL__"
+//                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
+//                    CXTemplateArgumentKind_Declaration -> "__DECL__"
+//                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
+//                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
+//                    CXTemplateArgumentKind_Template -> "__TYPE__"
+//                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
+//                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
+//                    CXTemplateArgumentKind_Pack -> "__PACK__"
+//                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
+//                }
+//            } + ">"
+//        }
+        return spelling.toKString() ?: ""
+    }
 val CValue<CXCursor>?.fullyQualified: String
     get() =
         if (this == null || this == CXCursor.NULL) ""
         else if (kind == CXCursorKind.CXCursor_TranslationUnit) ""
         else {
             val res = semanticParent.fullyQualified
-            if (res.isNotEmpty()) res + "::" + spelling.toKString()
-            else spelling.toKString() ?: ""
+            if (res.isNotEmpty()) "$res::$templatedName"
+            else templatedName ?: ""
         }
 
 val recurseVisitor =

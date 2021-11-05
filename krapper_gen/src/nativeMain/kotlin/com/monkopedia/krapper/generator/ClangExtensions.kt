@@ -91,6 +91,7 @@ import clang.clang_getCursorExtent
 import clang.clang_getCursorKind
 import clang.clang_getCursorLexicalParent
 import clang.clang_getCursorLocation
+import clang.clang_getCursorPrettyPrinted
 import clang.clang_getCursorReferenceNameRange
 import clang.clang_getCursorReferenced
 import clang.clang_getCursorResultType
@@ -148,6 +149,7 @@ import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toCStringArray
 import kotlinx.cinterop.toKString
+import kotlin.native.internal.NativePtr.Companion.NULL
 
 inline fun CXTranslationUnit.annotateTokens(
     token: CPointer<CXToken>,
@@ -292,6 +294,8 @@ inline val CValue<CXCursor>.type: CValue<CXType>
 
 inline val CValue<CXCursor>.usr: CValue<CXString>
     get() = clang_getCursorUSR(this)
+inline val CValue<CXCursor>.prettyPrinted: CValue<CXString>
+    get() = clang_getCursorPrettyPrinted(this, null)
 
 inline val CValue<CXCursor>.mangling: CValue<CXString>
     get() = clang_Cursor_getMangling(this)
@@ -510,5 +514,3 @@ inline val CValue<CXType>.refQualifier: CXRefQualifierKind
     get() = clang_Type_getCXXRefQualifier(this)
 inline val CValue<CXType>.namedType: CValue<CXType>
     get() = clang_Type_getNamedType(this)
-inline val CValue<CXType>.declaration: CValue<CXCursor>
-    get() = clang_getTypeDeclaration(this)

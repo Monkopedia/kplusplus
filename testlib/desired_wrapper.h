@@ -12,16 +12,34 @@
 typedef void* TestLib_TestClass;
 typedef void* TestLib_OtherClass;
 typedef void* std_vector_string;
+typedef void* TestLib_MyPair__OtherClass__P;
+typedef void* TestLib_MyPair__int;
 
 std_vector_string std_vector_string_new();
 void std_vector_string_dispose(std_vector_string thiz);
 void std_vector_string_push_back(std_vector_string thiz, const char* str);
+
+TestLib_MyPair__OtherClass__P TestLib_MyPair__OtherClass__P_new(TestLib_OtherClass first, TestLib_OtherClass second);
+void TestLib_MyPair__OtherClass__P_a_set(TestLib_MyPair__OtherClass__P thiz, TestLib_OtherClass value);
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_a_get(TestLib_MyPair__OtherClass__P thiz);
+void TestLib_MyPair__OtherClass__P_b_set(TestLib_MyPair__OtherClass__P thiz, TestLib_OtherClass value);
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_b_get(TestLib_MyPair__OtherClass__P thiz);
+TestLib_OtherClass TestLib_MyPair__OtherClass__P_get_max(TestLib_MyPair__OtherClass__P thiz);
+
+TestLib_MyPair__int TestLib_MyPair__int_new(int first, int second);
+void TestLib_MyPair__int_a_set(TestLib_MyPair__int thiz, int value);
+int TestLib_MyPair__int_a_get(TestLib_MyPair__int thiz);
+void TestLib_MyPair__int_b_set(TestLib_MyPair__int thiz, int value);
+int TestLib_MyPair__int_b_get(TestLib_MyPair__int thiz);
+int TestLib_MyPair__int_get_max(TestLib_MyPair__int thiz);
 
 TestLib_OtherClass TestLib_OtherClass_new();
 void TestLib_OtherClass_dispose(TestLib_OtherClass thiz);
 const char* TestLib_OtherClass_getPrivateString(TestLib_OtherClass thiz);
 void TestLib_OtherClass_setPrivateString(TestLib_OtherClass thiz, const char* value);
 void TestLib_OtherClass_appendText(TestLib_OtherClass thiz, std_vector_string value);
+TestLib_MyPair__OtherClass__P TestLib_OtherClass_copies(TestLib_OtherClass thiz);
+TestLib_MyPair__int TestLib_OtherClass_ints(TestLib_OtherClass thiz);
 
 bool TestLib_TestClass_b_get(TestLib_TestClass thiz);
 void TestLib_TestClass_b_set(TestLib_TestClass thiz, bool value);

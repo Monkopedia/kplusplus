@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.findQualifiers
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
@@ -34,5 +35,29 @@ class ParseTest {
         val classes = parseHeader(index, listOf(tmpFile)).findClasses(WrappedClass::defaultFilter)
         val expectedClasses = Json.decodeFromString<List<WrappedClass>>(TestData.JSON)
         assertEquals(expectedClasses, classes)
+    }
+
+    @Test
+    fun testTemplate() = memScoped {
+        val index = createIndex(0, 0) ?: error("Failed to create Index")
+        defer { index.dispose() }
+        val tmpFile = "/tmp/${random()}_${random()}"
+        File(tmpFile).writeText(TestData.TEMPLATE_HEADER)
+        val classes = parseHeader(index, listOf(tmpFile)).findClasses(WrappedClass::defaultFilter)
+        println(classes)
+    }
+
+    @Test
+    fun testQualifiers() = memScoped {
+        val str = "std::vector<std::string>::iterator"
+        val indices = findQualifiers(str)
+        assertEquals(
+            listOf(
+                "std",
+                "vector<std::string>",
+                "iterator"
+            ),
+            indices.map { str.substring(it.start, it.endInclusive + 1) }
+        )
     }
 }

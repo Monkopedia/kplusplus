@@ -103,7 +103,7 @@ fun WrappedKotlinType(type: WrappedTypeReference): WrappedKotlinType {
     if (name.contains("<")) {
         var templateTypes = mutableListOf<WrappedKotlinType>()
         return WrappedKotlinType(
-            splitQualifiers(name).joinToString("::") {
+            findQualifiers(name).joinToString("::") {
                 val section = name.substring(it).trimStart(':')
                 val start = section.indexOf('<')
                 if (start < 0) section
@@ -168,14 +168,14 @@ fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKot
 }
 
 fun parseTypes(argList: String): List<WrappedKotlinType> {
-    return splitList(argList).map {
+    return findTemplates(argList).map {
         argList.substring(it).trimStart(',')
     }.map(::WrappedKotlinType)
 }
 
-private fun splitQualifiers(argList: String): List<IntRange> {
+fun findQualifiers(argList: String): List<IntRange> {
     return sequence {
-        var last = 0
+        var last = -1
         var current = 1
         var lastColon = false
         while (current < argList.length) {
@@ -183,31 +183,17 @@ private fun splitQualifiers(argList: String): List<IntRange> {
             if (c == '<') {
                 current = argList.findEnd(start = current)
             } else if (c == ':' && lastColon) {
-                yield(IntRange(last, current - 2))
+                yield(IntRange(last + 1, current - 2))
                 last = current
             }
             lastColon = c == ':'
             current++
         }
-        yield(IntRange(last, current - 1))
+        yield(IntRange(last + 1, current - 1))
     }.toList()
-//    if (argList.contains("<")) {
-//        val startTemp = argList.indexOf('<')
-//        val endTemp = argList.findEnd(start = startTemp)
-//        return splitList(
-//            argList.substring(
-//                0,
-//                startTemp
-//            ) + Array(endTemp - startTemp + 2) { ' ' }.joinToString("") + argList.substring(endTemp)
-//        )
-//    }
-//    val list =
-//        listOf(0) + argList.zipWithNext()
-//            .mapIndexedNotNull { index, (c1, c2) -> if (c1 == ':' && c2 == ':') index - 1 else null } + argList.length
-//    return list.zipWithNext().map { IntRange(it.first, it.second - 1) }
 }
 
-private fun splitList(argList: String): List<IntRange> {
+fun findTemplates(argList: String): List<IntRange> {
     return sequence {
         var last = 0
         var current = 1
@@ -222,19 +208,6 @@ private fun splitList(argList: String): List<IntRange> {
         }
         yield(IntRange(last, current - 1))
     }.toList()
-//    if (argList.contains("<")) {
-//        val startTemp = argList.indexOf('<')
-//        val endTemp = argList.findEnd(start = startTemp)
-//        return splitList(
-//            argList.substring(
-//                0,
-//                startTemp
-//            ) + Array(endTemp - startTemp + 2) { ' ' }.joinToString("") + argList.substring(endTemp)
-//        )
-//    }
-//    val list =
-//        listOf(0) + argList.mapIndexedNotNull { index, c -> if (c == ',') index else null } + argList.length
-//    return list.zipWithNext().map { IntRange(it.first, it.second - 1) }
 }
 
 private fun String.findEnd(start: Int): Int {

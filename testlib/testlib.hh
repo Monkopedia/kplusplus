@@ -6,6 +6,22 @@
 
 namespace TestLib {
 
+    
+template <class T>
+class MyPair {
+  public:
+    T a, b;
+    MyPair (T first, T second) {a=first; b=second;}
+    T getMax();
+};
+
+template <class T>
+T MyPair<T>::getMax ()
+{
+  T retval;
+  retval = a>b? a : b;
+  return retval;
+}
 
 class OtherClass {
     private:
@@ -14,6 +30,8 @@ class OtherClass {
         std::string getPrivateString();
         void setPrivateString(std::string value);
         void appendText(std::vector<std::string> text);
+        MyPair<OtherClass*>* copies();
+        MyPair<int>* ints();
 };
 
 class TestClass {

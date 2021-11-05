@@ -942,6 +942,41 @@ object TestData {
         ]
     """.trimIndent()
 
+    val TEMPLATE_HEADER = """
+        #pragma once
+        
+        #include <iostream>
+        #include <vector>
+        #include <string>
+        
+        namespace TestLib {
+        
+        template <class T>
+        class MyPair {
+          public:
+            T a, b;
+            MyPair (T first, T second) {a=first; b=second;}
+            T getMax();
+        };
+        
+        template <class T>
+        T MyPair<T>::getMax ()
+        {
+          T retval;
+          retval = a>b? a : b;
+          return retval;
+        }
+        
+        class ZZ {
+          public:
+            MyPair<int> intPair;
+            MyPair<std::string> stringPair;
+            MyPair<std::vector<int>> vectorPair;
+        };
+        
+        }
+    """.trimIndent()
+
     object Vector {
         val type = WrappedTypeReference("std::vector<std::string>")
         val constructor = WrappedMethod(

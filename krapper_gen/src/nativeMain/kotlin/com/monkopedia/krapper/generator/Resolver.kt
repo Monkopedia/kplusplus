@@ -31,7 +31,7 @@ interface Resolver {
 }
 
 interface ResolverBuilder {
-    fun visit(type: CValue<CXType>)
+    fun visit(type: CValue<CXType>): CValue<CXType>
     fun visit(type: WrappedTypeReference)
 }
 

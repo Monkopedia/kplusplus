@@ -64,6 +64,11 @@ data class WrappedClass(
             children.findFields(resolverBuilder),
             children.findMethods(resolverBuilder)
         )
+//
+//    init {
+//        println("Created $fullyQualified")
+//        Throwable().printStackTrace()
+//    }
 
     override fun toString(): String {
         return buildString {
