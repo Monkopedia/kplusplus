@@ -71,16 +71,16 @@ private val pointerTypeMap = mapOf(
     "double" to "kotlinx.cinterop.DoubleVar",
 )
 
-fun typeToKotlinType(type: WrappedTypeReference): WrappedKotlinType = WrappedKotlinType(type)
+fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(type)
 
-fun WrappedKotlinType(type: WrappedTypeReference): WrappedKotlinType {
+fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     if (type.isString) return fullyQualifiedType("String?")
     if (type.isPointer) {
         if (type == WrappedTypeReference.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
         }
         if (type.pointed.isNative) {
-            val pointerType = pointerTypeMap[type.pointed.name]
+            val pointerType = pointerTypeMap[type.pointed.toString()]
                 ?: return WrappedKotlinType(type.pointed)
             return nullable(
                 fullyQualifiedType(C_VALUES_REF).typedWith(
@@ -91,15 +91,15 @@ fun WrappedKotlinType(type: WrappedTypeReference): WrappedKotlinType {
         return WrappedKotlinType(type.pointed)
     }
     if (type.isReference) {
-        return WrappedKotlinType(type.referenced)
+        return WrappedKotlinType(type.unreferenced)
     }
     if (type.isConst) {
         return WrappedKotlinType(type.unconst)
     }
     if (type.isNative || type.unconst.name == "long double") {
-        return fullyQualifiedType(typeMap[type.name] ?: type.name)
+        return fullyQualifiedType(typeMap[type.toString()] ?: type.toString())
     }
-    val name = type.name
+    val name = type.toString()
     if (name.contains("<")) {
         var templateTypes = mutableListOf<WrappedKotlinType>()
         return WrappedKotlinType(

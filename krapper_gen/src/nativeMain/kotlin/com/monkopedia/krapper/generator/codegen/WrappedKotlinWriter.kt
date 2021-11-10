@@ -58,13 +58,22 @@ import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedType
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
+import com.monkopedia.krapper.generator.model.isArray
+import com.monkopedia.krapper.generator.model.isConst
+import com.monkopedia.krapper.generator.model.isPointer
+import com.monkopedia.krapper.generator.model.isReference
+import com.monkopedia.krapper.generator.model.isString
+import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.nullable
+import com.monkopedia.krapper.generator.model.pointed
 import com.monkopedia.krapper.generator.model.typedWith
+
 
 class WrappedKotlinWriter(
     private val nameHandler: NameHandler,
@@ -95,7 +104,7 @@ class WrappedKotlinWriter(
         pkg(pkg)
 
         importBlock(pkg, this)
-        comment("BEGIN KRAPPER GEN for ${cls.fullyQualified}")
+        comment("BEGIN KRAPPER GEN for ${cls.type}")
         appendLine()
         cls(named(cls.type.kotlinType)) { source ->
             val ptr = define(ptr.content, fullyQualifiedType(C_OPAQUE_POINTER))
@@ -117,13 +126,14 @@ class WrappedKotlinWriter(
             handleChildren()
         }
         appendLine()
-        comment("END KRAPPER GEN for ${cls.fullyQualified}")
+        comment("END KRAPPER GEN for ${cls.type}")
         appendLine()
         appendLine()
     }
 
     override fun KotlinCodeBuilder.onGenerateMethods(cls: WrappedClass) {
-        cls.methods.filter {
+        val methods = cls.children.filterIsInstance<WrappedMethod>()
+        methods.filter {
             it.methodType == MethodType.STATIC_OP || it.methodType == MethodType.METHOD
         }.forEach { method ->
             try {
@@ -133,7 +143,7 @@ class WrappedKotlinWriter(
             }
         }
         companion {
-            for (method in cls.methods.filter { it.methodType == MethodType.CONSTRUCTOR }) {
+            for (method in methods.filter { it.methodType == MethodType.CONSTRUCTOR }) {
                 try {
                     onGenerate(cls, method)
                 } catch (t: Throwable) {
@@ -153,7 +163,8 @@ class WrappedKotlinWriter(
             val uniqueCName = extensionMethod(pkg, method.uniqueCName)
             when (method.methodType) {
                 MethodType.CONSTRUCTOR -> {
-                    val destructor = cls.methods.find { it.methodType == MethodType.DESTRUCTOR }
+                    val destructor =
+                        cls.children.filterIsInstance<WrappedDestructor>().firstOrNull()
                     extensionFunction {
                         receiver = fqType(MEM_SCOPE)
                         name = cls.type.kotlinType.name
@@ -223,7 +234,7 @@ class WrappedKotlinWriter(
             var args = method.args.map {
                 define(it.name, it.type)
             }
-            if (!returnType.isPointerOrReference && returnType.kotlinType.isWrapper) {
+            if (!(returnType.isPointer || returnType.isReference) && returnType.kotlinType.isWrapper) {
                 args += this@generateBasicMethod.define(
                     "retValue",
                     returnType,
@@ -285,7 +296,7 @@ class WrappedKotlinWriter(
             is BasicWithDummyMethod -> {
                 inline {
                     generateBasicMethod(
-                        method.copy(args = emptyList()),
+                        method.copy(children = emptyList()),
                         extensionMethod(pkg, method.uniqueCName),
                         kotlinType.name,
                         startArgs = listOf(ptr, Raw("0"))
@@ -332,7 +343,7 @@ class WrappedKotlinWriter(
         }
 
     private fun CodeBuilder<KotlinFactory>.generateReturn(
-        returnType: WrappedTypeReference,
+        returnType: WrappedType,
         call: Call
     ) {
         when {

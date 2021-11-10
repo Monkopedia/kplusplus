@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedType
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
@@ -45,7 +45,7 @@ val <T : LangFactory> CodeBuilder<T>.scope: Scope<T>
 
 fun <T : LangFactory> CodeBuilder<T>.define(
     desiredName: String,
-    type: WrappedTypeReference,
+    type: WrappedType,
     initializer: Symbol? = null
 ): LocalVar {
     val name = scope.allocateName(desiredName)

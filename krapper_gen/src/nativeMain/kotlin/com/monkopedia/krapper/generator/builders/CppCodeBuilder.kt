@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
+import com.monkopedia.krapper.generator.model.WrappedType
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
 
 typealias CppCodeBuilder = CodeBuilder<CppFactory>
@@ -24,7 +25,7 @@ fun CppCodeBuilder(): CppCodeBuilder {
 }
 
 class CppFactory : LangFactory {
-    override fun define(name: String, type: WrappedTypeReference, initializer: Symbol?): LocalVar {
+    override fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar {
         return CppLocalVar(name, type, initializer)
     }
 
@@ -32,7 +33,7 @@ class CppFactory : LangFactory {
         return CppFunctionSig(name, retType ?: CppType("void"), args)
     }
 
-    override fun createType(type: WrappedTypeReference): Symbol = CppType(type)
+    override fun createType(type: WrappedType): Symbol = CppType(type)
 }
 
 class CppFunctionSig(
@@ -58,7 +59,7 @@ class CppFunctionSig(
 
 class CppLocalVar(
     override val name: String,
-    val type: WrappedTypeReference,
+    val type: WrappedType,
     private val initializer: Symbol?
 ) : LocalVar, SymbolContainer {
     private val typeSymbol = CppType(type)
@@ -76,7 +77,7 @@ class CppLocalVar(
 }
 
 class CppType(private val typeStr: String) : Symbol {
-    constructor(type: WrappedTypeReference) : this(type.name)
+    constructor(type: WrappedType) : this(type.toString())
 
     override fun build(builder: CodeStringBuilder) {
         builder.append(typeStr)

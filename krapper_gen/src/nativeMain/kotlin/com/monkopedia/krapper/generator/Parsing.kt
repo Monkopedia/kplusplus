@@ -28,8 +28,11 @@ import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedElement
+import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.filterRecursive
+import com.monkopedia.krapper.generator.model.forEachRecursive
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.MemScope
@@ -50,7 +53,7 @@ import platform.posix.write
 typealias ClassFilter = WrappedClass.() -> Boolean
 
 fun WrappedClass.defaultFilter(): Boolean {
-    return !fullyQualified.startsWith("std::") && !fullyQualified.startsWith("__")
+    return !type.toString().startsWith("std::") && !type.toString().startsWith("__")
 }
 
 /**
@@ -116,16 +119,26 @@ fun find(s: String): String? {
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
 val INCLUDE_PATHS = generateIncludes()
 
-private class ParsedResolver(classes: List<WrappedClass>, templates: List<WrappedTemplate>) :
+private class ParsedResolver(private val tu: WrappedTU) :
     Resolver {
-    private val classMap = classes.associateBy { it.fullyQualified }
+    private val classMap = mutableMapOf<String, WrappedClass>()
 
     override fun resolve(fullyQualified: String): WrappedClass {
-        return classMap[fullyQualified] ?: error("Can't resolve $fullyQualified")
+        return classMap.getOrPut(fullyQualified) {
+            tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == fullyQualified }
+                .singleOrNull() as? WrappedClass ?: error("Can't resolve $fullyQualified")
+        }
     }
 
     override fun findClasses(filter: ClassFilter): List<WrappedClass> {
-        return classMap.values.filter { it.filter() }
+        return mutableListOf<WrappedClass>().also { ret ->
+            tu.forEachRecursive {
+                println("Foreach $it")
+                if ((it as? WrappedClass)?.filter() == true) {
+                    ret.add(it)
+                }
+            }
+        }
     }
 }
 
@@ -183,11 +196,12 @@ fun MemScope.parseHeader(
         .toTypedArray()
 ): Resolver {
     val builder = ResolverBuilderImpl()
-    val (expected, templates) = file.map { parseHeader(index, it, builder, args) }
-        .reduceRight { (f1, s1), (f2, s2) ->
-            (f1 + f2) to (s1 + s2)
+    val tu = file.map { parseHeader(index, it, builder, args) }
+        .reduceRight { tu1, tu2 ->
+            tu1 + tu2
         }
-    return ParsedResolver(expected + builder.classes, templates)
+    println("Reduced $tu")
+    return ParsedResolver(tu)
 }
 
 private fun MemScope.parseHeader(
@@ -196,33 +210,29 @@ private fun MemScope.parseHeader(
     resolverBuilder: ResolverBuilder,
     args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
         .toTypedArray(),
-): Pair<List<WrappedClass>, List<WrappedTemplate>> {
+): WrappedTU {
     val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
     tu.printDiagnostics()
     defer {
         tu.dispose()
     }
     val cursor = tu.cursor
-    val classes = cursor.filterChildrenRecursive {
-        it.kind == CXCursorKind.CXCursor_ClassDecl
-    }.map { WrappedClass(it, resolverBuilder) }
-    val templates = cursor.filterChildrenRecursive {
-        it.kind == CXCursorKind.CXCursor_ClassTemplate
-    }.map {
-//        if (it.fullyQualified.startsWith("std::vector")) {
-//            val info = CursorTreeInfo(it)
-// //            println(Json.encodeToString(info))
-//            File("/tmp/std_vector.json").writeText(Json.encodeToString(info))
+//    val classes = cursor.filterChildrenRecursive {
+//        it.kind == CXCursorKind.CXCursor_ClassDecl
+//    }.map { WrappedClass(it, resolverBuilder) }
+//    val templates = cursor.filterChildrenRecursive {
+//        it.kind == CXCursorKind.CXCursor_ClassTemplate
+//    }.map {
+// //        if (it.fullyQualified.startsWith("std::_Vector_base")) {
+// //            val info = CursorTreeInfo(it)
+// //            File("/tmp/std_vector_base.json").writeText(Json.encodeToString(info))
+// //        }
+//        WrappedTemplate(it, resolverBuilder).also {
+// //            println("Created template $it")
 //        }
-//        if (it.fullyQualified.startsWith("std::_Vector_base")) {
-//            val info = CursorTreeInfo(it)
-//            File("/tmp/std_vector_base.json").writeText(Json.encodeToString(info))
-//        }
-        WrappedTemplate(it, resolverBuilder).also {
-//            println("Created template $it")
-        }
-    }
-    return classes to templates
+//    }
+    val element = WrappedElement.map(tu.cursor, resolverBuilder)
+    return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
 }
 
 fun CXTranslationUnit.printDiagnostics() {

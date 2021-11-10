@@ -26,8 +26,14 @@ import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedType
+import com.monkopedia.krapper.generator.model.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.isArray
+import com.monkopedia.krapper.generator.model.isNative
+import com.monkopedia.krapper.generator.model.isPointer
+import com.monkopedia.krapper.generator.model.isReturnable
+import com.monkopedia.krapper.generator.model.unreferenced
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
 private const val BEFORE_UPPER_AND_LOWER = "(?<=\\p{L})(?=\\p{Lu}\\p{Ll})"
@@ -37,7 +43,7 @@ fun String.splitCamelcase(): List<String> {
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
-    type: WrappedTypeReference,
+    type: WrappedType,
     method: WrappedMethod,
     namer: Namer
 ) = with(namer) {
@@ -62,7 +68,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
 
 data class WrapperArgument(
     val arg: WrappedArgument?,
-    val targetType: WrappedTypeReference,
+    val targetType: WrappedType,
     val localVar: LocalVar,
     val needsDereference: Boolean
 ) {
@@ -78,7 +84,7 @@ data class WrapperArgument(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
-    type: WrappedTypeReference,
+    type: WrappedType,
     method: WrappedMethod
 ): List<WrapperArgument> {
     return listOfNotNull(
@@ -111,7 +117,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
-    type: WrappedTypeReference,
+    type: WrappedType,
     field: WrappedField,
     namer: Namer
 ): List<WrapperArgument> = with(namer) {
@@ -136,7 +142,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldSet(
-    type: WrappedTypeReference,
+    type: WrappedType,
     field: WrappedField,
     namer: Namer
 ): List<WrapperArgument> = with(namer) {

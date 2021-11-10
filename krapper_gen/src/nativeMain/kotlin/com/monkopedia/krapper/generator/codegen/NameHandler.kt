@@ -51,7 +51,7 @@ class NameHandler {
 
     private inner class NamerImpl(private val cls: WrappedClass) : Namer {
         private val nameLookup = mutableMapOf<Any, String>()
-        override val cName = cls.fullyQualified.replace("::", "_").replace("<", "_").replace(
+        override val cName = cls.type.toString().replace("::", "_").replace("<", "_").replace(
             ">",
             ""
         )

@@ -104,83 +104,111 @@ class KrapperGen : CliktCommand() {
         memScoped {
             val index = createIndex(0, 0) ?: error("Failed to create Index")
             defer { index.dispose() }
-            val resolver = parseHeader(index, header)
-            var classes = resolver.findClasses(WrappedClass::defaultFilter)
-            classes = classes.resolveAll(resolver, referencePolicy)
-            debug?.let {
-                val clsStr = Json.encodeToString(classes)
-                File(it).writeText(clsStr)
+            val args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
+                .toTypedArray()
+            println("Args: ${args.toList()}")
+            for (file in header) {
+                val tu =
+                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
+                tu.printDiagnostics()
+                defer {
+                    tu.dispose()
+                }
+                tu.cursor.filterChildrenRecursive {
+                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
+                        val info = Utils.CursorTreeInfo(it)
+                        println("Writing ${it.usr.toKString()}")
+                        File("/tmp/testlib_otherclass.json").writeText(Json.encodeToString(info))
+                    }
+                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("TestClass")) {
+                        val info = Utils.CursorTreeInfo(it)
+                        println("Writing ${it.usr.toKString()}")
+                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
+                    }
+                    false
+                }
+//                tu.cursor.filterChildren { true }.forEach {
+//                    val cursor = KXCursor.generate(tu.cursor)
+//                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
+//                }
             }
-            println(
-                "Generating for [\n    ${classes.joinToString(",\n    ") { it.fullyQualified }}\n]"
-            )
-            val outputBase = File(output ?: getcwd())
-            outputBase.mkdirs()
-            val namer = NameHandler()
-            File(outputBase, "$moduleName.h").writeText(
-                CppCodeBuilder().also {
-                    WrappedHeaderWriter(
-                        namer,
-                        it,
-                        policy = errorPolicy.policy
-                    ).generate(moduleName, header, classes)
-                }.toString()
-            )
-            val cppFile = File(outputBase, "$moduleName.cc")
-            cppFile.writeText(
-                CppCodeBuilder().also {
-                    WrappedCppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
-                        moduleName,
-                        header,
-                        classes
-                    )
-                }.toString()
-            )
-            val pkg = pkg ?: "krapper.$moduleName"
-            File(outputBase, "$moduleName.def").writeText(
-                WrappedDefWriter(namer).generateDef(
-                    outputBase,
-                    "$pkg.internal",
-                    moduleName,
-                    header,
-                    library
-                )
-            )
-            WrappedCppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
-                cppFile,
-                header,
-                library
-            )
-            WrappedKotlinWriter(
-                namer,
-                "$pkg.internal",
-                policy = errorPolicy.policy
-            ).generate(
-                File(outputBase, "src"),
-                classes
-            )
+//            val resolver = parseHeader(index, header)
+//            var classes = resolver.findClasses(WrappedClass::defaultFilter)
+//            classes = classes.resolveAll(resolver, referencePolicy)
+//            debug?.let {
+//                val clsStr = Json.encodeToString(classes)
+//                File(it).writeText(clsStr)
+//            }
+//            println(
+//                "Generating for [\n    ${classes.joinToString(",\n    ") { it.fullyQualified }}\n]"
+//            )
+//            val outputBase = File(output ?: getcwd())
+//            outputBase.mkdirs()
+//            val namer = NameHandler()
+//            File(outputBase, "$moduleName.h").writeText(
+//                CppCodeBuilder().also {
+//                    WrappedHeaderWriter(
+//                        namer,
+//                        it,
+//                        policy = errorPolicy.policy
+//                    ).generate(moduleName, header, classes)
+//                }.toString()
+//            )
+//            val cppFile = File(outputBase, "$moduleName.cc")
+//            cppFile.writeText(
+//                CppCodeBuilder().also {
+//                    WrappedCppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
+//                        moduleName,
+//                        header,
+//                        classes
+//                    )
+//                }.toString()
+//            )
+//            val pkg = pkg ?: "krapper.$moduleName"
+//            File(outputBase, "$moduleName.def").writeText(
+//                WrappedDefWriter(namer).generateDef(
+//                    outputBase,
+//                    "$pkg.internal",
+//                    moduleName,
+//                    header,
+//                    library
+//                )
+//            )
+//            WrappedCppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
+//                cppFile,
+//                header,
+//                library
+//            )
+//            WrappedKotlinWriter(
+//                namer,
+//                "$pkg.internal",
+//                policy = errorPolicy.policy
+//            ).generate(
+//                File(outputBase, "src"),
+//                classes
+//            )
         }
     }
 }
 
 private val CValue<CXCursor>.templatedName: String
     get() {
-//        if (numTemplateArguments != 0) {
-//            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
-//                when (getTemplateArgumentKind(it.toUInt())) {
-//                    CXTemplateArgumentKind_Null -> "__NULL__"
-//                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
-//                    CXTemplateArgumentKind_Declaration -> "__DECL__"
-//                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
-//                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
-//                    CXTemplateArgumentKind_Template -> "__TYPE__"
-//                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
-//                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
-//                    CXTemplateArgumentKind_Pack -> "__PACK__"
-//                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
-//                }
-//            } + ">"
-//        }
+        if (numTemplateArguments != 0) {
+            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
+                when (getTemplateArgumentKind(it.toUInt())) {
+                    CXTemplateArgumentKind_Null -> "__NULL__"
+                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
+                    CXTemplateArgumentKind_Declaration -> "__DECL__"
+                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
+                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
+                    CXTemplateArgumentKind_Template -> "__TYPE__"
+                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
+                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
+                    CXTemplateArgumentKind_Pack -> "__PACK__"
+                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
+                }
+            } + ">"
+        }
         return spelling.toKString() ?: ""
     }
 val CValue<CXCursor>?.fullyQualified: String
@@ -243,6 +271,16 @@ inline fun CValue<CXCursor>.filterChildren(
             if (filter(it)) {
                 list.add(it)
             }
+        }
+    }
+}
+
+inline fun <T> CValue<CXCursor>.mapChildren(
+    crossinline filter: (CValue<CXCursor>) -> T
+): List<T> {
+    return mutableListOf<T>().also { list ->
+        forEach {
+            list.add(filter(it))
         }
     }
 }

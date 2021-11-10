@@ -21,74 +21,75 @@ import clang.CXFile
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
-import com.monkopedia.krapper.generator.filterChildrenRecursive
-import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.spelling
+import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import kotlinx.cinterop.CValue
-import kotlinx.serialization.Serializable
 
 private val CValue<CXCursor>.fileParent: CXFile?
     get() {
         return includedFile
     }
 
-@Serializable
-data class WrappedClass(
-    val fullyQualified: String,
-    var baseClass: WrappedTypeReference? = null,
-    val fields: List<WrappedField> = emptyList(),
-    val methods: List<WrappedMethod> = emptyList()
-) {
+class WrappedBase(val type: WrappedType?) : WrappedElement()
 
-    val type: WrappedTypeReference
-        get() = WrappedTypeReference(fullyQualified)
+class WrappedClass(
+    val name: String
+) : WrappedElement() {
+    val baseClass: WrappedType?
+        get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
+
+    val type: WrappedType
+        get() = WrappedTypeReference(qualified)
+
+    private val WrappedElement.qualified: String
+        get() = parent?.qualified?.plus("::$named") ?: named ?: toString()
+    private val WrappedElement.named: String?
+        get() = when (this) {
+            is WrappedClass -> name
+            is WrappedNamespace -> namespace
+            else -> null
+        }
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        value.fullyQualified,
-        value.filterChildrenRecursive {
-            it.kind == CXCursorKind.CXCursor_CXXBaseSpecifier ||
-                it.kind == CXCursorKind.CXCursor_CXXMethod ||
-                it.kind == CXCursorKind.CXCursor_Constructor ||
-                it.kind == CXCursorKind.CXCursor_Destructor ||
-                it.kind == CXCursorKind.CXCursor_FieldDecl
-        },
-        resolverBuilder
+        value.spelling.toKString() ?: error("Missing name")
     )
 
-    constructor(name: String, children: List<CValue<CXCursor>>, resolverBuilder: ResolverBuilder) :
-        this(
-            name,
-            children.findBaseClass(resolverBuilder),
-            children.findFields(resolverBuilder),
-            children.findMethods(resolverBuilder)
-        )
+    override fun clone(): WrappedClass {
+        return WrappedClass(name).also {
+            it.parent = parent
+            it.children.addAll(children)
+        }
+    }
+
+//    constructor(name: String, children: List<WrappedElement>, resolverBuilder: ResolverBuilder)
 //
 //    init {
 //        println("Created $fullyQualified")
 //        Throwable().printStackTrace()
 //    }
 
-    override fun toString(): String {
-        return buildString {
-            append("class $fullyQualified {\n")
-            baseClass?.let {
-                append("    super $it")
-            }
-            append("\n")
-            for (field in fields) {
-                append("    $field\n")
-            }
-            append("\n")
-            for (method in methods) {
-                append("    $method\n")
-            }
-            append("\n")
-
-            append("}\n")
-        }
-    }
+//    override fun toString(): String {
+//        return buildString {
+//            append("class $fullyQualified {\n")
+//            baseClass?.let {
+//                append("    super $it")
+//            }
+//            append("\n")
+//            for (field in fields) {
+//                append("    $field\n")
+//            }
+//            append("\n")
+//            for (method in methods) {
+//                append("    $method\n")
+//            }
+//            append("\n")
+//
+//            append("}\n")
+//        }
+//    }
 }
 
 private fun List<CValue<CXCursor>>.findMethods(

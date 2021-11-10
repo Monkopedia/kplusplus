@@ -19,9 +19,10 @@ import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQU
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.MEM_SCOPE
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.PAIR
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedType
 import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.VOID
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
+import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
@@ -31,7 +32,7 @@ fun KotlinCodeBuilder(): KotlinCodeBuilder {
 }
 
 class KotlinFactory : LangFactory {
-    override fun define(name: String, type: WrappedTypeReference, initializer: Symbol?): LocalVar {
+    override fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar {
         return KotlinLocalVar(name, type.kotlinType, initializer)
     }
 
@@ -39,7 +40,7 @@ class KotlinFactory : LangFactory {
         return KotlinFunctionSig(name, retType ?: KotlinType(VOID), args)
     }
 
-    override fun createType(type: WrappedTypeReference): Symbol = KotlinType(type)
+    override fun createType(type: WrappedType): Symbol = KotlinType(type)
 
     fun define(name: String, type: WrappedKotlinType, initializer: Symbol?): LocalVar {
         return KotlinLocalVar(name, type, initializer)
@@ -333,7 +334,7 @@ class KotlinType(
     private val typeStr: String,
     override val fqNames: List<String>
 ) : Symbol, FqSymbol {
-    constructor(type: WrappedTypeReference) : this(type.kotlinType)
+    constructor(type: WrappedType) : this(type.kotlinType)
     constructor(type: WrappedKotlinType) : this(type.name, type.fullyQualified)
 
     override fun build(builder: CodeStringBuilder) {

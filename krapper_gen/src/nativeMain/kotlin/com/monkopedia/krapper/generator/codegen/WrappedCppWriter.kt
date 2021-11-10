@@ -45,8 +45,15 @@ import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedType
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
 import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.isNative
+import com.monkopedia.krapper.generator.model.isPointer
+import com.monkopedia.krapper.generator.model.isReturnable
+import com.monkopedia.krapper.generator.model.isString
+import com.monkopedia.krapper.generator.model.isVoid
+import com.monkopedia.krapper.generator.model.pointed
 
 class WrappedCppWriter(
     private val nameHandler: NameHandler,
@@ -59,11 +66,11 @@ class WrappedCppWriter(
         cls: WrappedClass,
         handleChildren: CppCodeBuilder.() -> Unit
     ) {
-        comment("BEGIN KRAPPER GEN for ${cls.fullyQualified}")
+        comment("BEGIN KRAPPER GEN for ${cls.type}")
         appendLine()
         handleChildren()
         appendLine()
-        comment("END KRAPPER GEN for ${cls.fullyQualified}")
+        comment("END KRAPPER GEN for ${cls.type}")
         appendLine()
         appendLine()
     }
@@ -145,16 +152,18 @@ class WrappedCppWriter(
         val thizCast = thiz?.let { createCast(it) }
         val returnCast = returnArg?.let { createCast(it) }
         val argCasts = args.filter { it.arg != null }.map { a ->
-            if (a.targetType.isString) createStringCast(a)
-            else if (a.targetType.isNative) a
-            else createCast(a)
+            when {
+                a.targetType.isString -> createStringCast(a)
+                a.targetType.isNative -> a
+                else -> createCast(a)
+            }
         }
         when (method.methodType) {
             MethodType.CONSTRUCTOR -> {
                 +Return(
                     New(
                         Call(
-                            cls.fullyQualified,
+                            cls.type.toString(),
                             *(argCasts.map { it.reference }.toTypedArray())
                         )
                     )
@@ -266,7 +275,7 @@ class WrappedCppWriter(
         )
     }
 
-    private fun CppCodeBuilder.reinterpret(arg: LocalVar, type: WrappedTypeReference): Symbol {
+    private fun CppCodeBuilder.reinterpret(arg: LocalVar, type: WrappedType): Symbol {
         val type = type(type)
         val reference = arg.reference
         return object : Symbol {

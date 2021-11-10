@@ -22,6 +22,8 @@ import com.monkopedia.krapper.generator.codegen.WrappedKotlinWriter
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedConstructor
+import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
 import kotlin.test.BeforeTest
@@ -81,17 +83,19 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::Constructable",
-                methods = listOf(
-                    WrappedMethod(
-                        "Constructable",
-                        WrappedTypeReference("TestLib::Constructable"),
-                        emptyList(),
-                        false,
-                        MethodType.CONSTRUCTOR
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "Constructable",
+                            WrappedTypeReference("TestLib::Constructable"),
+                            false,
+                            MethodType.CONSTRUCTOR
+                        )
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -113,24 +117,21 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::Constructable",
-                methods = listOf(
-                    WrappedMethod(
-                        "Constructable",
-                        WrappedTypeReference("TestLib::Constructable"),
-                        emptyList(),
-                        false,
-                        MethodType.CONSTRUCTOR
-                    ),
-                    WrappedMethod(
-                        "Constructable",
-                        WrappedTypeReference("TestLib::Constructable"),
-                        emptyList(),
-                        false,
-                        MethodType.DESTRUCTOR
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedConstructor(
+                            "Constructable",
+                            WrappedTypeReference("TestLib::Constructable"),
+                        ),
+                        WrappedDestructor(
+                            "Constructable",
+                            WrappedTypeReference("TestLib::Constructable"),
+                        )
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -152,21 +153,27 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::TestClass",
-                methods = listOf(
-                    WrappedMethod(
-                        "setSome",
-                        WrappedTypeReference.VOID,
-                        listOf(
-                            WrappedArgument("a", WrappedTypeReference("int")),
-                            WrappedArgument("b", WrappedTypeReference("long")),
-                            WrappedArgument("c", WrappedTypeReference("long long"))
-                        ),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "setSome",
+                            WrappedTypeReference.VOID,
+                            false,
+                            MethodType.METHOD
+                        ).also {
+                            it.children.addAll(
+                                listOf(
+                                    WrappedArgument("a", WrappedTypeReference("int")),
+                                    WrappedArgument("b", WrappedTypeReference("long")),
+                                    WrappedArgument("c", WrappedTypeReference("long long"))
+                                ),
+                            )
+                        }
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -184,21 +191,27 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::TestClass",
-                methods = listOf(
-                    WrappedMethod(
-                        "setPointers",
-                        WrappedTypeReference.VOID,
-                        listOf(
-                            WrappedArgument("a", WrappedTypeReference("int*")),
-                            WrappedArgument("b", WrappedTypeReference("long*")),
-                            WrappedArgument("c", WrappedTypeReference("long long*"))
-                        ),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "setPointers",
+                            WrappedTypeReference.VOID,
+                            false,
+                            MethodType.METHOD
+                        ).also { m ->
+                            m.children.addAll(
+                                listOf(
+                                    WrappedArgument("a", WrappedTypeReference("int*")),
+                                    WrappedArgument("b", WrappedTypeReference("long*")),
+                                    WrappedArgument("c", WrappedTypeReference("long long*"))
+                                ),
+                            )
+                        }
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -216,17 +229,19 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::TestClass",
-                methods = listOf(
-                    WrappedMethod(
-                        "sum",
-                        WrappedTypeReference("long"),
-                        listOf(),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "sum",
+                            WrappedTypeReference("long"),
+                            false,
+                            MethodType.METHOD
+                        )
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -244,19 +259,25 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "std::vector<std::string>",
-                methods = listOf(
-                    WrappedMethod(
-                        "at",
-                        WrappedTypeReference("std::string"),
-                        listOf(
-                            WrappedArgument("pos", WrappedTypeReference("size_t")),
-                        ),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "at",
+                            WrappedTypeReference("std::string"),
+                            false,
+                            MethodType.METHOD
+                        ).also {
+                            it.children.addAll(
+                                listOf(
+                                    WrappedArgument("pos", WrappedTypeReference("size_t")),
+                                ),
+                            )
+                        }
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -277,19 +298,28 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::TestClass",
-                methods = listOf(
-                    WrappedMethod(
-                        "setPrivateFrom",
-                        WrappedTypeReference.VOID,
-                        listOf(
-                            WrappedArgument("other", WrappedTypeReference("TestLib::OtherClass")),
-                        ),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "setPrivateFrom",
+                            WrappedTypeReference.VOID,
+                            false,
+                            MethodType.METHOD
+                        ).also {
+                            it.children.addAll(
+                                listOf(
+                                    WrappedArgument(
+                                        "other",
+                                        WrappedTypeReference("TestLib::OtherClass")
+                                    ),
+                                ),
+                            )
+                        }
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """
@@ -307,19 +337,29 @@ class KotlinCodeTests {
         with(writer) {
             val cls = WrappedClass(
                 "TestLib::TestClass",
-                methods = listOf(
-                    WrappedMethod(
-                        "setPrivateFrom",
-                        WrappedTypeReference.VOID,
-                        listOf(
-                            WrappedArgument("other", WrappedTypeReference("TestLib::OtherClass")),
-                        ),
-                        false,
-                        MethodType.METHOD
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedMethod(
+                            "setPrivateFrom",
+                            WrappedTypeReference.VOID,
+
+                            false,
+                            MethodType.METHOD
+                        ).also {
+                            it.children.addAll(
+                                listOf(
+                                    WrappedArgument(
+                                        "other",
+                                        WrappedTypeReference("TestLib::OtherClass")
+                                    ),
+                                ),
+                            )
+                        }
                     )
                 )
-            )
-            builder.onGenerate(cls, cls.methods.first())
+            }
+            builder.onGenerate(cls, cls.children.first() as WrappedMethod)
         }
         assertCode(
             """

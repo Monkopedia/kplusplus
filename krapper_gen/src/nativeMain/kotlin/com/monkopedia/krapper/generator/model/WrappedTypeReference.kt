@@ -15,134 +15,14 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import clang.CXCursorKind.CXCursor_TemplateRef
-import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
-import clang.CXTypeKind.CXType_Accum
-import clang.CXTypeKind.CXType_Atomic
-import clang.CXTypeKind.CXType_Attributed
-import clang.CXTypeKind.CXType_Auto
-import clang.CXTypeKind.CXType_BFloat16
-import clang.CXTypeKind.CXType_BlockPointer
-import clang.CXTypeKind.CXType_Bool
-import clang.CXTypeKind.CXType_Char16
-import clang.CXTypeKind.CXType_Char32
-import clang.CXTypeKind.CXType_Char_S
-import clang.CXTypeKind.CXType_Char_U
-import clang.CXTypeKind.CXType_Complex
-import clang.CXTypeKind.CXType_ConstantArray
-import clang.CXTypeKind.CXType_Dependent
-import clang.CXTypeKind.CXType_DependentSizedArray
-import clang.CXTypeKind.CXType_Double
 import clang.CXTypeKind.CXType_Elaborated
-import clang.CXTypeKind.CXType_Enum
-import clang.CXTypeKind.CXType_ExtVector
-import clang.CXTypeKind.CXType_Float
-import clang.CXTypeKind.CXType_Float128
-import clang.CXTypeKind.CXType_Float16
-import clang.CXTypeKind.CXType_FunctionNoProto
-import clang.CXTypeKind.CXType_FunctionProto
-import clang.CXTypeKind.CXType_Half
-import clang.CXTypeKind.CXType_IncompleteArray
-import clang.CXTypeKind.CXType_Int
-import clang.CXTypeKind.CXType_Int128
-import clang.CXTypeKind.CXType_Invalid
-import clang.CXTypeKind.CXType_LValueReference
-import clang.CXTypeKind.CXType_Long
-import clang.CXTypeKind.CXType_LongAccum
-import clang.CXTypeKind.CXType_LongDouble
-import clang.CXTypeKind.CXType_LongLong
-import clang.CXTypeKind.CXType_MemberPointer
-import clang.CXTypeKind.CXType_NullPtr
-import clang.CXTypeKind.CXType_OCLEvent
-import clang.CXTypeKind.CXType_OCLImage1dArrayRO
-import clang.CXTypeKind.CXType_OCLImage1dArrayRW
-import clang.CXTypeKind.CXType_OCLImage1dArrayWO
-import clang.CXTypeKind.CXType_OCLImage1dBufferRO
-import clang.CXTypeKind.CXType_OCLImage1dBufferRW
-import clang.CXTypeKind.CXType_OCLImage1dBufferWO
-import clang.CXTypeKind.CXType_OCLImage1dRO
-import clang.CXTypeKind.CXType_OCLImage1dRW
-import clang.CXTypeKind.CXType_OCLImage1dWO
-import clang.CXTypeKind.CXType_OCLImage2dArrayDepthRO
-import clang.CXTypeKind.CXType_OCLImage2dArrayDepthRW
-import clang.CXTypeKind.CXType_OCLImage2dArrayDepthWO
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAADepthRO
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAADepthRW
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAADepthWO
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAARO
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAARW
-import clang.CXTypeKind.CXType_OCLImage2dArrayMSAAWO
-import clang.CXTypeKind.CXType_OCLImage2dArrayRO
-import clang.CXTypeKind.CXType_OCLImage2dArrayRW
-import clang.CXTypeKind.CXType_OCLImage2dArrayWO
-import clang.CXTypeKind.CXType_OCLImage2dDepthRO
-import clang.CXTypeKind.CXType_OCLImage2dDepthRW
-import clang.CXTypeKind.CXType_OCLImage2dDepthWO
-import clang.CXTypeKind.CXType_OCLImage2dMSAADepthRO
-import clang.CXTypeKind.CXType_OCLImage2dMSAADepthRW
-import clang.CXTypeKind.CXType_OCLImage2dMSAADepthWO
-import clang.CXTypeKind.CXType_OCLImage2dMSAARO
-import clang.CXTypeKind.CXType_OCLImage2dMSAARW
-import clang.CXTypeKind.CXType_OCLImage2dMSAAWO
-import clang.CXTypeKind.CXType_OCLImage2dRO
-import clang.CXTypeKind.CXType_OCLImage2dRW
-import clang.CXTypeKind.CXType_OCLImage2dWO
-import clang.CXTypeKind.CXType_OCLImage3dRO
-import clang.CXTypeKind.CXType_OCLImage3dRW
-import clang.CXTypeKind.CXType_OCLImage3dWO
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImeDualRefStreamin
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImePayload
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImeResult
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImeResultDualRefStreamout
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImeResultSingleRefStreamout
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCImeSingleRefStreamin
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCMcePayload
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCMceResult
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCRefPayload
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCRefResult
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCSicPayload
-import clang.CXTypeKind.CXType_OCLIntelSubgroupAVCSicResult
-import clang.CXTypeKind.CXType_OCLQueue
-import clang.CXTypeKind.CXType_OCLReserveID
-import clang.CXTypeKind.CXType_OCLSampler
-import clang.CXTypeKind.CXType_ObjCClass
-import clang.CXTypeKind.CXType_ObjCId
-import clang.CXTypeKind.CXType_ObjCInterface
-import clang.CXTypeKind.CXType_ObjCObject
-import clang.CXTypeKind.CXType_ObjCObjectPointer
-import clang.CXTypeKind.CXType_ObjCSel
-import clang.CXTypeKind.CXType_ObjCTypeParam
-import clang.CXTypeKind.CXType_Overload
-import clang.CXTypeKind.CXType_Pipe
 import clang.CXTypeKind.CXType_Pointer
-import clang.CXTypeKind.CXType_RValueReference
-import clang.CXTypeKind.CXType_Record
-import clang.CXTypeKind.CXType_SChar
-import clang.CXTypeKind.CXType_Short
-import clang.CXTypeKind.CXType_ShortAccum
-import clang.CXTypeKind.CXType_Typedef
-import clang.CXTypeKind.CXType_UAccum
-import clang.CXTypeKind.CXType_UChar
-import clang.CXTypeKind.CXType_UInt
-import clang.CXTypeKind.CXType_UInt128
-import clang.CXTypeKind.CXType_ULong
-import clang.CXTypeKind.CXType_ULongAccum
-import clang.CXTypeKind.CXType_ULongLong
-import clang.CXTypeKind.CXType_UShort
-import clang.CXTypeKind.CXType_UShortAccum
-import clang.CXTypeKind.CXType_Unexposed
-import clang.CXTypeKind.CXType_VariableArray
-import clang.CXTypeKind.CXType_Vector
-import clang.CXTypeKind.CXType_Void
-import clang.CXTypeKind.CXType_WChar
 import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.namedType
 import com.monkopedia.krapper.generator.pointeeType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.typeDeclaration
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
 import kotlinx.serialization.Serializable
@@ -176,22 +56,37 @@ private const val STRING = "std::string"
 @ThreadLocal
 private val existingTypes = mutableMapOf<String, WrappedTypeReference>()
 
-sealed interface WrappedType {
-    fun typedWith(
+sealed class WrappedType : WrappedElement() {
+    abstract val cType: WrappedTypeReference
+
+    override fun clone(): WrappedType {
+        return this
+    }
+
+    abstract fun typedWith(
         resolverBuilder: ResolverBuilder,
         values: Map<WrappedTemplateType, WrappedTypeReference>
     ): WrappedTypeReference
 
     companion object {
         fun pointerTo(type: WrappedType): WrappedType {
+            if (type is WrappedTypeReference) {
+                return WrappedTypeReference.pointerTo(type)
+            }
             return WrappedModifiedType(type, "*")
         }
 
         fun referenceTo(type: WrappedType): WrappedType {
+            if (type is WrappedTypeReference) {
+                return WrappedTypeReference.referenceTo(type)
+            }
             return WrappedModifiedType(type, "&")
         }
 
         fun arrayOf(type: WrappedType): WrappedType {
+            if (type is WrappedTypeReference) {
+                return WrappedTypeReference.arrayOf(type)
+            }
             return WrappedModifiedType(type, "[]")
         }
     }
@@ -204,16 +99,23 @@ fun WrappedTemplateType(
     return type.useContents {
         when (kind) {
             CXType_Pointer -> WrappedTemplateType(type.pointeeType, resolverBuilder)
-            CXType_Elaborated ->WrappedTemplateType(type.namedType, resolverBuilder)
-            CXType_Typedef ->
-            //CXType_Enum ->
+            CXType_Elaborated -> WrappedTemplateType(type.namedType, resolverBuilder)
+//            CXType_Typedef ->
+            // CXType_Enum ->
             else -> WrappedTypeReference(type, resolverBuilder)
         }
     }
 }
 
-@Serializable
-data class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : WrappedType {
+class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : WrappedType() {
+    override val cType: WrappedTypeReference
+        get() = when (modifier) {
+            "*" -> WrappedTypeReference.pointerTo(baseType.cType)
+            "&" -> WrappedTypeReference.referenceTo(baseType.cType)
+            "[]" -> WrappedTypeReference.arrayOf(baseType.cType)
+            else -> error("Don't know how to handle $modifier")
+        }
+
     override fun typedWith(
         resolverBuilder: ResolverBuilder,
         values: Map<WrappedTemplateType, WrappedTypeReference>
@@ -231,8 +133,10 @@ data class WrappedModifiedType(val baseType: WrappedType, val modifier: String) 
     }
 }
 
-@Serializable
-data class WrappedTemplateType(val name: String) : WrappedType {
+class WrappedTemplateType(val name: String) : WrappedType() {
+    override val cType: WrappedTypeReference
+        get() = error("Can't convert template $name")
+
     override fun typedWith(
         resolverBuilder: ResolverBuilder,
         values: Map<WrappedTemplateType, WrappedTypeReference>
@@ -245,11 +149,13 @@ data class WrappedTemplateType(val name: String) : WrappedType {
     }
 }
 
-@Serializable
-data class WrappedTemplatedReference(
+class WrappedTemplatedReference(
     val fullyQualifiedTemplate: String,
     val templateArgs: List<WrappedType>
-) : WrappedType {
+) : WrappedType() {
+    override val cType: WrappedTypeReference
+        get() = error("Can't convert template $fullyQualifiedTemplate")
+
     override fun typedWith(
         resolverBuilder: ResolverBuilder,
         values: Map<WrappedTemplateType, WrappedTypeReference>
@@ -281,11 +187,9 @@ data class WrappedTemplatedReference(
 }
 
 @Serializable
-data class WrappedTypeReference private constructor(val name: String) : WrappedType {
+data class WrappedTypeReference private constructor(val name: String) : WrappedType() {
     val isPointerOrReference: Boolean
         get() = isPointer || isReference
-    val kotlinType: WrappedKotlinType
-        get() = typeToKotlinType(this)
     val isPointer: Boolean
         get() = name.endsWith("*")
     val isReference: Boolean
@@ -345,7 +249,7 @@ data class WrappedTypeReference private constructor(val name: String) : WrappedT
         get() = name in NATIVE || isString || name == "long double" || isPointer || isReference
     val isVoid: Boolean
         get() = name == "void"
-    val cType: WrappedTypeReference
+    override val cType: WrappedTypeReference
         get() {
             if (isString || (isPointer && pointed.isString)) {
                 return WrappedTypeReference("const char*")
@@ -416,3 +320,56 @@ data class WrappedTypeReference private constructor(val name: String) : WrappedT
         }
     }
 }
+
+val WrappedType.isNative: Boolean
+    get() = (
+        (this as? WrappedTypeReference)?.isNative
+            ?: (this as? WrappedModifiedType)?.baseType?.isNative
+        ) == true
+val WrappedType.isString: Boolean
+    get() = (
+        (this as? WrappedTypeReference)?.isString
+            ?: (this as? WrappedModifiedType)?.baseType?.isString
+        ) == true
+val WrappedType.kotlinType: WrappedKotlinType
+    get() = typeToKotlinType(this)
+
+val WrappedType.isReturnable: Boolean
+    get() = (this as? WrappedTypeReference)?.isReturnable
+        ?: (this as? WrappedModifiedType)?.baseType?.isReturnable
+        ?: false
+val WrappedType.isVoid: Boolean
+    get() = (this as? WrappedTypeReference)?.isVoid ?: false
+
+private val WrappedModifiedType.privatePointed: WrappedType?
+    get() = if (modifier == "*") baseType else null
+val WrappedType.pointed: WrappedType
+    get() = (this as? WrappedTypeReference)?.pointed
+        ?: (this as? WrappedModifiedType)?.privatePointed
+        ?: error("Can't find pointed of non pointer")
+val WrappedType.isPointer: Boolean
+    get() = (this as? WrappedTypeReference)?.isPointer
+        ?: ((this as? WrappedModifiedType)?.modifier == "*")
+
+val WrappedType.isArray: Boolean
+    get() = (this as? WrappedTypeReference)?.isArray
+        ?: ((this as? WrappedModifiedType)?.modifier == "[]")
+
+private val WrappedModifiedType.privateUnreferenced: WrappedType?
+    get() = if (modifier == "&") baseType else null
+val WrappedType.unreferenced: WrappedType
+    get() = (this as? WrappedTypeReference)?.unreferenced
+        ?: (this as? WrappedModifiedType)?.privateUnreferenced
+        ?: error("Can't find unreferenced of non reference")
+
+val WrappedType.isReference: Boolean
+    get() = (this as? WrappedTypeReference)?.isReference
+        ?: ((this as? WrappedModifiedType)?.modifier == "&")
+val WrappedType.isConst: Boolean
+    get() = (this as? WrappedTypeReference)?.isConst
+        ?: (this as? WrappedModifiedType)?.baseType?.isConst
+        ?: false
+val WrappedType.unconst: WrappedTypeReference
+    get() = (this as? WrappedTypeReference)?.unconst
+        ?: (this as? WrappedModifiedType)?.baseType?.unconst
+        ?: error("Can't unconst $this")

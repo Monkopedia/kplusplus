@@ -16,19 +16,14 @@
 package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
-import clang.CXCursorKind
 import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.getArgument
 import com.monkopedia.krapper.generator.isStatic
-import com.monkopedia.krapper.generator.kind
-import com.monkopedia.krapper.generator.numArguments
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import kotlinx.cinterop.CValue
-import kotlinx.serialization.Serializable
 
 enum class MethodType {
     CONSTRUCTOR,
@@ -37,27 +32,92 @@ enum class MethodType {
     STATIC_OP
 }
 
-@Serializable
-data class WrappedMethod(
+class WrappedConstructor(
+    name: String,
+    returnType: WrappedType,
+) : WrappedMethod(name, returnType, false, MethodType.CONSTRUCTOR) {
+    override fun copy(
+        name: String,
+        returnType: WrappedType,
+        isStatic: Boolean,
+        methodType: MethodType,
+        children: List<WrappedElement>
+    ): WrappedMethod {
+        return WrappedConstructor(name, returnType).also {
+            it.children.addAll(children)
+            it.parent = parent
+        }
+    }
+
+    override fun clone(): WrappedDestructor {
+        return WrappedDestructor(name, returnType).also {
+            it.parent = parent
+            it.children.addAll(children)
+        }
+    }
+}
+
+class WrappedDestructor(
+    name: String,
+    returnType: WrappedType,
+) : WrappedMethod(name, returnType, false, MethodType.DESTRUCTOR) {
+    override fun copy(
+        name: String,
+        returnType: WrappedType,
+        isStatic: Boolean,
+        methodType: MethodType,
+        children: List<WrappedElement>
+    ): WrappedMethod {
+        return WrappedDestructor(name, returnType).also {
+            it.children.addAll(children)
+            it.parent = parent
+        }
+    }
+
+    override fun clone(): WrappedDestructor {
+        return WrappedDestructor(name, returnType).also {
+            it.parent = parent
+            it.children.addAll(children)
+        }
+    }
+}
+
+open class WrappedMethod(
     val name: String,
-    val returnType: WrappedTypeReference,
-    val args: List<WrappedArgument>,
+    val returnType: WrappedType,
     val isStatic: Boolean,
-    val methodType: MethodType
-) {
+    val methodType: MethodType = MethodType.METHOD
+) : WrappedElement() {
+    val args: List<WrappedArgument>
+        get() = children.filterIsInstance<WrappedArgument>().also {
+            println("Getting children $it from $children")
+        }
+
     constructor(method: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         method.referenced.spelling.toKString() ?: error("Can't find name of $method"),
         WrappedTypeReference(method.type.result, resolverBuilder),
-        (0 until method.numArguments).map {
-            WrappedArgument(method.getArgument(it.toUInt()), resolverBuilder)
-        },
         method.isStatic,
-        when (method.kind) {
-            CXCursorKind.CXCursor_Constructor -> MethodType.CONSTRUCTOR
-            CXCursorKind.CXCursor_Destructor -> MethodType.DESTRUCTOR
-            else -> MethodType.METHOD
-        }
     )
+
+    open fun copy(
+        name: String = this.name,
+        returnType: WrappedType = this.returnType,
+        isStatic: Boolean = this.isStatic,
+        methodType: MethodType = this.methodType,
+        children: List<WrappedElement> = this.children.toList()
+    ): WrappedMethod {
+        return WrappedMethod(name, returnType, isStatic, methodType).also {
+            it.children.addAll(children)
+            it.parent = parent
+        }
+    }
+
+    override fun clone(): WrappedMethod {
+        return WrappedMethod(name, returnType, isStatic, methodType).also {
+            it.parent = parent
+            it.children.addAll(children)
+        }
+    }
 
     override fun toString(): String {
         return "${if (isStatic) "static " else ""}fun $name(${args.joinToString(", ")}): " +
@@ -65,12 +125,18 @@ data class WrappedMethod(
     }
 }
 
-@Serializable
-data class WrappedArgument(val name: String, val type: WrappedTypeReference) {
+class WrappedArgument(val name: String, val type: WrappedType) : WrappedElement() {
     constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         arg.spelling.toKString() ?: error("Can't find name of $arg"),
         WrappedTypeReference(arg.type, resolverBuilder)
     )
+
+    override fun clone(): WrappedArgument {
+        return WrappedArgument(name, type).also {
+            it.parent = parent
+            it.children.addAll(children)
+        }
+    }
 
     override fun toString(): String {
         return "$name: $type"

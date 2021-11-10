@@ -22,20 +22,26 @@ import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import kotlinx.cinterop.CValue
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
-@Serializable
 data class WrappedField(
     val name: String,
-    val type: WrappedTypeReference
-) {
+    val type: WrappedType
+) : WrappedElement() {
     @Transient
     internal val other = Any()
+
     constructor(field: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         field.referenced.spelling.toKString() ?: error("Can't find name for $field"),
         WrappedTypeReference(field.type, resolverBuilder)
     )
+
+    override fun clone(): WrappedElement {
+        return WrappedField(name, type).also {
+            it.children.addAll(children)
+            it.parent = parent
+        }
+    }
 
     override fun toString(): String {
         return "$name: $type"

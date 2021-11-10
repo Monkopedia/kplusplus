@@ -55,7 +55,7 @@ abstract class CodeGeneratorBase<T : CodeBuilder<*>>(
         try {
             onGenerate(cls) {
                 onGenerateMethods(cls)
-                for (field in cls.fields) {
+                for (field in cls.children.filterIsInstance<WrappedField>()) {
                     try {
                         onGenerate(cls, field)
                     } catch (t: Throwable) {
@@ -69,7 +69,7 @@ abstract class CodeGeneratorBase<T : CodeBuilder<*>>(
     }
 
     protected open fun T.onGenerateMethods(cls: WrappedClass) {
-        for (method in cls.methods) {
+        for (method in cls.children.filterIsInstance<WrappedMethod>()) {
             try {
                 onGenerate(cls, method)
             } catch (t: Throwable) {

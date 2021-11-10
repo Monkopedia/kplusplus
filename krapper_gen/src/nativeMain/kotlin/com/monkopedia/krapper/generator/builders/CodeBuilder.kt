@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedType
 
 interface Symbol {
 
@@ -36,9 +36,9 @@ interface LocalVar : Symbol {
 }
 
 interface LangFactory {
-    fun define(name: String, type: WrappedTypeReference, initializer: Symbol?): LocalVar
+    fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar
     fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol
-    fun createType(type: WrappedTypeReference): Symbol
+    fun createType(type: WrappedType): Symbol
 }
 
 interface CodeBuilder<T : LangFactory> {
@@ -93,6 +93,6 @@ inline fun CodeBuilder<*>.appendLine() {
     addSymbol(Empty)
 }
 
-inline fun CodeBuilder<*>.type(type: WrappedTypeReference): Symbol {
+inline fun CodeBuilder<*>.type(type: WrappedType): Symbol {
     return factory.createType(type)
 }

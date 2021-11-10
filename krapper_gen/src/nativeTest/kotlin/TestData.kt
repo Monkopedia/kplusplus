@@ -18,6 +18,8 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedConstructor
+import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
@@ -979,36 +981,27 @@ object TestData {
 
     object Vector {
         val type = WrappedTypeReference("std::vector<std::string>")
-        val constructor = WrappedMethod(
-            "std::vector<std::string>",
-            type,
-            emptyList(),
-            false,
-            MethodType.CONSTRUCTOR
-        )
-        val destructor = WrappedMethod(
-            "~std::vector<std::string>",
-            type,
-            emptyList(),
-            false,
-            MethodType.DESTRUCTOR
-        )
+        val constructor = WrappedConstructor("std::vector<std::string>", type)
+        val destructor = WrappedDestructor("~std::vector<std::string>", type)
         val pushBack = WrappedMethod(
             "push_back",
             WrappedTypeReference("void"),
-            listOf(WrappedArgument("str", WrappedTypeReference("std::string"))),
             false,
             MethodType.METHOD
-        )
+        ).also {
+            it.children.add(WrappedArgument("str", WrappedTypeReference("std::string")))
+        }
         val cls = WrappedClass(
             "std::vector<std::string>",
-            fields = emptyList(),
-            methods = listOf(
-                constructor,
-                destructor,
-                pushBack
+        ).also {
+            it.children.addAll(
+                listOf(
+                    constructor,
+                    destructor,
+                    pushBack
+                )
             )
-        )
+        }
     }
 
     object TestClass {
@@ -1046,369 +1039,424 @@ object TestData {
         val pd = WrappedField("pd", WrappedTypeReference("double *"))
 
         val sum =
-            WrappedMethod("sum", WrappedTypeReference("long"), listOf(), false, MethodType.METHOD)
+            WrappedMethod("sum", WrappedTypeReference("long"), false, MethodType.METHOD)
         val longPointer = WrappedMethod(
             "longPointer",
             WrappedTypeReference("long *"),
-            listOf(),
             false,
             MethodType.METHOD,
         )
         val setSome = WrappedMethod(
             "setSome",
             WrappedTypeReference("void"),
-            listOf(
-                WrappedArgument("a", WrappedTypeReference("int")),
-                WrappedArgument("b", WrappedTypeReference("long")),
-                WrappedArgument("c", WrappedTypeReference("long long"))
-            ),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.add(WrappedArgument("a", WrappedTypeReference("int")))
+            it.children.add(WrappedArgument("b", WrappedTypeReference("long")))
+            it.children.add(WrappedArgument("c", WrappedTypeReference("long long")))
+        }
         val setPointers = WrappedMethod(
             "setPointers",
             WrappedTypeReference("void"),
-            listOf(
-                WrappedArgument("a", WrappedTypeReference("int*")),
-                WrappedArgument("b", WrappedTypeReference("long*")),
-                WrappedArgument("c", WrappedTypeReference("long long*"))
-            ),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(
+                    WrappedArgument("a", WrappedTypeReference("int*")),
+                    WrappedArgument("b", WrappedTypeReference("long*")),
+                    WrappedArgument("c", WrappedTypeReference("long long*"))
+                )
+            )
+        }
         val setPrivateString = WrappedMethod(
             "setPrivateString",
             WrappedTypeReference("void"),
-            listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
+            )
+        }
         val setPrivateFrom = WrappedMethod(
             "setPrivateFrom",
             WrappedTypeReference("void"),
-            listOf(WrappedArgument("value", WrappedTypeReference("TestLib::OtherClass *"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("value", WrappedTypeReference("TestLib::OtherClass *"))),
+            )
+        }
         val output = WrappedMethod(
             "output",
             WrappedTypeReference("void"),
-            listOf(),
             false,
             MethodType.METHOD,
         )
-        val constructor = WrappedMethod("new", type, listOf(), false, MethodType.CONSTRUCTOR)
-        val copyConstructor = WrappedMethod(
-            "new",
-            type,
-            listOf(WrappedArgument("other", type)),
-            false,
-            MethodType.CONSTRUCTOR,
-        )
-        val otherConstructor = WrappedMethod(
-            "new",
-            type,
-            listOf(WrappedArgument("a", WrappedTypeReference("int"))),
-            false,
-            MethodType.CONSTRUCTOR,
-        )
-        val twoParamConstructor = WrappedMethod(
-            "new",
-            type,
-            listOf(
-                WrappedArgument("a", WrappedTypeReference("int")),
-                WrappedArgument("b", WrappedTypeReference("double"))
-            ),
-            false,
-            MethodType.CONSTRUCTOR,
-        )
-        val destructor = WrappedMethod("~TestClass", type, listOf(), false, MethodType.DESTRUCTOR)
+        val constructor = WrappedConstructor("new", type)
+        val copyConstructor = WrappedConstructor("new", type).also {
+            it.children.addAll(listOf(WrappedArgument("other", type)))
+        }
+        val otherConstructor = WrappedConstructor("new", type).also {
+            it.children.addAll(listOf(WrappedArgument("a", WrappedTypeReference("int"))))
+        }
+        val twoParamConstructor = WrappedConstructor("new", type).also {
+            it.children.addAll(
+                listOf(
+                    WrappedArgument("a", WrappedTypeReference("int")),
+                    WrappedArgument("b", WrappedTypeReference("double"))
+                ),
+            )
+        }
+        val destructor = WrappedDestructor("~TestClass", type)
         val operatorMinus = WrappedMethod(
             "operator-",
             type,
-            listOf(WrappedArgument("c2", type)),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", type)),
+            )
+        }
         val operatorUnaryMinus =
-            WrappedMethod("operator-", type, listOf(), false, MethodType.METHOD)
+            WrappedMethod("operator-", type, false, MethodType.METHOD)
         val operatorPlus = WrappedMethod(
             "operator+",
             type,
-            listOf(WrappedArgument("c2", type)),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", type)),
+            )
+        }
         val operatorUnaryPlus =
-            WrappedMethod("operator+", type, listOf(), false, MethodType.METHOD)
+            WrappedMethod("operator+", type, false, MethodType.METHOD)
         val operatorTimes = WrappedMethod(
             "operator*",
             type,
-            listOf(WrappedArgument("c2", type)),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(listOf(WrappedArgument("c2", type)))
+        }
         val operatorDiv = WrappedMethod(
             "operator/",
             type,
-            listOf(WrappedArgument("c2", type)),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(listOf(WrappedArgument("c2", type)))
+        }
         val operatorRem = WrappedMethod(
             "operator%",
             type,
-            listOf(WrappedArgument("c2", type)),
             false,
             MethodType.METHOD,
-        )
-        val operatorInc = WrappedMethod("operator++", type, listOf(), false, MethodType.METHOD)
+        ).also {
+            it.children.addAll(listOf(WrappedArgument("c2", type)))
+        }
+        val operatorInc = WrappedMethod("operator++", type, false, MethodType.METHOD)
         val operatorPostInc = WrappedMethod(
             "operator++",
             type,
-            listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
             false,
             MethodType.METHOD,
-        )
-        val operatorDec = WrappedMethod("operator--", type, listOf(), false, MethodType.METHOD)
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
+            )
+        }
+        val operatorDec = WrappedMethod("operator--", type, false, MethodType.METHOD)
         val operatorPostDec = WrappedMethod(
             "operator--",
             type,
-            listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
+            )
+        }
         val operatorEq = WrappedMethod(
             "operator==",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorNeq = WrappedMethod(
             "operator!=",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorLt = WrappedMethod(
             "operator<",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorGt = WrappedMethod(
             "operator>",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorLteq = WrappedMethod(
             "operator<=",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorGteq = WrappedMethod(
             "operator>=",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorNot =
-            WrappedMethod("operator!", referenceTo(type), listOf(), false, MethodType.METHOD)
+            WrappedMethod("operator!", referenceTo(type), false, MethodType.METHOD)
         val operatorBinaryAnd = WrappedMethod(
             "operator&&",
             type,
-            listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorBinaryOr = WrappedMethod(
             "operator||",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorInv =
-            WrappedMethod("operator~", pointerTo(type), listOf(), false, MethodType.METHOD)
+            WrappedMethod("operator~", pointerTo(type), false, MethodType.METHOD)
         val operatorBitwiseAnd = WrappedMethod(
             "operator&",
             type,
-            listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorBitwiseOr = WrappedMethod(
             "operator|",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorXor = WrappedMethod(
             "operator^",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorShl = WrappedMethod(
             "operator<<",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorShr = WrappedMethod(
             "operator>>",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+            )
+        }
         val operatorInd = WrappedMethod(
             "operator[]",
             type,
-            listOf(WrappedArgument("c2", WrappedTypeReference("std::string &"))),
             false,
             MethodType.METHOD,
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("c2", WrappedTypeReference("std::string &"))),
+            )
+        }
 
         val cls = WrappedClass(
             "TestLib::TestClass",
-            fields = listOf(
-
-                b,
-                st,
-                uit,
-                array,
-                str,
-                c,
-                uc,
-                s,
-                us,
-                i,
-                ui,
-                l,
-                ul,
-                ll,
-                ull,
-                f,
-                d,
-                ld,
-                pb,
-                pc,
-                puc,
-                ps,
-                pus,
-                pi,
-                pui,
-                pl,
-                pul,
-                pll,
-                pull,
-                pf,
-                pd,
-            ),
-            methods = listOf(
-                sum,
-                longPointer,
-                setSome,
-                setPointers,
-                setPrivateString,
-                setPrivateFrom,
-                output,
-                constructor,
-                copyConstructor,
-                otherConstructor,
-                twoParamConstructor,
-                destructor,
-                operatorMinus,
-                operatorUnaryMinus,
-                operatorPlus,
-                operatorUnaryPlus,
-                operatorTimes,
-                operatorDiv,
-                operatorRem,
-                operatorInc,
-                operatorPostInc,
-                operatorDec,
-                operatorPostDec,
-                operatorEq,
-                operatorNeq,
-                operatorLt,
-                operatorGt,
-                operatorLteq,
-                operatorGteq,
-                operatorNot,
-                operatorBinaryAnd,
-                operatorBinaryOr,
-                operatorInv,
-                operatorBitwiseAnd,
-                operatorBitwiseOr,
-                operatorXor,
-                operatorShl,
-                operatorShr,
-                operatorInd,
+        ).also {
+            it.children.addAll(
+                listOf(
+                    b,
+                    st,
+                    uit,
+                    array,
+                    str,
+                    c,
+                    uc,
+                    s,
+                    us,
+                    i,
+                    ui,
+                    l,
+                    ul,
+                    ll,
+                    ull,
+                    f,
+                    d,
+                    ld,
+                    pb,
+                    pc,
+                    puc,
+                    ps,
+                    pus,
+                    pi,
+                    pui,
+                    pl,
+                    pul,
+                    pll,
+                    pull,
+                    pf,
+                    pd,
+                    sum,
+                    longPointer,
+                    setSome,
+                    setPointers,
+                    setPrivateString,
+                    setPrivateFrom,
+                    output,
+                    constructor,
+                    copyConstructor,
+                    otherConstructor,
+                    twoParamConstructor,
+                    destructor,
+                    operatorMinus,
+                    operatorUnaryMinus,
+                    operatorPlus,
+                    operatorUnaryPlus,
+                    operatorTimes,
+                    operatorDiv,
+                    operatorRem,
+                    operatorInc,
+                    operatorPostInc,
+                    operatorDec,
+                    operatorPostDec,
+                    operatorEq,
+                    operatorNeq,
+                    operatorLt,
+                    operatorGt,
+                    operatorLteq,
+                    operatorGteq,
+                    operatorNot,
+                    operatorBinaryAnd,
+                    operatorBinaryOr,
+                    operatorInv,
+                    operatorBitwiseAnd,
+                    operatorBitwiseOr,
+                    operatorXor,
+                    operatorShl,
+                    operatorShr,
+                    operatorInd
+                )
             )
-        )
+        }
     }
 
     object OtherClass {
         val type = WrappedTypeReference("TestLib::OtherClass")
-        val constructor = WrappedMethod(
+        val constructor = WrappedConstructor(
             "TestLib::OtherClass",
             type,
-            emptyList(),
-            false,
-            MethodType.CONSTRUCTOR
         )
-        val destructor = WrappedMethod(
+        val destructor = WrappedDestructor(
             "~TestLib::OtherClass",
             type,
-            emptyList(),
-            false,
-            MethodType.DESTRUCTOR
         )
         val getPrivateString = WrappedMethod(
             "getPrivateString",
             WrappedTypeReference("std::string"),
-            emptyList(),
             false,
             MethodType.METHOD
         )
         val setPrivateString = WrappedMethod(
             "setPrivateString",
             WrappedTypeReference("void"),
-            listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
             false,
             MethodType.METHOD
-        )
+        ).also {
+            it.children.addAll(
+                listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
+            )
+        }
         val appendText = WrappedMethod(
             "appendText",
             WrappedTypeReference("void"),
-            listOf(
-                WrappedArgument("text", Vector.type)
-            ),
             false,
             MethodType.METHOD
-        )
+        ).also {
+            it.children.addAll(
+                listOf(
+                    WrappedArgument("text", Vector.type)
+                ),
+            )
+        }
         val cls = WrappedClass(
             "TestLib::OtherClass",
-            methods = listOf(
-                constructor,
-                destructor,
-                getPrivateString,
-                setPrivateString,
-                appendText
+        ).also {
+            it.children.addAll(
+                listOf(
+                    constructor,
+                    destructor,
+                    getPrivateString,
+                    setPrivateString,
+                    appendText
+                )
             )
-        )
+        }
     }
 }

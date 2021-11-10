@@ -42,11 +42,11 @@ class WrappedHeaderWriter(
         cls: WrappedClass,
         handleChildren: CppCodeBuilder.() -> Unit
     ) {
-        comment("BEGIN KRAPPER GEN for ${cls.fullyQualified}")
+        comment("BEGIN KRAPPER GEN for ${cls.type}")
         appendLine()
         handleChildren()
         appendLine()
-        comment("END KRAPPER GEN for ${cls.fullyQualified}")
+        comment("END KRAPPER GEN for ${cls.type}")
         appendLine()
         appendLine()
     }

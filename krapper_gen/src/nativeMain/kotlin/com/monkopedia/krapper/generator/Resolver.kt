@@ -17,12 +17,12 @@ package com.monkopedia.krapper.generator
 
 import clang.CXType
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedField
-import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.WrappedType
+import com.monkopedia.krapper.generator.model.WrappedType.Companion.arrayOf
+import com.monkopedia.krapper.generator.model.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.arrayOf
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.referenceTo
 import kotlinx.cinterop.CValue
 
 interface Resolver {
@@ -35,119 +35,111 @@ interface ResolverBuilder {
     fun visit(type: WrappedTypeReference)
 }
 
-fun List<WrappedClass>.resolveAll(
-    resolver: Resolver,
-    referencePolicy: ReferencePolicy
-): List<WrappedClass> {
-    val classMap = associate { it.fullyQualified to it }.toMutableMap()
-    for (cls in this) {
-        resolveAll(cls, classMap, resolver, referencePolicy)
-    }
-    return classMap.values.toList()
+fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): List<WrappedClass> {
+    val classMap = associate { it.type.toString() to it }.toMutableMap()
+    val mapper = handleUnresolved(classMap, resolver, policy)
+    return mapAll(mapper)
 }
 
-private fun resolveAll(
+fun resolveAll(
     cls: WrappedClass,
     classMap: MutableMap<String, WrappedClass>,
     resolver: Resolver,
     policy: ReferencePolicy
-) {
-    var needsMutation = false
-    val methods = cls.methods.map {
-        resolve(it, classMap, resolver, policy)?.also {
-            needsMutation = true
-        } ?: it
+): WrappedClass? {
+    val mapper = handleUnresolved(classMap, resolver, policy)
+    return when (val result = map(cls, mapper)) {
+        RemoveElement -> null
+        ElementUnchanged -> cls
+        is ReplaceWith -> result.replacement
     }
-    val fields = cls.fields.map {
-        resolve(it, classMap, resolver, policy)?.also {
-            needsMutation = true
-        } ?: it
-    }
-    if (needsMutation) {
-        classMap[cls.fullyQualified] = cls.copy(
-            methods = methods,
-            fields = fields
-        )
-    }
-}
-
-fun resolve(
-    method: WrappedMethod,
-    classMap: MutableMap<String, WrappedClass>,
-    resolver: Resolver,
-    policy: ReferencePolicy
-): WrappedMethod? {
-    val returnTypeResolves = classMap.canResolve(method.returnType)
-    val argsResolving = method.args.map {
-        it to classMap.canResolve(it.type)
-    }
-    if (returnTypeResolves && argsResolving.all { it.second }) return null
-
-    return method.copy(
-        returnType =
-            if (returnTypeResolves) method.returnType
-            else handleUnresolved(method.returnType, classMap, resolver, policy) ?: return null,
-        args = argsResolving.map {
-            if (it.second) it.first
-            else it.first.copy(
-                type = handleUnresolved(it.first.type, classMap, resolver, policy) ?: return null
-            )
-        }
-    )
-}
-
-fun resolve(
-    field: WrappedField,
-    classMap: MutableMap<String, WrappedClass>,
-    resolver: Resolver,
-    policy: ReferencePolicy
-): WrappedField? {
-    if (classMap.canResolve(field.type)) return null
-    return field.copy(
-        type = handleUnresolved(field.type, classMap, resolver, policy) ?: return null
-    )
 }
 
 fun handleUnresolved(
-    missingType: WrappedTypeReference,
     classMap: MutableMap<String, WrappedClass>,
     resolver: Resolver,
     policy: ReferencePolicy
-): WrappedTypeReference? {
-    if (missingType.isArray) return arrayOf(
-        handleUnresolved(missingType.arrayType, classMap, resolver, policy) ?: return null
-    )
-    if (missingType.isPointer) return pointerTo(
-        handleUnresolved(missingType.pointed, classMap, resolver, policy) ?: return null
-    )
-    if (missingType.isReference) return referenceTo(
-        handleUnresolved(missingType.referenced, classMap, resolver, policy) ?: return null
-    )
+): TypeMapping {
     return when (policy) {
-        ReferencePolicy.IGNORE_MISSING -> {
-            null
-        }
-        ReferencePolicy.OPAQUE_MISSING -> {
-            pointerTo(WrappedTypeReference.VOID)
-        }
-        ReferencePolicy.THROW_MISSING -> {
-            throw IllegalStateException("Cannot resolve ${missingType.name}")
-        }
-        ReferencePolicy.INCLUDE_MISSING -> {
-            if (!classMap.containsKey(missingType.name)) {
-                val cls = resolver.resolve(missingType.name)
-                classMap[cls.fullyQualified] = cls
-                resolveAll(cls, classMap, resolver, policy)
+        ReferencePolicy.IGNORE_MISSING -> return { t ->
+            t.operateOn {
+                if (classMap.canResolve(it)) {
+                    ElementUnchanged
+                } else {
+                    RemoveElement
+                }
             }
-            missingType
+        }
+        ReferencePolicy.OPAQUE_MISSING -> return { t ->
+            t.operateOn {
+                if (classMap.canResolve(it)) {
+                    ElementUnchanged
+                } else {
+                    ReplaceWith(pointerTo(WrappedTypeReference.VOID))
+                }
+            }
+        }
+        ReferencePolicy.THROW_MISSING -> return { t ->
+            t.operateOn {
+                if (classMap.canResolve(it)) {
+                    ElementUnchanged
+                } else {
+                    throw IllegalStateException("Cannot resolve $it")
+                }
+            }
+        }
+        ReferencePolicy.INCLUDE_MISSING -> return { t ->
+            t.operateOn {
+                if (!classMap.containsKey(it.toString())) {
+                    val cls = resolver.resolve(it.toString())
+                    classMap[cls.name] = cls
+                    classMap[cls.name] = resolveAll(cls, classMap, resolver, policy)
+                        ?: error("Couldn't include ${cls.name}, resolve failed")
+                }
+                ElementUnchanged
+            }
         }
     }
 }
 
-private fun MutableMap<String, WrappedClass>.canResolve(type: WrappedTypeReference): Boolean {
-    if (type.isVoid || type.isNative || type.isReturnable) return true
+private inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
+    if (this is WrappedModifiedType) {
+        return typeHandler(baseType).wrapOnReplace {
+            WrappedModifiedType(it, modifier)
+        }
+    }
+    if (this is WrappedTypeReference) {
+        if (isArray) return typeHandler(arrayType).wrapOnReplace {
+            arrayOf(it)
+        }
+        if (isPointer) return typeHandler(pointed).wrapOnReplace {
+            pointerTo(it)
+        }
+        if (isReference) return typeHandler(referenced).wrapOnReplace {
+            referenceTo(it)
+        }
+    }
+    return typeHandler(this)
+}
+
+private inline fun MapResult<out WrappedType>.wrapOnReplace(typeWrapping: (WrappedType) -> WrappedType): MapResult<out WrappedType> {
+    return when (this) {
+        is ReplaceWith -> ReplaceWith(typeWrapping(replacement))
+        RemoveElement -> this
+        ElementUnchanged -> this
+    }
+}
+
+private fun MutableMap<String, WrappedClass>.canResolve(type: WrappedType): Boolean {
+    if (type is WrappedModifiedType) {
+        return canResolve(type.baseType)
+    }
+    if (type !is WrappedTypeReference) {
+        return false
+    }
     if (type.isArray) return canResolve(type.arrayType)
     if (type.isPointer) return canResolve(type.pointed)
     if (type.isReference) return canResolve(type.referenced)
+    if (type.isVoid || type.isNative || type.isReturnable) return true
     return containsKey(type.unconst.name)
 }
