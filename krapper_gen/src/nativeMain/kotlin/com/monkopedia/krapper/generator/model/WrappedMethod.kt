@@ -18,6 +18,7 @@ package com.monkopedia.krapper.generator.model
 import clang.CXCursor
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.isStatic
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.spelling
@@ -49,8 +50,8 @@ class WrappedConstructor(
         }
     }
 
-    override fun clone(): WrappedDestructor {
-        return WrappedDestructor(name, returnType).also {
+    override fun clone(): WrappedConstructor {
+        return WrappedConstructor(name, returnType).also {
             it.parent = parent
             it.children.addAll(children)
         }
@@ -89,13 +90,11 @@ open class WrappedMethod(
     val methodType: MethodType = MethodType.METHOD
 ) : WrappedElement() {
     val args: List<WrappedArgument>
-        get() = children.filterIsInstance<WrappedArgument>().also {
-            println("Getting children $it from $children")
-        }
+        get() = children.filterIsInstance<WrappedArgument>()
 
     constructor(method: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         method.referenced.spelling.toKString() ?: error("Can't find name of $method"),
-        WrappedTypeReference(method.type.result, resolverBuilder),
+        WrappedType(method.type.result, resolverBuilder),
         method.isStatic,
     )
 
@@ -128,7 +127,7 @@ open class WrappedMethod(
 class WrappedArgument(val name: String, val type: WrappedType) : WrappedElement() {
     constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         arg.spelling.toKString() ?: error("Can't find name of $arg"),
-        WrappedTypeReference(arg.type, resolverBuilder)
+        WrappedType(arg.type, resolverBuilder)
     )
 
     override fun clone(): WrappedArgument {

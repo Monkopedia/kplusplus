@@ -17,27 +17,36 @@ package com.monkopedia.krapper.generator
 
 import clang.CXType
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedModifiedType
-import com.monkopedia.krapper.generator.model.WrappedType
-import com.monkopedia.krapper.generator.model.WrappedType.Companion.arrayOf
-import com.monkopedia.krapper.generator.model.WrappedType.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.WrappedType.Companion.referenceTo
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.arrayOf
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.isNative
+import com.monkopedia.krapper.generator.model.type.isPointer
+import com.monkopedia.krapper.generator.model.type.isReference
+import com.monkopedia.krapper.generator.model.type.isReturnable
+import com.monkopedia.krapper.generator.model.type.isVoid
+import com.monkopedia.krapper.generator.model.type.pointed
+import com.monkopedia.krapper.generator.model.type.unreferenced
 import kotlinx.cinterop.CValue
 
 interface Resolver {
-    fun resolve(fullyQualified: String): WrappedClass
+    fun resolve(type: WrappedType): WrappedClass
+    fun resolveTemplate(type: WrappedType): WrappedTemplate
     fun findClasses(filter: ClassFilter): List<WrappedClass>
 }
 
 interface ResolverBuilder {
     fun visit(type: CValue<CXType>): CValue<CXType>
-    fun visit(type: WrappedTypeReference)
+    fun visit(type: WrappedType)
 }
 
 fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): List<WrappedClass> {
     val classMap = associate { it.type.toString() to it }.toMutableMap()
-    val mapper = handleUnresolved(classMap, resolver, policy)
+    val mapper = typeMapper(classMap, resolver, policy)
     return mapAll(mapper)
 }
 
@@ -47,7 +56,7 @@ fun resolveAll(
     resolver: Resolver,
     policy: ReferencePolicy
 ): WrappedClass? {
-    val mapper = handleUnresolved(classMap, resolver, policy)
+    val mapper = typeMapper(classMap, resolver, policy)
     return when (val result = map(cls, mapper)) {
         RemoveElement -> null
         ElementUnchanged -> cls
@@ -55,7 +64,7 @@ fun resolveAll(
     }
 }
 
-fun handleUnresolved(
+fun typeMapper(
     classMap: MutableMap<String, WrappedClass>,
     resolver: Resolver,
     policy: ReferencePolicy
@@ -75,7 +84,7 @@ fun handleUnresolved(
                 if (classMap.canResolve(it)) {
                     ElementUnchanged
                 } else {
-                    ReplaceWith(pointerTo(WrappedTypeReference.VOID))
+                    ReplaceWith(pointerTo(WrappedType.VOID))
                 }
             }
         }
@@ -90,11 +99,16 @@ fun handleUnresolved(
         }
         ReferencePolicy.INCLUDE_MISSING -> return { t ->
             t.operateOn {
-                if (!classMap.containsKey(it.toString())) {
-                    val cls = resolver.resolve(it.toString())
-                    classMap[cls.name] = cls
-                    classMap[cls.name] = resolveAll(cls, classMap, resolver, policy)
-                        ?: error("Couldn't include ${cls.name}, resolve failed")
+                if (!classMap.canResolve(it)) {
+                    try {
+                        val cls = resolver.resolve(it)
+                        classMap[cls.name] = cls
+                        classMap[cls.name] = resolveAll(cls, classMap, resolver, policy)
+                            ?: error("Couldn't include ${cls.name}, resolve failed")
+                    } catch (_: Throwable) {
+                        // Its ok to not have a class if this reference points at a template.
+                        resolver.resolveTemplate(it)
+                    }
                 }
                 ElementUnchanged
             }
@@ -112,12 +126,12 @@ private inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult
         if (isArray) return typeHandler(arrayType).wrapOnReplace {
             arrayOf(it)
         }
-        if (isPointer) return typeHandler(pointed).wrapOnReplace {
-            pointerTo(it)
-        }
-        if (isReference) return typeHandler(referenced).wrapOnReplace {
-            referenceTo(it)
-        }
+    }
+    if (isPointer) return typeHandler(pointed).wrapOnReplace {
+        pointerTo(it)
+    }
+    if (isReference) return typeHandler(unreferenced).wrapOnReplace {
+        referenceTo(it)
     }
     return typeHandler(this)
 }
@@ -134,12 +148,9 @@ private fun MutableMap<String, WrappedClass>.canResolve(type: WrappedType): Bool
     if (type is WrappedModifiedType) {
         return canResolve(type.baseType)
     }
+    if (type.isNative || type.isVoid || type.isReturnable) return true
     if (type !is WrappedTypeReference) {
-        return false
+        return containsKey(type.toString())
     }
-    if (type.isArray) return canResolve(type.arrayType)
-    if (type.isPointer) return canResolve(type.pointed)
-    if (type.isReference) return canResolve(type.referenced)
-    if (type.isVoid || type.isNative || type.isReturnable) return true
     return containsKey(type.unconst.name)
 }

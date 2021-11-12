@@ -19,10 +19,10 @@ import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQU
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.MEM_SCOPE
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.PAIR
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.WrappedType
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.VOID
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.kotlinType
+import com.monkopedia.krapper.generator.model.type.kotlinType
 import com.monkopedia.krapper.generator.model.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>

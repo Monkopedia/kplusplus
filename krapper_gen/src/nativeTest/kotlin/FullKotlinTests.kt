@@ -21,18 +21,19 @@ import com.monkopedia.krapper.generator.codegen.WrappedKotlinWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import kotlin.test.Test
 import kotlin.test.fail
 
 class FullKotlinTests {
 
-    private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__string(): vector__string {\n" +
+    private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__String(): vector__String {\n" +
         "    val obj: COpaquePointer = (std_vector_std_string_new() ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        std_vector_std_string_dispose(obj)\n" +
         "    }\n" +
-        "    return vector__string((obj to this))\n" +
+        "    return vector__String((obj to this))\n" +
         "}\n\n"
 
     private val STD_VECTOR_STRING_DISPOSE = ""
@@ -68,8 +69,16 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_OTHERCLASS_APPEND_TEXT =
-        "inline fun appendText(text: vector__string): Unit {\n" +
+        "inline fun appendText(text: vector__String): Unit {\n" +
             "    return TestLib_OtherClass_append_text(ptr, text.ptr)\n" +
+            "}"
+    private val TESTLIB_OTHERCLASS_COPIES =
+        "inline fun copies(): MyPair__OtherClass {\n" +
+            "    return MyPair__OtherClass((TestLib_OtherClass_copies(ptr) to memScope))\n" +
+            "}"
+    private val TESTLIB_OTHERCLASS_INTS =
+        "inline fun ints(): MyPair__Int {\n" +
+            "    return MyPair__Int((TestLib_OtherClass_ints(ptr) to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_B =
@@ -606,21 +615,21 @@ class FullKotlinTests {
     @Test
     fun testVector_new() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.constructor,
+        target = (TestData.Vector.cls.children[1] as WrappedMethod),
         expected = STD_VECTOR_STRING_NEW,
     )
 
     @Test
     fun testVector_dispose() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.destructor,
+        target = TestData.Vector.cls.children[2] as WrappedMethod,
         expected = STD_VECTOR_STRING_DISPOSE,
     )
 
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.pushBack,
+        target = TestData.Vector.cls.children[3] as WrappedMethod,
         expected = STD_VECTOR_STRING_PUSH_BACK,
     )
 
@@ -657,6 +666,20 @@ class FullKotlinTests {
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.appendText,
         expected = TESTLIB_OTHERCLASS_APPEND_TEXT,
+    )
+
+    @Test
+    fun testOtherClass_copies() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.copies,
+        expected = TESTLIB_OTHERCLASS_COPIES,
+    )
+
+    @Test
+    fun testOtherClass_ints() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.ints,
+        expected = TESTLIB_OTHERCLASS_INTS,
     )
 
     @Test

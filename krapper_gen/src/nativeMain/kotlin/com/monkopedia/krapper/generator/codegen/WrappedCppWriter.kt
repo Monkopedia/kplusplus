@@ -45,15 +45,15 @@ import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedType
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.isNative
-import com.monkopedia.krapper.generator.model.isPointer
-import com.monkopedia.krapper.generator.model.isReturnable
-import com.monkopedia.krapper.generator.model.isString
-import com.monkopedia.krapper.generator.model.isVoid
-import com.monkopedia.krapper.generator.model.pointed
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.type.isNative
+import com.monkopedia.krapper.generator.model.type.isPointer
+import com.monkopedia.krapper.generator.model.type.isReturnable
+import com.monkopedia.krapper.generator.model.type.isString
+import com.monkopedia.krapper.generator.model.type.isVoid
+import com.monkopedia.krapper.generator.model.type.pointed
 
 class WrappedCppWriter(
     private val nameHandler: NameHandler,
@@ -213,12 +213,12 @@ class WrappedCppWriter(
     private fun CppCodeBuilder.createPointedStringReturn(call: Symbol) {
         val returnStr = +define(
             "ret_value",
-            pointerTo(WrappedTypeReference("std::string")),
+            pointerTo(WrappedType("std::string")),
             initializer = call
         )
         val returnArray = +define(
             "ret_value_cast",
-            WrappedTypeReference("char *"),
+            WrappedType("char *"),
             initializer = New(Raw("char[${returnStr.name}->length() + 1]"))
         )
         +(
@@ -234,10 +234,10 @@ class WrappedCppWriter(
 
     private fun CppCodeBuilder.createStringReturn(call: Symbol) {
         val returnStr =
-            +define("ret_value", WrappedTypeReference("std::string"), initializer = call)
+            +define("ret_value", WrappedType("std::string"), initializer = call)
         val returnArray = +define(
             "ret_value_cast",
-            WrappedTypeReference("char *"),
+            WrappedType("char *"),
             initializer = New(Raw("char[${returnStr.name}.length() + 1]"))
         )
         +(

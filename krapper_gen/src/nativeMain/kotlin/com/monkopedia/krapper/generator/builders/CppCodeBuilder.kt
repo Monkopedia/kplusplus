@@ -15,8 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.WrappedType
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.WrappedType
 
 typealias CppCodeBuilder = CodeBuilder<CppFactory>
 

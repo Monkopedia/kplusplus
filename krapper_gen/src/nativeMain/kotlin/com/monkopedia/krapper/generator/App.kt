@@ -32,6 +32,7 @@ import clang.clang_visitChildren
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.enum
@@ -53,8 +54,6 @@ import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.staticCFunction
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 enum class ErrorPolicy(val policy: CodeGenerationPolicy) {
     FAIL(ThrowPolicy),
@@ -90,7 +89,7 @@ class KrapperGen : CliktCommand() {
     val errorPolicy by option("--policy", help = "How to handle errors")
         .enum<ErrorPolicy>()
         .default(ErrorPolicy.LOG)
-    val debug by option("-d", "--debugOutput", help = "Specify file to output debug dump of state")
+    val debug by option("-d", "--debugOutput", help = "Specify file to output debug dump of state").flag()
 
     val referencePolicy by option(
         "-r",
@@ -107,86 +106,89 @@ class KrapperGen : CliktCommand() {
             val args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
                 .toTypedArray()
             println("Args: ${args.toList()}")
-            for (file in header) {
-                val tu =
-                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
-                tu.printDiagnostics()
-                defer {
-                    tu.dispose()
-                }
-                tu.cursor.filterChildrenRecursive {
-                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
-                        val info = Utils.CursorTreeInfo(it)
-                        println("Writing ${it.usr.toKString()}")
-                        File("/tmp/testlib_otherclass.json").writeText(Json.encodeToString(info))
-                    }
-                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("TestClass")) {
-                        val info = Utils.CursorTreeInfo(it)
-                        println("Writing ${it.usr.toKString()}")
-                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
-                    }
-                    false
-                }
-//                tu.cursor.filterChildren { true }.forEach {
-//                    val cursor = KXCursor.generate(tu.cursor)
-//                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
+//            for (file in header) {
+//                val tu =
+//                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
+//                tu.printDiagnostics()
+//                defer {
+//                    tu.dispose()
 //                }
-            }
-//            val resolver = parseHeader(index, header)
-//            var classes = resolver.findClasses(WrappedClass::defaultFilter)
-//            classes = classes.resolveAll(resolver, referencePolicy)
+//                tu.cursor.filterChildrenRecursive {
+//                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
+//                        val info = Utils.CursorTreeInfo(it)
+//                        println("Writing ${it.usr.toKString()}")
+//                        File("/tmp/testlib_otherclass.json").writeText(Json.encodeToString(info))
+//                    }
+//                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("TestClass")) {
+//                        val info = Utils.CursorTreeInfo(it)
+//                        println("Writing ${it.usr.toKString()}")
+//                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
+//                    }
+//                    false
+//                }
+////                tu.cursor.filterChildren { true }.forEach {
+////                    val cursor = KXCursor.generate(tu.cursor)
+////                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
+////                }
+//            }
+            val resolver = parseHeader(index, header, debug = debug)
+            var classes = resolver.findClasses(WrappedClass::defaultFilter)
+            println(
+                "Resolving: [\n    ${classes.joinToString(",\n    ") { it.type.toString() }}\n]"
+            )
+            classes = classes.resolveAll(resolver, referencePolicy)
 //            debug?.let {
-//                val clsStr = Json.encodeToString(classes)
+//                val clsStr = Json.encodeToString(resolver.tu)
 //                File(it).writeText(clsStr)
 //            }
-//            println(
-//                "Generating for [\n    ${classes.joinToString(",\n    ") { it.fullyQualified }}\n]"
-//            )
-//            val outputBase = File(output ?: getcwd())
-//            outputBase.mkdirs()
-//            val namer = NameHandler()
-//            File(outputBase, "$moduleName.h").writeText(
-//                CppCodeBuilder().also {
-//                    WrappedHeaderWriter(
-//                        namer,
-//                        it,
-//                        policy = errorPolicy.policy
-//                    ).generate(moduleName, header, classes)
-//                }.toString()
-//            )
-//            val cppFile = File(outputBase, "$moduleName.cc")
-//            cppFile.writeText(
-//                CppCodeBuilder().also {
-//                    WrappedCppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
-//                        moduleName,
-//                        header,
-//                        classes
-//                    )
-//                }.toString()
-//            )
-//            val pkg = pkg ?: "krapper.$moduleName"
-//            File(outputBase, "$moduleName.def").writeText(
-//                WrappedDefWriter(namer).generateDef(
-//                    outputBase,
-//                    "$pkg.internal",
-//                    moduleName,
-//                    header,
-//                    library
-//                )
-//            )
-//            WrappedCppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
-//                cppFile,
-//                header,
-//                library
-//            )
-//            WrappedKotlinWriter(
-//                namer,
-//                "$pkg.internal",
-//                policy = errorPolicy.policy
-//            ).generate(
-//                File(outputBase, "src"),
-//                classes
-//            )
+            println(
+                "Generating for [\n    ${classes.joinToString(",\n    ") { it.type.toString() }}\n]"
+            )
+            val outputBase = File(output ?: getcwd())
+            outputBase.mkdirs()
+            val namer = NameHandler()
+            File(outputBase, "$moduleName.h").writeText(
+                CppCodeBuilder().also {
+                    WrappedHeaderWriter(
+                        namer,
+                        it,
+                        policy = errorPolicy.policy
+                    ).generate(moduleName, header, classes)
+                }.toString()
+            )
+            val cppFile = File(outputBase, "$moduleName.cc")
+            cppFile.writeText(
+                CppCodeBuilder().also {
+                    WrappedCppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
+                        moduleName,
+                        header,
+                        classes
+                    )
+                }.toString()
+            )
+            val pkg = pkg ?: "krapper.$moduleName"
+            File(outputBase, "$moduleName.def").writeText(
+                WrappedDefWriter(namer).generateDef(
+                    outputBase,
+                    "$pkg.internal",
+                    moduleName,
+                    header,
+                    library
+                )
+            )
+            WrappedCppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
+                cppFile,
+                header,
+                library
+            )
+            WrappedKotlinWriter(
+                namer,
+                "$pkg.internal",
+                policy = errorPolicy.policy
+            ).generate(
+                File(outputBase, "src"),
+                classes
+            )
         }
     }
 }

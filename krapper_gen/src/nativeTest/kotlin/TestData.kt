@@ -22,11 +22,23 @@ import com.monkopedia.krapper.generator.model.WrappedConstructor
 import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.WrappedTypeReference.Companion.referenceTo
+import com.monkopedia.krapper.generator.model.WrappedNamespace
+import com.monkopedia.krapper.generator.model.WrappedTU
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 
-object TestData {
+@ThreadLocal
+val TestData by lazy {
+    TestDataClass()
+}
+
+class TestDataClass {
 
     val HEADER = """
         #pragma once
@@ -979,171 +991,203 @@ object TestData {
         }
     """.trimIndent()
 
-    object Vector {
-        val type = WrappedTypeReference("std::vector<std::string>")
-        val constructor = WrappedConstructor("std::vector<std::string>", type)
-        val destructor = WrappedDestructor("~std::vector<std::string>", type)
-        val pushBack = WrappedMethod(
-            "push_back",
-            WrappedTypeReference("void"),
-            false,
-            MethodType.METHOD
-        ).also {
-            it.children.add(WrappedArgument("str", WrappedTypeReference("std::string")))
-        }
-        val cls = WrappedClass(
-            "std::vector<std::string>",
-        ).also {
-            it.children.addAll(
-                listOf(
-                    constructor,
-                    destructor,
-                    pushBack
-                )
-            )
-        }
+    val TU = WrappedTU()
+    val TestLib = WrappedNamespace("TestLib").also {
+        TU.children.add(it)
+        it.parent = TU
+    }
+    val Std = WrappedNamespace("std").also {
+        TU.children.add(it)
+        it.parent = TU
     }
 
-    object TestClass {
-        val type = WrappedTypeReference("TestLib::TestClass")
-        val b = WrappedField("b", WrappedTypeReference("bool"))
-        val st = WrappedField("st", WrappedTypeReference("size_t"))
-        val uit = WrappedField("uit", WrappedTypeReference("uint16_t"))
-        val array = WrappedField("array", WrappedTypeReference("int [5]"))
-        val str = WrappedField("str", WrappedTypeReference("std::string"))
-        val c = WrappedField("c", WrappedTypeReference("signed char"))
-        val uc = WrappedField("uc", WrappedTypeReference("unsigned char"))
-        val s = WrappedField("s", WrappedTypeReference("signed short"))
-        val us = WrappedField("us", WrappedTypeReference("unsigned short"))
-        val i = WrappedField("i", WrappedTypeReference("signed int"))
-        val ui = WrappedField("ui", WrappedTypeReference("unsigned int"))
-        val l = WrappedField("l", WrappedTypeReference("signed long"))
-        val ul = WrappedField("ul", WrappedTypeReference("unsigned long"))
-        val ll = WrappedField("ll", WrappedTypeReference("signed long long"))
-        val ull = WrappedField("ull", WrappedTypeReference("unsigned long long"))
-        val f = WrappedField("f", WrappedTypeReference("float"))
-        val d = WrappedField("d", WrappedTypeReference("double"))
-        val ld = WrappedField("ld", WrappedTypeReference("long double"))
-        val pb = WrappedField("pb", WrappedTypeReference("bool *"))
-        val pc = WrappedField("pc", WrappedTypeReference("signed char *"))
-        val puc = WrappedField("puc", WrappedTypeReference("unsigned char *"))
-        val ps = WrappedField("ps", WrappedTypeReference("signed short *"))
-        val pus = WrappedField("pus", WrappedTypeReference("unsigned short *"))
-        val pi = WrappedField("pi", WrappedTypeReference("signed int *"))
-        val pui = WrappedField("pui", WrappedTypeReference("unsigned int *"))
-        val pl = WrappedField("pl", WrappedTypeReference("signed long *"))
-        val pul = WrappedField("pul", WrappedTypeReference("unsigned long *"))
-        val pll = WrappedField("pll", WrappedTypeReference("signed long long *"))
-        val pull = WrappedField("pull", WrappedTypeReference("unsigned long long *"))
-        val pf = WrappedField("pf", WrappedTypeReference("float *"))
-        val pd = WrappedField("pd", WrappedTypeReference("double *"))
+    val Vector = VectorClass()
+
+    inner class VectorClass {
+        val localType = WrappedType("std::vector")
+        val template = WrappedTemplateParam("_Tp", null)
+        val type = WrappedTemplateType(localType, listOf(WrappedType("std::string")))
+        val constructor = WrappedConstructor("std::vector", WrappedTemplateType(localType, listOf(WrappedTemplateRef(template))))
+        val destructor = WrappedDestructor("~std::vector", VOID)
+        val pushBack =
+            WrappedMethod(
+                "push_back",
+                WrappedType("void"),
+                false,
+                MethodType.METHOD
+            ).also {
+                it.children.add(WrappedArgument("str", WrappedTemplateRef(template)))
+            }
+        val tmp =
+            WrappedTemplate(
+                "vector",
+            ).also {
+                it.parent = Std
+                Std.children.add(it)
+                it.children.addAll(
+                    listOf(
+                        template,
+                        constructor,
+                        destructor,
+                        pushBack
+                    )
+                )
+            }
+        val cls = tmp.typedAs(type)
+    }
+
+    val TestClass = TestClassClass()
+
+    inner class TestClassClass {
+        val type = WrappedType("TestLib::TestClass")
+        val b = WrappedField("b", WrappedType("bool"))
+        val st = WrappedField("st", WrappedType("size_t"))
+        val uit = WrappedField("uit", WrappedType("uint16_t"))
+        val array = WrappedField("array", WrappedType("int [5]"))
+        val str = WrappedField("str", WrappedType("std::string"))
+        val c = WrappedField("c", WrappedType("signed char"))
+        val uc = WrappedField("uc", WrappedType("unsigned char"))
+        val s = WrappedField("s", WrappedType("signed short"))
+        val us = WrappedField("us", WrappedType("unsigned short"))
+        val i = WrappedField("i", WrappedType("signed int"))
+        val ui = WrappedField("ui", WrappedType("unsigned int"))
+        val l = WrappedField("l", WrappedType("signed long"))
+        val ul = WrappedField("ul", WrappedType("unsigned long"))
+        val ll = WrappedField("ll", WrappedType("signed long long"))
+        val ull = WrappedField("ull", WrappedType("unsigned long long"))
+        val f = WrappedField("f", WrappedType("float"))
+        val d = WrappedField("d", WrappedType("double"))
+        val ld = WrappedField("ld", WrappedType("long double"))
+        val pb = WrappedField("pb", WrappedType("bool *"))
+        val pc = WrappedField("pc", WrappedType("signed char *"))
+        val puc = WrappedField("puc", WrappedType("unsigned char *"))
+        val ps = WrappedField("ps", WrappedType("signed short *"))
+        val pus = WrappedField("pus", WrappedType("unsigned short *"))
+        val pi = WrappedField("pi", WrappedType("signed int *"))
+        val pui = WrappedField("pui", WrappedType("unsigned int *"))
+        val pl = WrappedField("pl", WrappedType("signed long *"))
+        val pul = WrappedField("pul", WrappedType("unsigned long *"))
+        val pll = WrappedField("pll", WrappedType("signed long long *"))
+        val pull = WrappedField("pull", WrappedType("unsigned long long *"))
+        val pf = WrappedField("pf", WrappedType("float *"))
+        val pd = WrappedField("pd", WrappedType("double *"))
 
         val sum =
-            WrappedMethod("sum", WrappedTypeReference("long"), false, MethodType.METHOD)
+            WrappedMethod("sum", WrappedType("long"), false, MethodType.METHOD)
         val longPointer = WrappedMethod(
             "longPointer",
-            WrappedTypeReference("long *"),
+            WrappedType("long *"),
             false,
             MethodType.METHOD,
         )
-        val setSome = WrappedMethod(
-            "setSome",
-            WrappedTypeReference("void"),
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.add(WrappedArgument("a", WrappedTypeReference("int")))
-            it.children.add(WrappedArgument("b", WrappedTypeReference("long")))
-            it.children.add(WrappedArgument("c", WrappedTypeReference("long long")))
-        }
-        val setPointers = WrappedMethod(
-            "setPointers",
-            WrappedTypeReference("void"),
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(
-                listOf(
-                    WrappedArgument("a", WrappedTypeReference("int*")),
-                    WrappedArgument("b", WrappedTypeReference("long*")),
-                    WrappedArgument("c", WrappedTypeReference("long long*"))
+        val setSome =
+            WrappedMethod(
+                "setSome",
+                WrappedType("void"),
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.add(WrappedArgument("a", WrappedType("int")))
+                it.children.add(WrappedArgument("b", WrappedType("long")))
+                it.children.add(WrappedArgument("c", WrappedType("long long")))
+            }
+        val setPointers =
+            WrappedMethod(
+                "setPointers",
+                WrappedType("void"),
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedArgument("a", WrappedType("int*")),
+                        WrappedArgument("b", WrappedType("long*")),
+                        WrappedArgument("c", WrappedType("long long*"))
+                    )
                 )
-            )
-        }
-        val setPrivateString = WrappedMethod(
-            "setPrivateString",
-            WrappedTypeReference("void"),
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(
-                listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
-            )
-        }
-        val setPrivateFrom = WrappedMethod(
-            "setPrivateFrom",
-            WrappedTypeReference("void"),
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(
-                listOf(WrappedArgument("value", WrappedTypeReference("TestLib::OtherClass *"))),
-            )
-        }
+            }
+        val setPrivateString =
+            WrappedMethod(
+                "setPrivateString",
+                WrappedType("void"),
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(
+                    listOf(WrappedArgument("value", WrappedType("std::string"))),
+                )
+            }
+        val setPrivateFrom =
+            WrappedMethod(
+                "setPrivateFrom",
+                WrappedType("void"),
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(
+                    listOf(WrappedArgument("value", WrappedType("TestLib::OtherClass *"))),
+                )
+            }
         val output = WrappedMethod(
             "output",
-            WrappedTypeReference("void"),
+            WrappedType("void"),
             false,
             MethodType.METHOD,
         )
         val constructor = WrappedConstructor("new", type)
-        val copyConstructor = WrappedConstructor("new", type).also {
-            it.children.addAll(listOf(WrappedArgument("other", type)))
-        }
-        val otherConstructor = WrappedConstructor("new", type).also {
-            it.children.addAll(listOf(WrappedArgument("a", WrappedTypeReference("int"))))
-        }
-        val twoParamConstructor = WrappedConstructor("new", type).also {
-            it.children.addAll(
-                listOf(
-                    WrappedArgument("a", WrappedTypeReference("int")),
-                    WrappedArgument("b", WrappedTypeReference("double"))
-                ),
-            )
-        }
+        val copyConstructor =
+            WrappedConstructor("new", type).also {
+                it.children.addAll(listOf(WrappedArgument("other", type)))
+            }
+        val otherConstructor =
+            WrappedConstructor("new", type).also {
+                it.children.addAll(listOf(WrappedArgument("a", WrappedType("int"))))
+            }
+        val twoParamConstructor =
+            WrappedConstructor("new", type).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedArgument("a", WrappedType("int")),
+                        WrappedArgument("b", WrappedType("double"))
+                    ),
+                )
+            }
         val destructor = WrappedDestructor("~TestClass", type)
-        val operatorMinus = WrappedMethod(
-            "operator-",
-            type,
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(
-                listOf(WrappedArgument("c2", type)),
-            )
-        }
+        val operatorMinus =
+            WrappedMethod(
+                "operator-",
+                type,
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(
+                    listOf(WrappedArgument("c2", type)),
+                )
+            }
         val operatorUnaryMinus =
             WrappedMethod("operator-", type, false, MethodType.METHOD)
-        val operatorPlus = WrappedMethod(
-            "operator+",
-            type,
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(
-                listOf(WrappedArgument("c2", type)),
-            )
-        }
+        val operatorPlus =
+            WrappedMethod(
+                "operator+",
+                type,
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(
+                    listOf(WrappedArgument("c2", type)),
+                )
+            }
         val operatorUnaryPlus =
             WrappedMethod("operator+", type, false, MethodType.METHOD)
-        val operatorTimes = WrappedMethod(
-            "operator*",
-            type,
-            false,
-            MethodType.METHOD,
-        ).also {
-            it.children.addAll(listOf(WrappedArgument("c2", type)))
-        }
+        val operatorTimes =
+            WrappedMethod(
+                "operator*",
+                type,
+                false,
+                MethodType.METHOD,
+            ).also {
+                it.children.addAll(listOf(WrappedArgument("c2", type)))
+            }
         val operatorDiv = WrappedMethod(
             "operator/",
             type,
@@ -1168,7 +1212,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
+                listOf(WrappedArgument("dummy", WrappedType("int"))),
             )
         }
         val operatorDec = WrappedMethod("operator--", type, false, MethodType.METHOD)
@@ -1179,7 +1223,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("dummy", WrappedTypeReference("int"))),
+                listOf(WrappedArgument("dummy", WrappedType("int"))),
             )
         }
         val operatorEq = WrappedMethod(
@@ -1189,7 +1233,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorNeq = WrappedMethod(
@@ -1199,7 +1243,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorLt = WrappedMethod(
@@ -1209,7 +1253,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorGt = WrappedMethod(
@@ -1219,7 +1263,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorLteq = WrappedMethod(
@@ -1229,7 +1273,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorGteq = WrappedMethod(
@@ -1239,7 +1283,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorNot =
@@ -1251,7 +1295,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorBinaryOr = WrappedMethod(
@@ -1261,7 +1305,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorInv =
@@ -1273,7 +1317,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorBitwiseOr = WrappedMethod(
@@ -1283,7 +1327,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorXor = WrappedMethod(
@@ -1293,7 +1337,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorShl = WrappedMethod(
@@ -1303,7 +1347,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorShr = WrappedMethod(
@@ -1313,7 +1357,7 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
         val operatorInd = WrappedMethod(
@@ -1323,119 +1367,118 @@ object TestData {
             MethodType.METHOD,
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("c2", WrappedTypeReference("std::string &"))),
+                listOf(WrappedArgument("c2", WrappedType("std::string &"))),
             )
         }
 
-        val cls = WrappedClass(
-            "TestLib::TestClass",
-        ).also {
-            it.children.addAll(
-                listOf(
-                    b,
-                    st,
-                    uit,
-                    array,
-                    str,
-                    c,
-                    uc,
-                    s,
-                    us,
-                    i,
-                    ui,
-                    l,
-                    ul,
-                    ll,
-                    ull,
-                    f,
-                    d,
-                    ld,
-                    pb,
-                    pc,
-                    puc,
-                    ps,
-                    pus,
-                    pi,
-                    pui,
-                    pl,
-                    pul,
-                    pll,
-                    pull,
-                    pf,
-                    pd,
-                    sum,
-                    longPointer,
-                    setSome,
-                    setPointers,
-                    setPrivateString,
-                    setPrivateFrom,
-                    output,
-                    constructor,
-                    copyConstructor,
-                    otherConstructor,
-                    twoParamConstructor,
-                    destructor,
-                    operatorMinus,
-                    operatorUnaryMinus,
-                    operatorPlus,
-                    operatorUnaryPlus,
-                    operatorTimes,
-                    operatorDiv,
-                    operatorRem,
-                    operatorInc,
-                    operatorPostInc,
-                    operatorDec,
-                    operatorPostDec,
-                    operatorEq,
-                    operatorNeq,
-                    operatorLt,
-                    operatorGt,
-                    operatorLteq,
-                    operatorGteq,
-                    operatorNot,
-                    operatorBinaryAnd,
-                    operatorBinaryOr,
-                    operatorInv,
-                    operatorBitwiseAnd,
-                    operatorBitwiseOr,
-                    operatorXor,
-                    operatorShl,
-                    operatorShr,
-                    operatorInd
+        val cls =
+            WrappedClass(
+                "TestClass",
+            ).also {
+                TestLib.children.add(it)
+                it.parent = TestLib
+                it.children.addAll(
+                    listOf(
+                        b,
+                        st,
+                        uit,
+                        array,
+                        str,
+                        c,
+                        uc,
+                        s,
+                        us,
+                        i,
+                        ui,
+                        l,
+                        ul,
+                        ll,
+                        ull,
+                        f,
+                        d,
+                        ld,
+                        pb,
+                        pc,
+                        puc,
+                        ps,
+                        pus,
+                        pi,
+                        pui,
+                        pl,
+                        pul,
+                        pll,
+                        pull,
+                        pf,
+                        pd,
+                        sum,
+                        longPointer,
+                        setSome,
+                        setPointers,
+                        setPrivateString,
+                        setPrivateFrom,
+                        output,
+                        constructor,
+                        copyConstructor,
+                        otherConstructor,
+                        twoParamConstructor,
+                        destructor,
+                        operatorMinus,
+                        operatorUnaryMinus,
+                        operatorPlus,
+                        operatorUnaryPlus,
+                        operatorTimes,
+                        operatorDiv,
+                        operatorRem,
+                        operatorInc,
+                        operatorPostInc,
+                        operatorDec,
+                        operatorPostDec,
+                        operatorEq,
+                        operatorNeq,
+                        operatorLt,
+                        operatorGt,
+                        operatorLteq,
+                        operatorGteq,
+                        operatorNot,
+                        operatorBinaryAnd,
+                        operatorBinaryOr,
+                        operatorInv,
+                        operatorBitwiseAnd,
+                        operatorBitwiseOr,
+                        operatorXor,
+                        operatorShl,
+                        operatorShr,
+                        operatorInd
+                    )
                 )
-            )
-        }
+            }
     }
 
-    object OtherClass {
-        val type = WrappedTypeReference("TestLib::OtherClass")
-        val constructor = WrappedConstructor(
-            "TestLib::OtherClass",
-            type,
-        )
-        val destructor = WrappedDestructor(
-            "~TestLib::OtherClass",
-            type,
-        )
+    val OtherClass = OtherClassClass()
+
+    inner class OtherClassClass {
+        val type = WrappedType("TestLib::OtherClass")
+        val constructor = WrappedConstructor("TestLib::OtherClass", type)
+        val destructor = WrappedDestructor("~TestLib::OtherClass", type)
         val getPrivateString = WrappedMethod(
             "getPrivateString",
-            WrappedTypeReference("std::string"),
+            WrappedType("std::string"),
             false,
             MethodType.METHOD
         )
         val setPrivateString = WrappedMethod(
             "setPrivateString",
-            WrappedTypeReference("void"),
+            WrappedType("void"),
             false,
             MethodType.METHOD
         ).also {
             it.children.addAll(
-                listOf(WrappedArgument("value", WrappedTypeReference("std::string"))),
+                listOf(WrappedArgument("value", WrappedType("std::string"))),
             )
         }
         val appendText = WrappedMethod(
             "appendText",
-            WrappedTypeReference("void"),
+            WrappedType("void"),
             false,
             MethodType.METHOD
         ).also {
@@ -1445,18 +1488,82 @@ object TestData {
                 ),
             )
         }
-        val cls = WrappedClass(
-            "TestLib::OtherClass",
-        ).also {
-            it.children.addAll(
-                listOf(
-                    constructor,
-                    destructor,
-                    getPrivateString,
-                    setPrivateString,
-                    appendText
+        val copies = WrappedMethod(
+            "copies",
+            pointerTo(
+                WrappedTemplateType(
+                    WrappedType("TestLib::MyPair"),
+                    listOf(pointerTo(WrappedType("TestLib::OtherClass")))
                 )
-            )
-        }
+            ),
+            false,
+            MethodType.METHOD
+        )
+        val ints = WrappedMethod(
+            "ints",
+            pointerTo(
+                WrappedTemplateType(
+                    WrappedType("TestLib::MyPair"),
+                    listOf(WrappedType("int"))
+                )
+            ),
+            false,
+            MethodType.METHOD
+        )
+        val cls =
+            WrappedClass(
+                "OtherClass",
+            ).also {
+                TestLib.children.add(it)
+                it.parent = TestLib
+                it.children.addAll(
+                    listOf(
+                        constructor,
+                        destructor,
+                        getPrivateString,
+                        setPrivateString,
+                        appendText,
+                        copies,
+                        ints
+                    )
+                )
+            }
+    }
+
+    val MyPair = MyPairClass()
+
+    inner class MyPairClass {
+        val type = WrappedType("TestLib::MyPair")
+        val templateParam = WrappedTemplateParam("T", null)
+        val aprop = WrappedField("a", WrappedTemplateRef(templateParam))
+        val bprop = WrappedField("b", WrappedTemplateRef(templateParam))
+        val constructor =
+            WrappedConstructor("TestLib::MyPair", type).also {
+                it.children.addAll(
+                    listOf(
+                        WrappedArgument("first", WrappedTemplateRef(templateParam)),
+                        WrappedArgument("second", WrappedTemplateRef(templateParam))
+                    )
+                )
+            }
+        val max = WrappedMethod(
+            "getMax",
+            WrappedTemplateRef(templateParam),
+            false
+        )
+        val template =
+            WrappedTemplate("MyPair").also {
+                TestLib.children.add(it)
+                it.parent = TestLib
+                it.children.addAll(
+                    listOf(
+                        templateParam,
+                        aprop,
+                        bprop,
+                        constructor,
+                        max
+                    )
+                )
+            }
     }
 }

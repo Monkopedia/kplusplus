@@ -6,7 +6,9 @@ import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedType
+import com.monkopedia.krapper.generator.model.WrappedTypedef
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.type.WrappedType
 
 typealias TypeMapping = (WrappedType) -> MapResult<out WrappedType>
 
@@ -44,6 +46,32 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
         }
     }
     when (element) {
+        is WrappedTemplateType -> {
+            val baseType = when (val result = map(element.baseType, typeMapper)) {
+                RemoveElement -> return RemoveElement
+                ElementUnchanged -> element.baseType
+                is ReplaceWith -> {
+                    needsMutation = true
+                    result.replacement
+                }
+            }
+            val arguments = element.templateArgs.mapNotNull {
+                when (val result = map(it, typeMapper)) {
+                    RemoveElement -> null
+                    ElementUnchanged -> it
+                    is ReplaceWith -> {
+                        needsMutation = true
+                        result.replacement
+                    }
+                }
+            }
+            return if (needsMutation) ReplaceWith(
+                WrappedTemplateType(
+                    baseType,
+                    arguments
+                ) as T
+            ) else ElementUnchanged
+        }
         is WrappedType -> {
             return element.mapped() as MapResult<out T>
         }
@@ -76,6 +104,23 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                 }
             return if (needsMutation) ReplaceWith(
                 WrappedBase(mappedType).also {
+                    it.children.clear()
+                    it.children.addAll(resolvedChildren)
+                    it.parent = element.parent
+                } as T
+            ) else ElementUnchanged
+        }
+        is WrappedTypedef -> {
+            val mappedType = when (val result = map(element.targetType, typeMapper)) {
+                RemoveElement -> return RemoveElement
+                ElementUnchanged -> element.targetType
+                is ReplaceWith -> {
+                    needsMutation = true
+                    result.replacement
+                }
+            }
+            return if (needsMutation) ReplaceWith(
+                WrappedTypedef(element.name, mappedType).also {
                     it.children.clear()
                     it.children.addAll(resolvedChildren)
                     it.parent = element.parent

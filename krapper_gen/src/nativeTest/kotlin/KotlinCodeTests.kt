@@ -25,7 +25,7 @@ import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedConstructor
 import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -88,7 +88,7 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "Constructable",
-                            WrappedTypeReference("TestLib::Constructable"),
+                            WrappedType("TestLib::Constructable"),
                             false,
                             MethodType.CONSTRUCTOR
                         )
@@ -122,11 +122,11 @@ class KotlinCodeTests {
                     listOf(
                         WrappedConstructor(
                             "Constructable",
-                            WrappedTypeReference("TestLib::Constructable"),
+                            WrappedType("TestLib::Constructable"),
                         ),
                         WrappedDestructor(
                             "Constructable",
-                            WrappedTypeReference("TestLib::Constructable"),
+                            WrappedType("TestLib::Constructable"),
                         )
                     )
                 )
@@ -158,15 +158,15 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "setSome",
-                            WrappedTypeReference.VOID,
+                            WrappedType.VOID,
                             false,
                             MethodType.METHOD
                         ).also {
                             it.children.addAll(
                                 listOf(
-                                    WrappedArgument("a", WrappedTypeReference("int")),
-                                    WrappedArgument("b", WrappedTypeReference("long")),
-                                    WrappedArgument("c", WrappedTypeReference("long long"))
+                                    WrappedArgument("a", WrappedType("int")),
+                                    WrappedArgument("b", WrappedType("long")),
+                                    WrappedArgument("c", WrappedType("long long"))
                                 ),
                             )
                         }
@@ -196,15 +196,15 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "setPointers",
-                            WrappedTypeReference.VOID,
+                            WrappedType.VOID,
                             false,
                             MethodType.METHOD
                         ).also { m ->
                             m.children.addAll(
                                 listOf(
-                                    WrappedArgument("a", WrappedTypeReference("int*")),
-                                    WrappedArgument("b", WrappedTypeReference("long*")),
-                                    WrappedArgument("c", WrappedTypeReference("long long*"))
+                                    WrappedArgument("a", WrappedType("int*")),
+                                    WrappedArgument("b", WrappedType("long*")),
+                                    WrappedArgument("c", WrappedType("long long*"))
                                 ),
                             )
                         }
@@ -234,7 +234,7 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "sum",
-                            WrappedTypeReference("long"),
+                            WrappedType("long"),
                             false,
                             MethodType.METHOD
                         )
@@ -264,13 +264,13 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "at",
-                            WrappedTypeReference("std::string"),
+                            WrappedType("std::string"),
                             false,
                             MethodType.METHOD
                         ).also {
                             it.children.addAll(
                                 listOf(
-                                    WrappedArgument("pos", WrappedTypeReference("size_t")),
+                                    WrappedArgument("pos", WrappedType("size_t")),
                                 ),
                             )
                         }
@@ -303,7 +303,7 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "setPrivateFrom",
-                            WrappedTypeReference.VOID,
+                            WrappedType.VOID,
                             false,
                             MethodType.METHOD
                         ).also {
@@ -311,7 +311,7 @@ class KotlinCodeTests {
                                 listOf(
                                     WrappedArgument(
                                         "other",
-                                        WrappedTypeReference("TestLib::OtherClass")
+                                        WrappedType("TestLib::OtherClass")
                                     ),
                                 ),
                             )
@@ -342,7 +342,7 @@ class KotlinCodeTests {
                     listOf(
                         WrappedMethod(
                             "setPrivateFrom",
-                            WrappedTypeReference.VOID,
+                            WrappedType.VOID,
 
                             false,
                             MethodType.METHOD
@@ -351,7 +351,7 @@ class KotlinCodeTests {
                                 listOf(
                                     WrappedArgument(
                                         "other",
-                                        WrappedTypeReference("TestLib::OtherClass")
+                                        WrappedType("TestLib::OtherClass")
                                     ),
                                 ),
                             )

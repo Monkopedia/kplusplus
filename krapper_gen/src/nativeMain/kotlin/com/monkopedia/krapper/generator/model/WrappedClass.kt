@@ -23,6 +23,8 @@ import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -36,20 +38,23 @@ private val CValue<CXCursor>.fileParent: CXFile?
 class WrappedBase(val type: WrappedType?) : WrappedElement()
 
 class WrappedClass(
-    val name: String
+    val name: String,
+    val specifiedType: WrappedType? = null
 ) : WrappedElement() {
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
 
     val type: WrappedType
-        get() = WrappedTypeReference(qualified)
+        get() = specifiedType ?: WrappedType(qualified)
 
-    private val WrappedElement.qualified: String
-        get() = parent?.qualified?.plus("::$named") ?: named ?: toString()
+    private val qualified: String
+        get() = withParents.mapNotNull { it.named }.joinToString("::")
+    private val WrappedElement.withParents: List<WrappedElement>
+        get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents)) ?: listOf(this@withParents)
     private val WrappedElement.named: String?
         get() = when (this) {
-            is WrappedClass -> name
-            is WrappedNamespace -> namespace
+            is WrappedClass -> this@named.name
+            is WrappedNamespace -> this@named.namespace
             else -> null
         }
 
@@ -58,10 +63,14 @@ class WrappedClass(
     )
 
     override fun clone(): WrappedClass {
-        return WrappedClass(name).also {
+        return WrappedClass(name, specifiedType).also {
             it.parent = parent
             it.children.addAll(children)
         }
+    }
+
+    override fun toString(): String {
+        return "cls($name)"
     }
 
 //    constructor(name: String, children: List<WrappedElement>, resolverBuilder: ResolverBuilder)
@@ -120,10 +129,10 @@ private fun List<CValue<CXCursor>>.findFields(
 
 private fun List<CValue<CXCursor>>.findBaseClass(
     resolverBuilder: ResolverBuilder
-): WrappedTypeReference? {
+): WrappedType? {
     return find {
         it.kind == CXCursorKind.CXCursor_CXXBaseSpecifier
     }?.let {
-        WrappedTypeReference(it.type, resolverBuilder)
+        WrappedType(it.type, resolverBuilder)
     }
 }

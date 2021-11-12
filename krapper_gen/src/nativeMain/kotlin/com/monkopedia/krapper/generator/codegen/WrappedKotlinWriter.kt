@@ -62,16 +62,16 @@ import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.isArray
-import com.monkopedia.krapper.generator.model.isConst
-import com.monkopedia.krapper.generator.model.isPointer
-import com.monkopedia.krapper.generator.model.isReference
-import com.monkopedia.krapper.generator.model.isString
-import com.monkopedia.krapper.generator.model.kotlinType
+import com.monkopedia.krapper.generator.model.type.isArray
+import com.monkopedia.krapper.generator.model.type.isConst
+import com.monkopedia.krapper.generator.model.type.isPointer
+import com.monkopedia.krapper.generator.model.type.isReference
+import com.monkopedia.krapper.generator.model.type.isString
+import com.monkopedia.krapper.generator.model.type.kotlinType
 import com.monkopedia.krapper.generator.model.nullable
-import com.monkopedia.krapper.generator.model.pointed
+import com.monkopedia.krapper.generator.model.type.pointed
 import com.monkopedia.krapper.generator.model.typedWith
 
 

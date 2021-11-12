@@ -34,16 +34,18 @@ object Utils {
     data class CursorTreeInfo(
         val spelling: String?,
         val type: String?,
+        val usr: String?,
         val kind: CXCursorKind,
-        val prettyPrint: String,
+//        val prettyPrint: String,
         val children: List<CursorTreeInfo>,
     ) {
         constructor(cursor: CValue<CXCursor>): this(
             cursor.spelling.toKString() ?: "UKN",
             cursor.type.spelling.toKString() ?: "UKN",
+            cursor.usr.toKString() ?: "NOUSR",
             cursor.kind,
-            cursor.prettyPrinted.toKString() ?: "NOINFO",
-            cursor.filterChildren { true }.map { CursorTreeInfo(it) }
+//            cursor.prettyPrinted.toKString() ?: "NOINFO",
+            cursor.mapChildren { CursorTreeInfo(it) }
         )
     }
 }

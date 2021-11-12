@@ -17,15 +17,15 @@ package com.monkopedia.krapper.generator
 
 import clang.CXType
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedTemplateType
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import kotlinx.cinterop.CValue
 
 private typealias WrappedClassFactory =
-    (ResolverBuilder, Array<WrappedTypeReference>) -> WrappedClass
+    (ResolverBuilder, Array<WrappedType>) -> WrappedClass
 
 object StdPopulator {
-    val template = WrappedTemplateType("T")
+//    val template = WrappedTemplateRef("T")
 
     private val wrappedClassGen: Map<String, WrappedClassFactory> =
         mapOf(
@@ -52,10 +52,10 @@ object StdPopulator {
         extractTypes(type, resolverBuilder)
     )
 
-    fun maybePopulate(cls: WrappedTypeReference, resolverBuilder: ResolverBuilder): WrappedClass? {
-        return wrappedClassGen[baseName(cls.name)]?.invoke(
+    fun maybePopulate(cls: WrappedType, resolverBuilder: ResolverBuilder): WrappedClass? {
+        return wrappedClassGen[baseName(cls.toString())]?.invoke(
             resolverBuilder,
-            extractTypes(cls.name, resolverBuilder)
+            extractTypes(cls.toString(), resolverBuilder)
         )
     }
 
@@ -64,21 +64,21 @@ object StdPopulator {
     private fun extractTypes(
         type: String,
         resolverBuilder: ResolverBuilder
-    ): Array<WrappedTypeReference> {
+    ): Array<WrappedType> {
         if (!type.contains("<")) return emptyArray()
         val startIndex = type.indexOf('<')
         val endIndex = type.indexOf('>')
         return type.substring(startIndex + 1, endIndex).split(",").map {
-            WrappedTypeReference(it)
+            WrappedType(it)
         }.toTypedArray().also { println("Extracted $type as ${it.toList()}") }
     }
 
     private fun extractTypes(
         type: CValue<CXType>,
         resolverBuilder: ResolverBuilder
-    ): Array<WrappedTypeReference> {
+    ): Array<WrappedType> {
         return Array(type.numTemplateArguments.coerceAtLeast(0)) {
-            WrappedTypeReference(type.getTemplateArgumentKind(it.toUInt()), resolverBuilder)
+            WrappedType(type.getTemplateArgumentType(it.toUInt()), resolverBuilder)
         }.also { println("Extracted ${type.spelling.toKString()} as ${it.toList()}") }
     }
 
@@ -525,8 +525,8 @@ object StdPopulator {
 //            println("Declaring ${it.fullyQualified}")
 //        }
 //    }
-
-    private fun ResolverBuilder.type(s: String): WrappedTypeReference {
-        return WrappedTypeReference(s).also { visit(it) }
-    }
+//
+//    private fun ResolverBuilder.type(s: String): WrappedType {
+//        return WrappedTypeReference(s).also { visit(it) }
+//    }
 }

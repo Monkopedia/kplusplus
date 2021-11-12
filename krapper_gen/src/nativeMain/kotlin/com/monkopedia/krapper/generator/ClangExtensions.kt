@@ -507,7 +507,7 @@ inline val CValue<CXType>.classType: CValue<CXType>
 inline val CValue<CXType>.numTemplateArguments: Int
     get() = clang_Type_getNumTemplateArguments(this)
 
-inline fun CValue<CXType>.getTemplateArgumentKind(index: UInt) =
+inline fun CValue<CXType>.getTemplateArgumentType(index: UInt) =
     clang_Type_getTemplateArgumentAsType(this, index)
 
 inline val CValue<CXType>.refQualifier: CXRefQualifierKind

@@ -17,6 +17,17 @@ package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUES_REF
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.isConst
+import com.monkopedia.krapper.generator.model.type.isNative
+import com.monkopedia.krapper.generator.model.type.isPointer
+import com.monkopedia.krapper.generator.model.type.isReference
+import com.monkopedia.krapper.generator.model.type.isString
+import com.monkopedia.krapper.generator.model.type.pointed
+import com.monkopedia.krapper.generator.model.type.unconst
+import com.monkopedia.krapper.generator.model.type.unreferenced
 
 interface WrappedKotlinType {
     val isWrapper: Boolean
@@ -74,9 +85,15 @@ private val pointerTypeMap = mapOf(
 fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(type)
 
 fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
+    if (type is WrappedTemplateType) {
+        return WrappedKotlinType(WrappedKotlinType(type.baseType).pkg + "." + (listOf(type.baseType) + type.templateArgs).joinToString("__") {
+            WrappedKotlinType(it).name.trimEnd('?')
+        })
+    }
+    if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     if (type.isString) return fullyQualifiedType("String?")
     if (type.isPointer) {
-        if (type == WrappedTypeReference.VOID) {
+        if (type == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
         }
         if (type.pointed.isNative) {
@@ -96,7 +113,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     if (type.isConst) {
         return WrappedKotlinType(type.unconst)
     }
-    if (type.isNative || type.unconst.name == "long double") {
+    if (type.isNative || type == WrappedType.LONG_DOUBLE) {
         return fullyQualifiedType(typeMap[type.toString()] ?: type.toString())
     }
     val name = type.toString()

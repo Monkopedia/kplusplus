@@ -8,6 +8,7 @@ import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.forEach
 import com.monkopedia.krapper.generator.hash
 import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -30,7 +31,18 @@ open class WrappedElement(
 
     companion object {
         fun map(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
+            val element = fetchElement(value, resolverBuilder)  ?: return null
+            value.forEach { child ->
+                map(child, resolverBuilder)?.let { mappedChild ->
+                    element.children.add(mappedChild)
+                    mappedChild.parent = mappedChild.parent ?: element
+                }
+            }
+            return element
+        }
+        private fun fetchElement(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
             val strTag = value.usr.toKString() ?: "${value.spelling.toKString()}:${value.hash}"
+
             elementLookup[strTag]?.let { return it }
 
             if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate) {
@@ -52,13 +64,16 @@ open class WrappedElement(
                     value.spelling.toKString() ?: error("Namespace without name")
                 )
                 CXCursorKind.CXCursor_Constructor -> WrappedConstructor(
-                    value.spelling.toKString() ?: "constructor", WrappedTypeReference.VOID
+                    value.spelling.toKString() ?: "constructor", WrappedType.VOID
                 )
                 CXCursorKind.CXCursor_Destructor -> WrappedConstructor(
-                    value.spelling.toKString() ?: "constructor", WrappedTypeReference.VOID
+                    value.spelling.toKString() ?: "constructor", WrappedType.VOID
                 )
 //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
-                CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(value, resolverBuilder)
+                CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
+                    value,
+                    resolverBuilder
+                )
 //                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
 //                CXCursorKind.CXCursor_TemplateTemplateParameter -> TODO()
                 CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
@@ -66,12 +81,12 @@ open class WrappedElement(
 //                CXCursorKind.CXCursor_TypeAliasDecl -> TODO()
 //                CXCursorKind.CXCursor_TypeRef -> TODO()
                 CXCursorKind.CXCursor_CXXBaseSpecifier -> WrappedBase(
-                    WrappedTypeReference(
+                    WrappedType(
                         value.type,
                         resolverBuilder
                     )
                 )
-                CXCursorKind.CXCursor_TemplateRef -> WrappedTypeReference(
+                CXCursorKind.CXCursor_TemplateRef -> WrappedType(
                     value.type,
                     resolverBuilder
                 )
@@ -79,14 +94,6 @@ open class WrappedElement(
                 else -> return null
             }
             elementLookup[strTag] = element
-            value.forEach { child ->
-                val strTag = value.usr.toKString() ?: "${value.spelling.toKString()}:${value.hash}"
-                if (elementLookup.containsKey(strTag)) return@forEach
-                map(child, resolverBuilder)?.let { mappedChild ->
-                    element.children.add(mappedChild)
-                    mappedChild.parent = element
-                }
-            }
             return element
         }
     }
@@ -99,13 +106,23 @@ fun WrappedElement.forEachRecursive(onEach: (WrappedElement) -> Unit) {
     }
 }
 
-fun WrappedElement.filterRecursive(onEach: (WrappedElement) -> Boolean): List<WrappedElement> {
-    val ret = mutableListOf<WrappedElement>()
+fun WrappedElement.filterRecursive(
+    ret: MutableList<WrappedElement> = mutableListOf(),
+    onEach: (WrappedElement) -> Boolean
+): List<WrappedElement> {
     for (child in children) {
         if (onEach(child)) {
             ret.add(child)
         }
-        child.filterRecursive(onEach)
+        child.filterRecursive(ret, onEach)
     }
     return ret
+}
+
+fun <T : WrappedElement> T.cloneRecursive(): T {
+    return clone().also {
+        val newChildren = it.children.map { it.cloneRecursive() }
+        it.children.clear()
+        it.children.addAll(newChildren)
+    } as T
 }

@@ -17,6 +17,8 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
@@ -33,7 +35,7 @@ data class WrappedField(
 
     constructor(field: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         field.referenced.spelling.toKString() ?: error("Can't find name for $field"),
-        WrappedTypeReference(field.type, resolverBuilder)
+        WrappedType(field.type, resolverBuilder)
     )
 
     override fun clone(): WrappedElement {

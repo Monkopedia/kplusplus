@@ -67,6 +67,10 @@ class CppHeaderTests {
 
     private val TESTLIB_OTHERCLASS_APPEND_TEXT =
         "void TestLib_OtherClass_append_text(void* thiz, void* text);\n\n"
+    private val TESTLIB_OTHERCLASS_COPIES =
+        "void* TestLib_OtherClass_copies(void* thiz);\n\n"
+    private val TESTLIB_OTHERCLASS_INTS =
+        "void* TestLib_OtherClass_ints(void* thiz);\n\n"
 
     private val TESTLIB_TESTCLASS_B =
         "bool TestLib_TestClass_b_get(void* thiz);\n\n" +
@@ -315,7 +319,7 @@ class CppHeaderTests {
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.pushBack,
+        target = TestData.Vector.cls.children[3] as WrappedMethod,
         expected = STD_VECTOR_STRING_PUSH_BACK,
     )
 
@@ -352,6 +356,20 @@ class CppHeaderTests {
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.appendText,
         expected = TESTLIB_OTHERCLASS_APPEND_TEXT,
+    )
+
+    @Test
+    fun testOtherClass_copies() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.copies,
+        expected = TESTLIB_OTHERCLASS_COPIES,
+    )
+
+    @Test
+    fun testOtherClass_ints() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.ints,
+        expected = TESTLIB_OTHERCLASS_INTS,
     )
 
     @Test
@@ -892,6 +910,7 @@ class CppHeaderTests {
 }
 
 fun assertCode(expected: String, actual: String) {
+    println("Checking code:\n$actual")
     assertCodeInner(expected.trim(), actual.trim())
 }
 

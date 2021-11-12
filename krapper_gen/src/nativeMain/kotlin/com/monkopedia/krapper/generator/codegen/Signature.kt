@@ -26,14 +26,16 @@ import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.WrappedType
-import com.monkopedia.krapper.generator.model.WrappedType.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.isArray
-import com.monkopedia.krapper.generator.model.isNative
-import com.monkopedia.krapper.generator.model.isPointer
-import com.monkopedia.krapper.generator.model.isReturnable
-import com.monkopedia.krapper.generator.model.unreferenced
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.isArray
+import com.monkopedia.krapper.generator.model.type.isNative
+import com.monkopedia.krapper.generator.model.type.isPointer
+import com.monkopedia.krapper.generator.model.type.isReference
+import com.monkopedia.krapper.generator.model.type.isReturnable
+import com.monkopedia.krapper.generator.model.type.unreferenced
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
 private const val BEFORE_UPPER_AND_LOWER = "(?<=\\p{L})(?=\\p{Lu}\\p{Ll})"
@@ -96,7 +98,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
         )
         else null
     ) + method.args.map {
-        val type = it.type.unreferenced
+        val type = if (it.type.isReference) it.type.unreferenced else it.type
         if (type.isPointer || type.isNative) {
             WrapperArgument(it, type, define(it.name, type.cType), false)
         } else {
@@ -127,7 +129,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
     name = field.uniqueCGetter
     retType =
         if (field.type.isReturnable) functionBuilder.type(field.type.cType)
-        else functionBuilder.type(WrappedTypeReference("void"))
+        else functionBuilder.type(VOID)
     val thiz = WrapperArgument(null, pointerTo(type), define("thiz", pointerTo(type).cType), true)
     return listOfNotNull(
         thiz,
@@ -150,9 +152,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldSet(
         throw UnsupportedOperationException("Arrays are not supported")
     }
     name = field.uniqueCSetter
-    retType = functionBuilder.type(
-        WrappedTypeReference("void")
-    )
+    retType = functionBuilder.type(VOID)
     val thiz = WrapperArgument(null, pointerTo(type), define("thiz", pointerTo(type).cType), true)
     val type = field.type
     val value = if (type.isPointer || type.isReturnable) {

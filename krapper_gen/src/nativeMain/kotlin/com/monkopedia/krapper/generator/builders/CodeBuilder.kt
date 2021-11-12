@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType
 
 interface Symbol {
 

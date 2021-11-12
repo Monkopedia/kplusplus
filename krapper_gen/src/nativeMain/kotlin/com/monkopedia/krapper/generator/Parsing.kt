@@ -30,9 +30,14 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedTU
-import com.monkopedia.krapper.generator.model.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.cloneRecursive
 import com.monkopedia.krapper.generator.model.filterRecursive
 import com.monkopedia.krapper.generator.model.forEachRecursive
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.MemScope
@@ -43,6 +48,8 @@ import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.toKStringFromUtf8
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import platform.posix.EOF
 import platform.posix.close
 import platform.posix.getenv
@@ -119,21 +126,49 @@ fun find(s: String): String? {
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
 val INCLUDE_PATHS = generateIncludes()
 
-private class ParsedResolver(private val tu: WrappedTU) :
+class ParsedResolver(val tu: WrappedTU) :
     Resolver {
     private val classMap = mutableMapOf<String, WrappedClass>()
+    private val templateMap = mutableMapOf<String, WrappedTemplate>()
 
-    override fun resolve(fullyQualified: String): WrappedClass {
-        return classMap.getOrPut(fullyQualified) {
-            tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == fullyQualified }
-                .singleOrNull() as? WrappedClass ?: error("Can't resolve $fullyQualified")
+    override fun resolveTemplate(type: WrappedType): WrappedTemplate {
+        return templateMap.getOrPut(type.toString()) {
+            val templateCandidates = tu.filterRecursive {
+                if (it is WrappedTemplate) {
+                    println("Checking template ${it.qualified} againsts $type")
+                }
+                ((it as? WrappedTemplate)?.qualified == type.toString()).also {
+                    println("Return $it")
+                }
+            }
+            println("Candidates $templateCandidates for $type")
+            templateCandidates.singleOrNull() as? WrappedTemplate
+                ?: error("Can't resolve template $type")
+        }
+    }
+
+    override fun resolve(type: WrappedType): WrappedClass {
+        return classMap.getOrPut(type.toString()) {
+            when (type) {
+                is WrappedTemplateType -> {
+                    val template = resolveTemplate(type.baseType)
+                    template.typedAs(type)
+                }
+                is WrappedTemplateRef -> {
+                    throw IllegalArgumentException("Can't resolve $type since it is templated")
+                }
+                else -> {
+                    tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == type.toString() }
+                        .singleOrNull() as? WrappedClass
+                        ?: error("Can't resolve $type (${type::class.qualifiedName})")
+                }
+            }
         }
     }
 
     override fun findClasses(filter: ClassFilter): List<WrappedClass> {
         return mutableListOf<WrappedClass>().also { ret ->
             tu.forEachRecursive {
-                println("Foreach $it")
                 if ((it as? WrappedClass)?.filter() == true) {
                     ret.add(it)
                 }
@@ -179,8 +214,8 @@ private class ResolverBuilderImpl : ResolverBuilder {
         }
     }
 
-    override fun visit(type: WrappedTypeReference) {
-        val strType = type.name
+    override fun visit(type: WrappedType) {
+        val strType = type.toString()
 //        if (!seenNames.add(strType)) return
 
         classes.add(
@@ -193,14 +228,15 @@ fun MemScope.parseHeader(
     index: CXIndex,
     file: List<String>,
     args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
-        .toTypedArray()
+        .toTypedArray(),
+    debug: Boolean = false
 ): Resolver {
     val builder = ResolverBuilderImpl()
-    val tu = file.map { parseHeader(index, it, builder, args) }
+    val tu = file.map { parseHeader(index, it, builder, args, debug) }
         .reduceRight { tu1, tu2 ->
             tu1 + tu2
         }
-    println("Reduced $tu")
+    println("Reduced ${tu.children}")
     return ParsedResolver(tu)
 }
 
@@ -210,6 +246,7 @@ private fun MemScope.parseHeader(
     resolverBuilder: ResolverBuilder,
     args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
         .toTypedArray(),
+    debug: Boolean = false
 ): WrappedTU {
     val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
     tu.printDiagnostics()
@@ -217,6 +254,12 @@ private fun MemScope.parseHeader(
         tu.dispose()
     }
     val cursor = tu.cursor
+    if (debug) {
+        File(
+            File("/tmp"),
+            "cursor_${File(file).name}.json"
+        ).writeText(Json.encodeToString(Utils.CursorTreeInfo(cursor)))
+    }
 //    val classes = cursor.filterChildrenRecursive {
 //        it.kind == CXCursorKind.CXCursor_ClassDecl
 //    }.map { WrappedClass(it, resolverBuilder) }
@@ -253,5 +296,39 @@ fun CXTranslationUnit.printDiagnostics() {
     }
     if (foundError) {
         throw RuntimeException("Found errors parsing")
+    }
+}
+
+fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
+    val templates =
+        filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
+    val mapping = templates.mapIndexedNotNull { index, t ->
+        when {
+            index < type.templateArgs.size -> t to type.templateArgs[index]
+            t.defaultType != null -> t to t.defaultType
+            else -> null
+        }
+    }.toMap()
+    val outputClass =
+        WrappedClass(name, type)
+    outputClass.parent = parent
+    outputClass.children.addAll(children.map { it.cloneRecursive() })
+    return when (
+        val result = map(outputClass) { type ->
+            if (type is WrappedTemplateRef) {
+                val mapping = mapping[type.target]
+                if (mapping != null) {
+                    ReplaceWith(mapping)
+                } else {
+                    RemoveElement
+                }
+            } else {
+                ElementUnchanged
+            }
+        }
+    ) {
+        RemoveElement -> throw IllegalArgumentException("Can't map $outputClass")
+        ElementUnchanged -> outputClass
+        is ReplaceWith -> result.replacement
     }
 }

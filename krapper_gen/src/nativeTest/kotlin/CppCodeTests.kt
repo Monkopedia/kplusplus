@@ -71,7 +71,7 @@ class CppCodeTests {
         const char* TestLib_OtherClass_get_private_string(void* thiz) {
             TestLib::OtherClass* thiz_cast = reinterpret_cast<TestLib::OtherClass*>(thiz);
             std::string ret_value = thiz_cast->getPrivateString();
-            char * ret_value_cast = new char[ret_value.length() + 1];
+            char* ret_value_cast = new char[ret_value.length() + 1];
             ret_value.copy(ret_value_cast, ret_value.length(), 0);
             return ret_value_cast;
         }
@@ -90,10 +90,22 @@ class CppCodeTests {
             thiz_cast->appendText(*(text_cast));
         }
     """.trimIndent()
+    private val TESTLIB_OTHERCLASS_COPIES = """
+        void* TestLib_OtherClass_copies(void* thiz) {
+            TestLib::OtherClass* thiz_cast = reinterpret_cast<TestLib::OtherClass*>(thiz);
+            return thiz_cast->copies();
+        }
+    """.trimIndent()
+    private val TESTLIB_OTHERCLASS_INTS = """
+        void* TestLib_OtherClass_ints(void* thiz) {
+            TestLib::OtherClass* thiz_cast = reinterpret_cast<TestLib::OtherClass*>(thiz);
+            return thiz_cast->ints();
+        }
+    """.trimIndent()
     private val TESTLIB_TESTCLASS_SET_PRIVATE_FROM = """
         void TestLib_TestClass_set_private_from(void* thiz, void* value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
-            TestLib::OtherClass * value_cast = reinterpret_cast<TestLib::OtherClass *>(value);
+            TestLib::OtherClass* value_cast = reinterpret_cast<TestLib::OtherClass*>(value);
             thiz_cast->setPrivateFrom(value_cast);
         }
 
@@ -162,7 +174,7 @@ class CppCodeTests {
         const char* TestLib_TestClass_str_get(void* thiz) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             std::string ret_value = thiz_cast->str;
-            char * ret_value_cast = new char[ret_value.length() + 1];
+            char* ret_value_cast = new char[ret_value.length() + 1];
             ret_value.copy(ret_value_cast, ret_value.length(), 0);
             return ret_value_cast;
         }
@@ -719,7 +731,7 @@ class CppCodeTests {
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.pushBack,
+        target = TestData.Vector.cls.children[3] as WrappedMethod,
         expected = STD_VECTOR_STRING_PUSH_BACK,
     )
 
@@ -756,6 +768,20 @@ class CppCodeTests {
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.appendText,
         expected = TESTLIB_OTHERCLASS_APPEND_TEXT,
+    )
+
+    @Test
+    fun testOtherClass_copies() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.copies,
+        expected = TESTLIB_OTHERCLASS_COPIES,
+    )
+
+    @Test
+    fun testOtherClass_ints() = runTest(
+        cls = TestData.OtherClass.cls,
+        target = TestData.OtherClass.ints,
+        expected = TESTLIB_OTHERCLASS_INTS,
     )
 
     @Test
