@@ -37,17 +37,21 @@ interface Resolver {
     fun resolve(type: WrappedType): WrappedClass
     fun resolveTemplate(type: WrappedType): WrappedTemplate
     fun findClasses(filter: ClassFilter): List<WrappedClass>
+    fun startCapture()
+    fun endCapture(): List<WrappedClass>
 }
 
 interface ResolverBuilder {
     fun visit(type: CValue<CXType>): CValue<CXType>
-    fun visit(type: WrappedType)
 }
 
 fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): List<WrappedClass> {
     val classMap = associate { it.type.toString() to it }.toMutableMap()
     val mapper = typeMapper(classMap, resolver, policy)
-    return mapAll(mapper)
+    resolver.startCapture()
+    val list = mapAll(mapper)
+    val extras = resolver.endCapture()
+    return list + extras
 }
 
 fun resolveAll(
@@ -105,9 +109,14 @@ fun typeMapper(
                         classMap[cls.name] = cls
                         classMap[cls.name] = resolveAll(cls, classMap, resolver, policy)
                             ?: error("Couldn't include ${cls.name}, resolve failed")
-                    } catch (_: Throwable) {
-                        // Its ok to not have a class if this reference points at a template.
-                        resolver.resolveTemplate(it)
+                    } catch (original: Throwable) {
+                        try {
+                            // Its ok to not have a class if this reference points at a template.
+                            resolver.resolveTemplate(it)
+                        } catch (template: Throwable) {
+                            template.printStackTrace()
+                            throw original
+                        }
                     }
                 }
                 ElementUnchanged
@@ -136,7 +145,9 @@ private inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult
     return typeHandler(this)
 }
 
-private inline fun MapResult<out WrappedType>.wrapOnReplace(typeWrapping: (WrappedType) -> WrappedType): MapResult<out WrappedType> {
+private inline fun MapResult<out WrappedType>.wrapOnReplace(
+    typeWrapping: (WrappedType) -> WrappedType
+): MapResult<out WrappedType> {
     return when (this) {
         is ReplaceWith -> ReplaceWith(typeWrapping(replacement))
         RemoveElement -> this

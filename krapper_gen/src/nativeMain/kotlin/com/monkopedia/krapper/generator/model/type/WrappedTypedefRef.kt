@@ -1,12 +1,10 @@
 package com.monkopedia.krapper.generator.model.type
 
-import com.monkopedia.krapper.generator.model.WrappedTypedef
-
-class WrappedTypedefRef(val target: WrappedTypedef) : WrappedType() {
+class WrappedTypedefRef(val usr: String) : WrappedType() {
     override val cType: WrappedType
-        get() = target.targetType.cType
+        get() = error("Cannot convert typedef($usr) to cType")
 
     override fun toString(): String {
-        return target.targetType.toString()
+        return "unresolved_typedef($usr)"
     }
 }

@@ -2,25 +2,29 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import clang.CXCursorKind
+import clang.CXCursorKind.Companion
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
-import com.monkopedia.krapper.generator.forEach
+import com.monkopedia.krapper.generator.forEachRecursive
+import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.hash
 import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.lexicalParent
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
+import platform.posix.usleep
 
 @ThreadLocal
 private val elementLookup = mutableMapOf<String, WrappedElement>()
 
 open class WrappedElement(
     val children: MutableList<WrappedElement> = mutableListOf()
-) : Iterable<WrappedElement> by children {
+) {
     var parent: WrappedElement? = null
 
     open fun clone(): WrappedElement {
@@ -30,20 +34,44 @@ open class WrappedElement(
     }
 
     companion object {
-        fun map(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
-            val element = fetchElement(value, resolverBuilder)  ?: return null
-            value.forEach { child ->
-                map(child, resolverBuilder)?.let { mappedChild ->
-                    element.children.add(mappedChild)
-                    mappedChild.parent = mappedChild.parent ?: element
+        fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
+            val element = map(value, resolverBuilder) ?: return null
+            value.forEachRecursive { child, parent ->
+                val parent = map(parent, resolverBuilder) ?: return@forEachRecursive
+                val child = map(child, resolverBuilder) ?: return@forEachRecursive
+                if (child == element) return@forEachRecursive
+                if (child.parent == parent) return@forEachRecursive
+                if (parent.children.contains(child)) {
+                    throw IllegalArgumentException("$parent already contains $child")
                 }
+                parent.children.add(child)
+                child.parent = parent
             }
             return element
         }
-        private fun fetchElement(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
+
+        private fun map(
+            value: CValue<CXCursor>,
+            resolverBuilder: ResolverBuilder
+        ): WrappedElement? {
+            return fetchElement(value, resolverBuilder)
+        }
+
+        private fun fetchElement(
+            value: CValue<CXCursor>,
+            resolverBuilder: ResolverBuilder
+        ): WrappedElement? {
             val strTag = value.usr.toKString() ?: "${value.spelling.toKString()}:${value.hash}"
 
             elementLookup[strTag]?.let { return it }
+            if (value.fullyQualified == "TestLib::MyPair") {
+                println("TestLib::MyPair ${value.kind}")
+                var parent = value.lexicalParent
+                while (parent.kind < CXCursorKind.CXCursor_FirstInvalid || parent.kind > CXCursorKind.CXCursor_LastInvalid) {
+                    println("Parent ${parent.fullyQualified} ${parent.kind}")
+                    parent = parent.lexicalParent
+                }
+            }
 
             if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate) {
                 return null

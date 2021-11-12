@@ -1005,9 +1005,9 @@ class TestDataClass {
 
     inner class VectorClass {
         val localType = WrappedType("std::vector")
-        val template = WrappedTemplateParam("_Tp", null)
+        val template = WrappedTemplateParam("_Tp", "_Tp", null)
         val type = WrappedTemplateType(localType, listOf(WrappedType("std::string")))
-        val constructor = WrappedConstructor("std::vector", WrappedTemplateType(localType, listOf(WrappedTemplateRef(template))))
+        val constructor = WrappedConstructor("std::vector", WrappedTemplateType(localType, listOf(WrappedTemplateRef(template.usr))))
         val destructor = WrappedDestructor("~std::vector", VOID)
         val pushBack =
             WrappedMethod(
@@ -1016,7 +1016,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD
             ).also {
-                it.children.add(WrappedArgument("str", WrappedTemplateRef(template)))
+                it.children.add(WrappedArgument("str", WrappedTemplateRef(template.usr)))
             }
         val tmp =
             WrappedTemplate(
@@ -1534,21 +1534,21 @@ class TestDataClass {
 
     inner class MyPairClass {
         val type = WrappedType("TestLib::MyPair")
-        val templateParam = WrappedTemplateParam("T", null)
-        val aprop = WrappedField("a", WrappedTemplateRef(templateParam))
-        val bprop = WrappedField("b", WrappedTemplateRef(templateParam))
+        val templateParam = WrappedTemplateParam("T", "T", null)
+        val aprop = WrappedField("a", WrappedTemplateRef(templateParam.usr))
+        val bprop = WrappedField("b", WrappedTemplateRef(templateParam.usr))
         val constructor =
             WrappedConstructor("TestLib::MyPair", type).also {
                 it.children.addAll(
                     listOf(
-                        WrappedArgument("first", WrappedTemplateRef(templateParam)),
-                        WrappedArgument("second", WrappedTemplateRef(templateParam))
+                        WrappedArgument("first", WrappedTemplateRef(templateParam.usr)),
+                        WrappedArgument("second", WrappedTemplateRef(templateParam.usr))
                     )
                 )
             }
         val max = WrappedMethod(
             "getMax",
-            WrappedTemplateRef(templateParam),
+            WrappedTemplateRef(templateParam.usr),
             false
         )
         val template =

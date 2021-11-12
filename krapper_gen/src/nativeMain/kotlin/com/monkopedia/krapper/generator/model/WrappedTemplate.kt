@@ -7,6 +7,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
+import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
 
@@ -87,17 +88,18 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
     }
 }
 
-class WrappedTemplateParam(val name: String, val defaultType: WrappedType?) : WrappedElement() {
+class WrappedTemplateParam(val name: String, val usr: String, val defaultType: WrappedType?) : WrappedElement() {
     constructor(
         value: CValue<CXCursor>,
         resolverBuilder: ResolverBuilder
     ) : this(
         value.spelling.toKString() ?: error("Template param without name $value"),
+        value.usr.toKString() ?: error("Template param without USR $value"),
         determineType(value, resolverBuilder)
     )
 
     override fun clone(): WrappedTemplateParam {
-        return WrappedTemplateParam(name, defaultType).also {
+        return WrappedTemplateParam(name, usr, defaultType).also {
             it.children.addAll(children)
             it.parent = parent
         }

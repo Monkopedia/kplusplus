@@ -134,21 +134,17 @@ class ParsedResolver(val tu: WrappedTU) :
     override fun resolveTemplate(type: WrappedType): WrappedTemplate {
         return templateMap.getOrPut(type.toString()) {
             val templateCandidates = tu.filterRecursive {
-                if (it is WrappedTemplate) {
-                    println("Checking template ${it.qualified} againsts $type")
-                }
-                ((it as? WrappedTemplate)?.qualified == type.toString()).also {
-                    println("Return $it")
-                }
+                ((it as? WrappedTemplate)?.qualified == type.toString())
             }
-            println("Candidates $templateCandidates for $type")
+//            println("Candidates $templateCandidates for $type")
             templateCandidates.singleOrNull() as? WrappedTemplate
-                ?: error("Can't resolve template $type")
+                ?: error("Can't resolve template $type (${type::class.simpleName})")
         }
     }
 
     override fun resolve(type: WrappedType): WrappedClass {
         return classMap.getOrPut(type.toString()) {
+            println("Resolving $type (${type::class.simpleName})")
             when (type) {
                 is WrappedTemplateType -> {
                     val template = resolveTemplate(type.baseType)
@@ -160,19 +156,31 @@ class ParsedResolver(val tu: WrappedTU) :
                 else -> {
                     tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == type.toString() }
                         .singleOrNull() as? WrappedClass
-                        ?: error("Can't resolve $type (${type::class.qualifiedName})")
+                        ?: error("Can't resolve $type (${type::class.simpleName})")
                 }
             }
         }
     }
 
+    override fun startCapture() {
+        classMap.clear()
+        templateMap.clear()
+    }
+
+    override fun endCapture(): List<WrappedClass> {
+        return classMap.values.toList()
+    }
+
     override fun findClasses(filter: ClassFilter): List<WrappedClass> {
+        println("Finding classes")
         return mutableListOf<WrappedClass>().also { ret ->
             tu.forEachRecursive {
                 if ((it as? WrappedClass)?.filter() == true) {
                     ret.add(it)
                 }
             }
+        }.also {
+            println("Found ${it.size} classes")
         }
     }
 }
@@ -203,25 +211,25 @@ private class ResolverBuilderImpl : ResolverBuilder {
                     type
                 }
                 CXCursor_TypedefDecl -> {
-                    println("Typedef ${declaration.prettyPrinted.toKString()}")
+//                    println("Typedef ${declaration.prettyPrinted.toKString()}")
                     visit(type.typeDeclaration.typedefDeclUnderlyingType)
                 }
                 else -> {
-                    println("Not sure how to handle $strType with kind ${declaration.kind}")
+//                    println("Not sure how to handle $strType with kind ${declaration.kind}")
                     type
                 }
             }
         }
     }
 
-    override fun visit(type: WrappedType) {
-        val strType = type.toString()
-//        if (!seenNames.add(strType)) return
-
-        classes.add(
-            StdPopulator.maybePopulate(type, this) ?: return
-        )
-    }
+//    override fun visit(type: WrappedType) {
+//        val strType = type.toString()
+// //        if (!seenNames.add(strType)) return
+//
+//        classes.add(
+//            StdPopulator.maybePopulate(type, this) ?: return
+//        )
+//    }
 }
 
 fun MemScope.parseHeader(
@@ -234,9 +242,13 @@ fun MemScope.parseHeader(
     val builder = ResolverBuilderImpl()
     val tu = file.map { parseHeader(index, it, builder, args, debug) }
         .reduceRight { tu1, tu2 ->
-            tu1 + tu2
+            tu1.also {
+                it.children.addAll(tu2.children.map {
+                    it.also { it.parent = tu1}
+                })
+            }
         }
-    println("Reduced ${tu.children}")
+    println("Reduced ${tu.children.size}")
     return ParsedResolver(tu)
 }
 
@@ -274,7 +286,7 @@ private fun MemScope.parseHeader(
 // //            println("Created template $it")
 //        }
 //    }
-    val element = WrappedElement.map(tu.cursor, resolverBuilder)
+    val element = WrappedElement.mapAll(tu.cursor, resolverBuilder)
     return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
 }
 
@@ -302,13 +314,19 @@ fun CXTranslationUnit.printDiagnostics() {
 fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
     val templates =
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
-    val mapping = templates.mapIndexedNotNull { index, t ->
+    val mapping = (templates.mapIndexedNotNull { index, t ->
         when {
-            index < type.templateArgs.size -> t to type.templateArgs[index]
-            t.defaultType != null -> t to t.defaultType
+            index < type.templateArgs.size -> t.name to type.templateArgs[index]
+            t.defaultType != null -> t.name to t.defaultType
             else -> null
         }
-    }.toMap()
+    } + templates.mapIndexedNotNull { index, t ->
+        when {
+            index < type.templateArgs.size -> t.usr to type.templateArgs[index]
+            t.defaultType != null -> t.usr to t.defaultType
+            else -> null
+        }
+    }).toMap()
     val outputClass =
         WrappedClass(name, type)
     outputClass.parent = parent

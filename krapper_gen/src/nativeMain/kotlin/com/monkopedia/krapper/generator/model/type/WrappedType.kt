@@ -1,18 +1,27 @@
 package com.monkopedia.krapper.generator.model.type
 
+import clang.CXCursorKind.CXCursor_ClassDecl
+import clang.CXCursorKind.CXCursor_ClassTemplate
+import clang.CXCursorKind.CXCursor_NoDeclFound
+import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
+import clang.CXTypeKind.CXType_Unexposed
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.getTemplateArgumentType
+import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.WrappedTemplateParam
-import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.typeToKotlinType
 import com.monkopedia.krapper.generator.numTemplateArguments
+import com.monkopedia.krapper.generator.pointeeType
+import com.monkopedia.krapper.generator.prettyPrinted
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
+import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
+import kotlinx.cinterop.useContents
 
 @ThreadLocal
 private val existingTypes = mutableMapOf<String, WrappedType>()
@@ -65,12 +74,15 @@ abstract class WrappedType : WrappedElement() {
             type: CValue<CXType>,
             resolverBuilder: ResolverBuilder
         ): WrappedType {
+            if (type.spelling.toKString()?.endsWith("*") == true) {
+                return pointerTo(invoke(type.pointeeType, resolverBuilder))
+            }
             if (type.numTemplateArguments > 0) {
                 val templateReference = createForType(type, resolverBuilder)
                 return WrappedTemplateType(
                     templateReference,
                     List(type.numTemplateArguments) {
-                        WrappedType(type.getTemplateArgumentType(it.toUInt()), resolverBuilder)
+                        invoke(type.getTemplateArgumentType(it.toUInt()), resolverBuilder)
                     }
                 )
             }
@@ -84,12 +96,23 @@ abstract class WrappedType : WrappedElement() {
             val type = resolverBuilder.visit(type)
             val spelling =
                 type.spelling.toKString()?.trim() ?: error("Missing spelling for type $type")
-            val referencedDecl =
-                map(type.typeDeclaration, resolverBuilder) ?: return invoke(spelling)
-            if (referencedDecl is WrappedTypedef) {
-                return WrappedTypedefRef(referencedDecl)
-            } else if (referencedDecl is WrappedTemplateParam) {
-                return WrappedTemplateRef(referencedDecl)
+            val referencedDecl = type.typeDeclaration
+            if (referencedDecl.kind == CXCursor_TypedefDecl) {
+                return WrappedTypedefRef(
+                    referencedDecl.usr.toKString() ?: error("Declaration missing usr")
+                )
+            } else if (referencedDecl.kind == CXCursor_ClassTemplate) {
+                return WrappedTemplateRef(
+                    referencedDecl.usr.toKString() ?: error("Declaration missing usr")
+                )
+            } else if (referencedDecl.kind == CXCursor_ClassDecl) {
+                return invoke(referencedDecl.fullyQualified)
+            }
+            if (type.useContents { kind } == CXType_Unexposed && referencedDecl.kind == CXCursor_NoDeclFound && !spelling.startsWith("typename ")) {
+                return WrappedTemplateRef(spelling)
+            }
+            if (spelling == "T") {
+                println("Generating T ${type.useContents { kind }} ${referencedDecl.kind}")
             }
             return invoke(spelling)
         }

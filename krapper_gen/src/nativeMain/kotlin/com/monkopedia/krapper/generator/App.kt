@@ -195,22 +195,22 @@ class KrapperGen : CliktCommand() {
 
 private val CValue<CXCursor>.templatedName: String
     get() {
-        if (numTemplateArguments != 0) {
-            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
-                when (getTemplateArgumentKind(it.toUInt())) {
-                    CXTemplateArgumentKind_Null -> "__NULL__"
-                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
-                    CXTemplateArgumentKind_Declaration -> "__DECL__"
-                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
-                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
-                    CXTemplateArgumentKind_Template -> "__TYPE__"
-                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
-                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
-                    CXTemplateArgumentKind_Pack -> "__PACK__"
-                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
-                }
-            } + ">"
-        }
+//        if (numTemplateArguments != 0) {
+//            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
+//                when (getTemplateArgumentKind(it.toUInt())) {
+//                    CXTemplateArgumentKind_Null -> "__NULL__"
+//                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
+//                    CXTemplateArgumentKind_Declaration -> "__DECL__"
+//                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
+//                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
+//                    CXTemplateArgumentKind_Template -> "__TYPE__"
+//                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
+//                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
+//                    CXTemplateArgumentKind_Pack -> "__PACK__"
+//                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
+//                }
+//            } + ">"
+//        }
         return spelling.toKString() ?: ""
     }
 val CValue<CXCursor>?.fullyQualified: String
@@ -223,13 +223,14 @@ val CValue<CXCursor>?.fullyQualified: String
             else templatedName ?: ""
         }
 
+typealias ChildVisitor = (child: CValue<CXCursor>, parent: CValue<CXCursor>) -> Unit
+
 val recurseVisitor =
     staticCFunction {
         child: CValue<CXCursor>,
-        _: CValue<CXCursor>,
+        parent: CValue<CXCursor>,
         children: clang.CXClientData? ->
-        children!!.asStableRef<(CValue<CXCursor>) -> Unit>()!!.get()!!
-            .invoke(child)
+        children!!.asStableRef<ChildVisitor>().get().invoke(child, parent)
         CXChildVisitResult.CXChildVisit_Recurse
     }
 
@@ -238,12 +239,12 @@ val visitor =
         child: CValue<CXCursor>,
         _: CValue<CXCursor>,
         children: clang.CXClientData? ->
-        children!!.asStableRef<(CValue<CXCursor>) -> Unit>()!!.get()!!
+        children!!.asStableRef<(CValue<CXCursor>) -> Unit>().get()
             .invoke(child)
         CXChildVisitResult.CXChildVisit_Continue
     }
 
-inline fun CValue<CXCursor>.forEachRecursive(noinline childHandler: (CValue<CXCursor>) -> Unit) {
+inline fun CValue<CXCursor>.forEachRecursive(noinline childHandler: ChildVisitor) {
     val ptr = StableRef.create(childHandler)
     clang_visitChildren(this, recurseVisitor, ptr.asCPointer())
 }
@@ -257,9 +258,9 @@ inline fun CValue<CXCursor>.filterChildrenRecursive(
     crossinline filter: (CValue<CXCursor>) -> Boolean
 ): List<CValue<CXCursor>> {
     return mutableListOf<CValue<CXCursor>>().also { list ->
-        forEachRecursive {
-            if (filter(it)) {
-                list.add(it)
+        forEachRecursive { child, _ ->
+            if (filter(child)) {
+                list.add(child)
             }
         }
     }
@@ -290,7 +291,9 @@ inline fun <T> CValue<CXCursor>.mapChildren(
 private val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
     get() {
         return mutableListOf<CValue<CXCursor>>().also { list ->
-            forEachRecursive(list::add)
+            forEachRecursive { child, _ ->
+                list.add(child)
+            }
         }
     }
 
