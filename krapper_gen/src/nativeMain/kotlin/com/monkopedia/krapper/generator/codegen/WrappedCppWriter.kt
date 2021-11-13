@@ -26,6 +26,7 @@ import com.monkopedia.krapper.generator.builders.ExternCOpen
 import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.builders.New
 import com.monkopedia.krapper.generator.builders.Raw
+import com.monkopedia.krapper.generator.builders.RawCast
 import com.monkopedia.krapper.generator.builders.Return
 import com.monkopedia.krapper.generator.builders.Symbol
 import com.monkopedia.krapper.generator.builders.ThrowPolicy
@@ -46,14 +47,8 @@ import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.type.isNative
-import com.monkopedia.krapper.generator.model.type.isPointer
-import com.monkopedia.krapper.generator.model.type.isReturnable
-import com.monkopedia.krapper.generator.model.type.isString
-import com.monkopedia.krapper.generator.model.type.isVoid
-import com.monkopedia.krapper.generator.model.type.pointed
 
 class WrappedCppWriter(
     private val nameHandler: NameHandler,
@@ -270,7 +265,8 @@ class WrappedCppWriter(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                reinterpret(arg.localVar, arg.targetType)
+                if (arg.targetType == LONG_DOUBLE) RawCast(arg.targetType.toString(), arg.localVar.reference)
+                    else reinterpret(arg.localVar, arg.targetType)
             )
         )
     }
@@ -315,7 +311,9 @@ class WrappedCppWriter(
     ) {
         val thizCast = createCast(args[0])
         val fetch = thizCast.pointerReference arrow Raw(field.name)
-        if (field.type.isReturnable) {
+        if (field.type.isString) {
+            +(fetch assign createStringCast(args[1]).reference)
+        } else if (field.type.isNative) {
             +(fetch assign args[1].reference)
         } else {
             val valueCast = createCast(args[1])

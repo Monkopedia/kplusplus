@@ -15,6 +15,8 @@
  */
 package com.monkopedia.krapper.generator.builders
 
+import com.monkopedia.krapper.generator.model.type.WrappedType
+
 class Reference(private val arg: LocalVar) : Symbol {
     override fun build(builder: CodeStringBuilder) {
         builder.append(arg.name)
@@ -136,5 +138,17 @@ inline infix fun Symbol.assign(other: Symbol): Symbol = Assign(this, other)
 class Raw(val content: String) : Symbol {
     override fun build(builder: CodeStringBuilder) {
         builder.append(content)
+    }
+}
+
+class RawCast(val content: String, val target: Symbol) : Symbol, SymbolContainer {
+    override val symbols: List<Symbol>
+        get() = listOf(target)
+
+    override fun build(builder: CodeStringBuilder) {
+        builder.append('(')
+        builder.append(content)
+        builder.append(')')
+        target.build(builder)
     }
 }

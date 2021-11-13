@@ -45,7 +45,7 @@ private const val STRING = "std::string"
 
 @Serializable
 data class WrappedTypeReference(val name: String) : WrappedType() {
-    val isArray: Boolean
+    override val isArray: Boolean
         get() = name.endsWith("]")
     val arraySize: Int
         get() {
@@ -69,31 +69,37 @@ data class WrappedTypeReference(val name: String) : WrappedType() {
             }
             return WrappedTypeReference(name.substring(0, openIndex).trim())
         }
-    val isConst: Boolean
-        get() = name.startsWith("const ")
-    val unconst: WrappedTypeReference
-        get() = if (isConst) WrappedTypeReference(name.substring("const ".length).trim()) else this
-    val isString: Boolean
-        get() = unconst.name == STRING
-    val isNative: Boolean
-        get() = unconst.name in NATIVE ||
-            isString ||
-            (isArray && arrayType.isNative) ||
-            (isPointer && pointed.isNative)
-    val isReturnable: Boolean
+    override val isPointer: Boolean
+        get() = false
+    override val isReference: Boolean
+        get() = false
+    override val pointed: WrappedType
+        get() = error("Cannot get pointed of non-pointer type $this")
+    override val unreferenced: WrappedType
+        get() = error("Cannot unreference of non-reference type $this")
+
+    override val isConst: Boolean
+        get() = false
+    override val unconst: WrappedTypeReference
+        get() = this
+    override val isString: Boolean
+        get() = name == STRING
+    override val isNative: Boolean
+        get() = name in NATIVE || isString || (isArray && arrayType.isNative)
+    override val isReturnable: Boolean
         get() = name in NATIVE || isString || name == LONG_DOUBLE_STR
-    val isVoid: Boolean
+    override val isVoid: Boolean
         get() = name == "void"
     override val cType: WrappedType
         get() {
             if (isString) {
-                return WrappedTypeReference("const char*")
+                return WrappedType("const char*")
             }
             if (isNative) {
                 return this
             }
             if (name == LONG_DOUBLE_STR) {
-                return WrappedTypeReference("double")
+                return WrappedType("double")
             }
             throw IllegalStateException("Don't know how to convert $name to C")
         }

@@ -20,14 +20,6 @@ import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUE
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.isConst
-import com.monkopedia.krapper.generator.model.type.isNative
-import com.monkopedia.krapper.generator.model.type.isPointer
-import com.monkopedia.krapper.generator.model.type.isReference
-import com.monkopedia.krapper.generator.model.type.isString
-import com.monkopedia.krapper.generator.model.type.pointed
-import com.monkopedia.krapper.generator.model.type.unconst
-import com.monkopedia.krapper.generator.model.type.unreferenced
 
 interface WrappedKotlinType {
     val isWrapper: Boolean

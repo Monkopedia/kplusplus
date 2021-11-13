@@ -29,13 +29,6 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
-import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.type.isArray
-import com.monkopedia.krapper.generator.model.type.isNative
-import com.monkopedia.krapper.generator.model.type.isPointer
-import com.monkopedia.krapper.generator.model.type.isReference
-import com.monkopedia.krapper.generator.model.type.isReturnable
-import com.monkopedia.krapper.generator.model.type.unreferenced
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
 private const val BEFORE_UPPER_AND_LOWER = "(?<=\\p{L})(?=\\p{Lu}\\p{Ll})"

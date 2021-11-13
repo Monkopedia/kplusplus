@@ -181,7 +181,8 @@ class CppCodeTests {
         
         void TestLib_TestClass_str_set(void* thiz, const char* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
-            thiz_cast->str = ret_value;
+            std::string ret_value_cast = std::string(ret_value);
+            thiz_cast->str = ret_value_cast;
         }
     """.trimIndent()
     private val TESTLIB_TESTCLASS_C = """
@@ -324,7 +325,8 @@ class CppCodeTests {
         
         void TestLib_TestClass_ld_set(void* thiz, double ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
-            thiz_cast->ld = ret_value;
+            long double ret_value_cast = (long double)ret_value;
+            thiz_cast->ld = ret_value_cast;
         }
     """.trimIndent()
     private val TESTLIB_TESTCLASS_PB = """
@@ -713,6 +715,18 @@ class CppCodeTests {
             *(ret_value_cast) = thiz_cast->operator[](c2_cast);
         }
     """.trimIndent()
+    private val TESTLIB_MYPAIR_TESTLIB_OTHERCLASS_A = """
+        void* TestLib_MyPair_TestLib_OtherClass_P_a_get(void* thiz) {
+            TestLib::MyPair<TestLib::OtherClass*>* thiz_cast = reinterpret_cast<TestLib::MyPair<TestLib::OtherClass*>*>(thiz);
+            return thiz_cast->a;
+        }
+
+        void TestLib_MyPair_TestLib_OtherClass_P_a_set(void* thiz, void* ret_value) {
+            TestLib::MyPair<TestLib::OtherClass*>* thiz_cast = reinterpret_cast<TestLib::MyPair<TestLib::OtherClass*>*>(thiz);
+            TestLib::OtherClass* ret_value_cast = reinterpret_cast<TestLib::OtherClass*>(ret_value);
+            thiz_cast->a = ret_value_cast;
+        }
+    """.trimIndent()
 
     @Test
     fun testVector_new() = runTest(
@@ -913,7 +927,6 @@ class CppCodeTests {
     fun testTestClass_ld() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ld,
-
         expected = TESTLIB_TESTCLASS_LD,
     )
 
@@ -1280,6 +1293,14 @@ class CppCodeTests {
         target = TestData.TestClass.operatorInd,
         expected = TESTLIB_TESTCLASS_IND,
     )
+
+    @Test
+    fun testMyPair_OtherClass_a() = runTest(
+        cls = TestData.MyPair.cls,
+        target = TestData.MyPair.cls.children[1] as WrappedField,
+        expected = TESTLIB_MYPAIR_TESTLIB_OTHERCLASS_A,
+    )
+
     private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
         assertCode(expected, buildCode(cls, target).toString())
     }

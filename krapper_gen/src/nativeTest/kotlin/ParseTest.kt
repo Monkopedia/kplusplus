@@ -15,7 +15,6 @@
  */
 package com.monkopedia.krapper.generator
 
-import com.monkopedia.krapper.generator.builders.ThrowPolicy
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.findQualifiers
@@ -38,10 +37,15 @@ class ParseTest {
 
     @Test
     fun testResolve() {
-        val resolver = ParsedResolver(TestData.TU)
-        val cls = resolver.findClasses(WrappedClass::defaultFilter)
-        val resolved = cls.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
-        println("Classes: $cls")
+        try {
+            val resolver = ParsedResolver(TestData.TU)
+            val cls = resolver.findClasses(WrappedClass::defaultFilter)
+            val resolved = cls.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            println("Classes: $cls")
+        } catch (t: Throwable) {
+            t.printStackTrace()
+            throw t
+        }
     }
 
     @Test

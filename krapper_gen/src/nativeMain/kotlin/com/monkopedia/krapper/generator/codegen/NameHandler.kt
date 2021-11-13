@@ -51,10 +51,11 @@ class NameHandler {
 
     private inner class NamerImpl(private val cls: WrappedClass) : Namer {
         private val nameLookup = mutableMapOf<Any, String>()
-        override val cName = cls.type.toString().replace("::", "_").replace("<", "_").replace(
-            ">",
-            ""
-        )
+        override val cName = cls.type.toString()
+            .replace("::", "_")
+            .replace("<", "_")
+            .replace(">", "")
+            .replace("*", "_P")
         override val WrappedMethod.uniqueCName: String
             get() = name(this) {
                 uniqueNameFor(

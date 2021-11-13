@@ -133,6 +133,7 @@ class ParsedResolver(val tu: WrappedTU) :
 
     override fun resolveTemplate(type: WrappedType): WrappedTemplate {
         return templateMap.getOrPut(type.toString()) {
+            println("Resolving template $type (${type::class.simpleName})")
             val templateCandidates = tu.filterRecursive {
                 ((it as? WrappedTemplate)?.qualified == type.toString())
             }
@@ -156,7 +157,7 @@ class ParsedResolver(val tu: WrappedTU) :
                 else -> {
                     tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == type.toString() }
                         .singleOrNull() as? WrappedClass
-                        ?: error("Can't resolve $type (${type::class.simpleName})")
+                        ?: error("Can't resolve $type (${type::class.simpleName})".also { println(it) })
                 }
             }
         }
@@ -168,7 +169,9 @@ class ParsedResolver(val tu: WrappedTU) :
     }
 
     override fun endCapture(): List<WrappedClass> {
-        return classMap.values.toList()
+        return classMap.values.toList().also {
+            println("Ending capture with ${it.map { it.type }}")
+        }
     }
 
     override fun findClasses(filter: ClassFilter): List<WrappedClass> {
@@ -243,9 +246,11 @@ fun MemScope.parseHeader(
     val tu = file.map { parseHeader(index, it, builder, args, debug) }
         .reduceRight { tu1, tu2 ->
             tu1.also {
-                it.children.addAll(tu2.children.map {
-                    it.also { it.parent = tu1}
-                })
+                it.children.addAll(
+                    tu2.children.map {
+                        it.also { it.parent = tu1 }
+                    }
+                )
             }
         }
     println("Reduced ${tu.children.size}")
@@ -312,29 +317,35 @@ fun CXTranslationUnit.printDiagnostics() {
 }
 
 fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
+    println("Typing $name as $type")
     val templates =
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
-    val mapping = (templates.mapIndexedNotNull { index, t ->
-        when {
-            index < type.templateArgs.size -> t.name to type.templateArgs[index]
-            t.defaultType != null -> t.name to t.defaultType
-            else -> null
+    val mapping = (
+        templates.mapIndexedNotNull { index, t ->
+            when {
+                index < type.templateArgs.size -> t.name to type.templateArgs[index]
+                t.defaultType != null -> t.name to t.defaultType
+                else -> null
+            }
+        } + templates.mapIndexedNotNull { index, t ->
+            when {
+                index < type.templateArgs.size -> t.usr to type.templateArgs[index]
+                t.defaultType != null -> t.usr to t.defaultType
+                else -> null
+            }
         }
-    } + templates.mapIndexedNotNull { index, t ->
-        when {
-            index < type.templateArgs.size -> t.usr to type.templateArgs[index]
-            t.defaultType != null -> t.usr to t.defaultType
-            else -> null
-        }
-    }).toMap()
+        ).toMap()
+    println("Type mapping for $name is $mapping")
     val outputClass =
         WrappedClass(name, type)
     outputClass.parent = parent
     outputClass.children.addAll(children.map { it.cloneRecursive() })
     return when (
         val result = map(outputClass) { type ->
+            println("Map check $type ${type::class.simpleName}")
             if (type is WrappedTemplateRef) {
                 val mapping = mapping[type.target]
+                println("Checking mapping ${type.target} result: $mapping")
                 if (mapping != null) {
                     ReplaceWith(mapping)
                 } else {
@@ -348,5 +359,7 @@ fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
         RemoveElement -> throw IllegalArgumentException("Can't map $outputClass")
         ElementUnchanged -> outputClass
         is ReplaceWith -> result.replacement
+    }.also {
+        println("Typing $name as $type is done with result $it")
     }
 }

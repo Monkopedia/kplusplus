@@ -1565,5 +1565,6 @@ class TestDataClass {
                     )
                 )
             }
+        val cls = template.typedAs(WrappedTemplateType(type, listOf(pointerTo(OtherClass.type))))
     }
 }

@@ -64,14 +64,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.type.isArray
-import com.monkopedia.krapper.generator.model.type.isConst
-import com.monkopedia.krapper.generator.model.type.isPointer
-import com.monkopedia.krapper.generator.model.type.isReference
-import com.monkopedia.krapper.generator.model.type.isString
-import com.monkopedia.krapper.generator.model.type.kotlinType
 import com.monkopedia.krapper.generator.model.nullable
-import com.monkopedia.krapper.generator.model.type.pointed
 import com.monkopedia.krapper.generator.model.typedWith
 
 

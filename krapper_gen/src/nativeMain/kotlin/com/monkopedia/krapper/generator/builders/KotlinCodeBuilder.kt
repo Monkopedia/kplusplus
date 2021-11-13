@@ -22,7 +22,6 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.type.kotlinType
 import com.monkopedia.krapper.generator.model.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>

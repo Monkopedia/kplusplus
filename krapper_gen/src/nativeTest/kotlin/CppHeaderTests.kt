@@ -910,7 +910,6 @@ class CppHeaderTests {
 }
 
 fun assertCode(expected: String, actual: String) {
-    println("Checking code:\n$actual")
     assertCodeInner(expected.trim(), actual.trim())
 }
 

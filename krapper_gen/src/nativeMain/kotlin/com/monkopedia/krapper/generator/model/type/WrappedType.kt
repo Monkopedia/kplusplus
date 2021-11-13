@@ -9,13 +9,13 @@ import clang.CXTypeKind.CXType_Unexposed
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.getTemplateArgumentType
+import com.monkopedia.krapper.generator.isConstQualifiedType
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
-import com.monkopedia.krapper.generator.prettyPrinted
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
@@ -32,6 +32,23 @@ abstract class WrappedType : WrappedElement() {
     override fun clone(): WrappedType {
         return this
     }
+    abstract val isNative: Boolean
+    abstract val isString: Boolean
+    val kotlinType: WrappedKotlinType
+        get() = typeToKotlinType(this)
+    abstract val isReturnable: Boolean
+    abstract val isVoid: Boolean
+
+    abstract val pointed: WrappedType
+    abstract val isPointer: Boolean
+
+    abstract val isArray: Boolean
+
+    abstract val unreferenced: WrappedType
+
+    abstract val isReference: Boolean
+    abstract val isConst: Boolean
+    abstract val unconst: WrappedType
 
     companion object :
         (String) -> WrappedType,
@@ -44,6 +61,7 @@ abstract class WrappedType : WrappedElement() {
         override fun invoke(type: String): WrappedType {
             if (type == "void") return VOID
             if (type == "std::size_t") return invoke("size_t")
+            if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
             return existingTypes.getOrPut(type) {
                 if (type.endsWith("*")) {
                     return pointerTo(invoke(type.substring(0, type.length - 1).trim()))
@@ -75,7 +93,7 @@ abstract class WrappedType : WrappedElement() {
             resolverBuilder: ResolverBuilder
         ): WrappedType {
             if (type.spelling.toKString()?.endsWith("*") == true) {
-                return pointerTo(invoke(type.pointeeType, resolverBuilder))
+                return pointerTo(invoke(type.pointeeType, resolverBuilder)).maybeConst(type.isConstQualifiedType)
             }
             if (type.numTemplateArguments > 0) {
                 val templateReference = createForType(type, resolverBuilder)
@@ -84,9 +102,13 @@ abstract class WrappedType : WrappedElement() {
                     List(type.numTemplateArguments) {
                         invoke(type.getTemplateArgumentType(it.toUInt()), resolverBuilder)
                     }
-                )
+                ).maybeConst(type.isConstQualifiedType)
             }
-            return createForType(type, resolverBuilder)
+            return createForType(type, resolverBuilder).maybeConst(type.isConstQualifiedType)
+        }
+
+        private inline fun WrappedType.maybeConst(isConst: Boolean): WrappedType {
+            return if (isConst) const(this) else this
         }
 
         private fun createForType(
@@ -94,27 +116,33 @@ abstract class WrappedType : WrappedElement() {
             resolverBuilder: ResolverBuilder
         ): WrappedType {
             val type = resolverBuilder.visit(type)
-            val spelling =
+            var spelling =
                 type.spelling.toKString()?.trim() ?: error("Missing spelling for type $type")
+            if (spelling.startsWith("const ")) {
+                spelling = spelling.substring("const ".length)
+            }
             val referencedDecl = type.typeDeclaration
-            if (referencedDecl.kind == CXCursor_TypedefDecl) {
-                return WrappedTypedefRef(
-                    referencedDecl.usr.toKString() ?: error("Declaration missing usr")
-                )
-            } else if (referencedDecl.kind == CXCursor_ClassTemplate) {
-                return WrappedTemplateRef(
-                    referencedDecl.usr.toKString() ?: error("Declaration missing usr")
-                )
-            } else if (referencedDecl.kind == CXCursor_ClassDecl) {
-                return invoke(referencedDecl.fullyQualified)
+            return when {
+                referencedDecl.kind == CXCursor_TypedefDecl -> {
+                    WrappedTypedefRef(
+                        referencedDecl.usr.toKString() ?: error("Declaration missing usr")
+                    )
+                }
+                referencedDecl.kind == CXCursor_ClassTemplate -> {
+                    WrappedTemplateRef(
+                        referencedDecl.usr.toKString() ?: error("Declaration missing usr")
+                    )
+                }
+                referencedDecl.kind == CXCursor_ClassDecl -> {
+                    invoke(referencedDecl.fullyQualified)
+                }
+                type.useContents { kind } == CXType_Unexposed && referencedDecl.kind == CXCursor_NoDeclFound && !spelling.startsWith("typename ") -> {
+                    WrappedTemplateRef(spelling)
+                }
+                else -> {
+                    invoke(spelling)
+                }
             }
-            if (type.useContents { kind } == CXType_Unexposed && referencedDecl.kind == CXCursor_NoDeclFound && !spelling.startsWith("typename ")) {
-                return WrappedTemplateRef(spelling)
-            }
-            if (spelling == "T") {
-                println("Generating T ${type.useContents { kind }} ${referencedDecl.kind}")
-            }
-            return invoke(spelling)
         }
 
         fun pointerTo(type: WrappedType): WrappedType {
@@ -128,54 +156,10 @@ abstract class WrappedType : WrappedElement() {
         fun arrayOf(type: WrappedType): WrappedType {
             return WrappedModifiedType(type, "[]")
         }
+
+        fun const(type: WrappedType): WrappedType {
+            return WrappedPrefixedType(type, "const")
+        }
     }
 }
 
-val WrappedType.isNative: Boolean
-    get() = (
-        (this as? WrappedTypeReference)?.isNative
-            ?: (this as? WrappedModifiedType)?.baseType?.isNative
-        ) == true
-val WrappedType.isString: Boolean
-    get() = (
-        (this as? WrappedTypeReference)?.isString
-            ?: (this as? WrappedModifiedType)?.baseType?.isString
-        ) == true
-val WrappedType.kotlinType: WrappedKotlinType
-    get() = typeToKotlinType(this)
-
-val WrappedType.isReturnable: Boolean
-    get() = (this as? WrappedTypeReference)?.isReturnable
-        ?: (this as? WrappedModifiedType)?.isReturnable
-        ?: false
-val WrappedType.isVoid: Boolean
-    get() = (this as? WrappedTypeReference)?.isVoid ?: false
-
-private val WrappedModifiedType.privatePointed: WrappedType?
-    get() = if (modifier == "*") baseType else null
-val WrappedType.pointed: WrappedType
-    get() = (this as? WrappedModifiedType)?.privatePointed
-        ?: error("Can't find pointed of non pointer")
-val WrappedType.isPointer: Boolean
-    get() = ((this as? WrappedModifiedType)?.modifier == "*")
-
-val WrappedType.isArray: Boolean
-    get() = (this as? WrappedTypeReference)?.isArray
-        ?: ((this as? WrappedModifiedType)?.modifier == "[]")
-
-private val WrappedModifiedType.privateUnreferenced: WrappedType?
-    get() = if (modifier == "&") baseType else null
-val WrappedType.unreferenced: WrappedType
-    get() = (this as? WrappedModifiedType)?.privateUnreferenced
-        ?: error("Can't find unreferenced of non reference")
-
-val WrappedType.isReference: Boolean
-    get() = ((this as? WrappedModifiedType)?.modifier == "&")
-val WrappedType.isConst: Boolean
-    get() = (this as? WrappedTypeReference)?.isConst
-        ?: (this as? WrappedModifiedType)?.baseType?.isConst
-        ?: false
-val WrappedType.unconst: WrappedTypeReference
-    get() = (this as? WrappedTypeReference)?.unconst
-        ?: (this as? WrappedModifiedType)?.baseType?.unconst
-        ?: error("Can't unconst $this")
