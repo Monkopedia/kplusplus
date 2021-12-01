@@ -84,7 +84,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::Constructable",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "Constructable",
@@ -118,7 +118,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::Constructable",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedConstructor(
                             "Constructable",
@@ -154,7 +154,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::TestClass",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "setSome",
@@ -162,7 +162,7 @@ class KotlinCodeTests {
                             false,
                             MethodType.METHOD
                         ).also {
-                            it.children.addAll(
+                            it.addAllChildren(
                                 listOf(
                                     WrappedArgument("a", WrappedType("int")),
                                     WrappedArgument("b", WrappedType("long")),
@@ -192,7 +192,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::TestClass",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "setPointers",
@@ -200,7 +200,7 @@ class KotlinCodeTests {
                             false,
                             MethodType.METHOD
                         ).also { m ->
-                            m.children.addAll(
+                            m.addAllChildren(
                                 listOf(
                                     WrappedArgument("a", WrappedType("int*")),
                                     WrappedArgument("b", WrappedType("long*")),
@@ -230,7 +230,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::TestClass",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "sum",
@@ -260,7 +260,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "std::vector<std::string>",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "at",
@@ -268,7 +268,7 @@ class KotlinCodeTests {
                             false,
                             MethodType.METHOD
                         ).also {
-                            it.children.addAll(
+                            it.addAllChildren(
                                 listOf(
                                     WrappedArgument("pos", WrappedType("size_t")),
                                 ),
@@ -299,7 +299,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::TestClass",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "setPrivateFrom",
@@ -307,7 +307,7 @@ class KotlinCodeTests {
                             false,
                             MethodType.METHOD
                         ).also {
-                            it.children.addAll(
+                            it.addAllChildren(
                                 listOf(
                                     WrappedArgument(
                                         "other",
@@ -338,7 +338,7 @@ class KotlinCodeTests {
             val cls = WrappedClass(
                 "TestLib::TestClass",
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedMethod(
                             "setPrivateFrom",
@@ -347,7 +347,7 @@ class KotlinCodeTests {
                             false,
                             MethodType.METHOD
                         ).also {
-                            it.children.addAll(
+                            it.addAllChildren(
                                 listOf(
                                     WrappedArgument(
                                         "other",

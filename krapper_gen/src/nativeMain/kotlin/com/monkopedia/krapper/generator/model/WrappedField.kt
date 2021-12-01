@@ -40,7 +40,7 @@ data class WrappedField(
 
     override fun clone(): WrappedElement {
         return WrappedField(name, type).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }

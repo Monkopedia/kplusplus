@@ -133,7 +133,7 @@ class ParsedResolver(val tu: WrappedTU) :
 
     override fun resolveTemplate(type: WrappedType): WrappedTemplate {
         return templateMap.getOrPut(type.toString()) {
-            println("Resolving template $type (${type::class.simpleName})")
+//            println("Resolving template $type (${type::class.simpleName})")
             val templateCandidates = tu.filterRecursive {
                 ((it as? WrappedTemplate)?.qualified == type.toString())
             }
@@ -145,7 +145,7 @@ class ParsedResolver(val tu: WrappedTU) :
 
     override fun resolve(type: WrappedType): WrappedClass {
         return classMap.getOrPut(type.toString()) {
-            println("Resolving $type (${type::class.simpleName})")
+//            println("Resolving $type (${type::class.simpleName})")
             when (type) {
                 is WrappedTemplateType -> {
                     val template = resolveTemplate(type.baseType)
@@ -157,7 +157,7 @@ class ParsedResolver(val tu: WrappedTU) :
                 else -> {
                     tu.filterRecursive { (it as? WrappedClass)?.type?.toString() == type.toString() }
                         .singleOrNull() as? WrappedClass
-                        ?: error("Can't resolve $type (${type::class.simpleName})".also { println(it) })
+                        ?: error("Can't resolve $type (${type::class.simpleName})")
                 }
             }
         }
@@ -246,7 +246,7 @@ fun MemScope.parseHeader(
     val tu = file.map { parseHeader(index, it, builder, args, debug) }
         .reduceRight { tu1, tu2 ->
             tu1.also {
-                it.children.addAll(
+                it.addAllChildren(
                     tu2.children.map {
                         it.also { it.parent = tu1 }
                     }
@@ -335,17 +335,14 @@ fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
             }
         }
         ).toMap()
-    println("Type mapping for $name is $mapping")
     val outputClass =
         WrappedClass(name, type)
     outputClass.parent = parent
-    outputClass.children.addAll(children.map { it.cloneRecursive() })
+    outputClass.addAllChildren(children.map { it.cloneRecursive() })
     return when (
         val result = map(outputClass) { type ->
-            println("Map check $type ${type::class.simpleName}")
             if (type is WrappedTemplateRef) {
                 val mapping = mapping[type.target]
-                println("Checking mapping ${type.target} result: $mapping")
                 if (mapping != null) {
                     ReplaceWith(mapping)
                 } else {
@@ -360,6 +357,5 @@ fun WrappedTemplate.typedAs(type: WrappedTemplateType): WrappedClass {
         ElementUnchanged -> outputClass
         is ReplaceWith -> result.replacement
     }.also {
-        println("Typing $name as $type is done with result $it")
     }
 }

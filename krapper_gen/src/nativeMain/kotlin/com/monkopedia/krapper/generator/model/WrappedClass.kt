@@ -65,7 +65,7 @@ class WrappedClass(
     override fun clone(): WrappedClass {
         return WrappedClass(name, specifiedType).also {
             it.parent = parent
-            it.children.addAll(children)
+            it.addAllChildren(children)
         }
     }
 

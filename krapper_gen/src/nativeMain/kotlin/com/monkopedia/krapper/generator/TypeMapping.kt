@@ -8,6 +8,7 @@ import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 
@@ -78,6 +79,28 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                 }
                 return if (needsMutation) ReplaceWith(newType as T) else ElementUnchanged
             }
+            is WrappedPrefixedType -> {
+                val baseType = when (val result = map(element.baseType, typeMapper)) {
+                    RemoveElement -> return RemoveElement
+                    ElementUnchanged -> element.baseType
+                    is ReplaceWith -> {
+                        needsMutation = true
+                        result.replacement
+                    }
+                }
+                val type = if (needsMutation) {
+                    WrappedPrefixedType(baseType, element.modifier)
+                } else element
+                val newType = when (val result = typeMapper(type)) {
+                    RemoveElement -> return RemoveElement
+                    ElementUnchanged -> type
+                    is ReplaceWith -> {
+                        needsMutation = true
+                        result.replacement
+                    }
+                }
+                return if (needsMutation) ReplaceWith(newType as T) else ElementUnchanged
+            }
             is WrappedModifiedType -> {
                 val baseType = when (val result = map(element.baseType, typeMapper)) {
                         RemoveElement -> return RemoveElement
@@ -114,8 +137,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                 }
                 return if (needsMutation) ReplaceWith(
                     element.copy(returnType = returnType).also {
-                        it.children.clear()
-                        it.children.addAll(resolvedChildren)
+                        it.clearChildren()
+                        it.addAllChildren(resolvedChildren)
                         it.parent = element.parent
                     } as T
                 ) else ElementUnchanged
@@ -132,8 +155,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                     }
                 return if (needsMutation) ReplaceWith(
                     WrappedBase(mappedType).also {
-                        it.children.clear()
-                        it.children.addAll(resolvedChildren)
+                        it.clearChildren()
+                        it.addAllChildren(resolvedChildren)
                         it.parent = element.parent
                     } as T
                 ) else ElementUnchanged
@@ -149,8 +172,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                 }
                 return if (needsMutation) ReplaceWith(
                     WrappedTypedef(element.name, mappedType).also {
-                        it.children.clear()
-                        it.children.addAll(resolvedChildren)
+                        it.clearChildren()
+                        it.addAllChildren(resolvedChildren)
                         it.parent = element.parent
                     } as T
                 ) else ElementUnchanged
@@ -166,8 +189,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                 }
                 return if (needsMutation) ReplaceWith(
                     WrappedField(element.name, mappedType).also {
-                        it.children.clear()
-                        it.children.addAll(resolvedChildren)
+                        it.clearChildren()
+                        it.addAllChildren(resolvedChildren)
                         it.parent = element.parent
                     } as T
                 ) else ElementUnchanged
@@ -186,8 +209,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
                         element.name,
                         mappedType
                     ).also {
-                        it.children.clear()
-                        it.children.addAll(resolvedChildren)
+                        it.clearChildren()
+                        it.addAllChildren(resolvedChildren)
                         it.parent = element.parent
                     } as T
                 ) else ElementUnchanged
@@ -197,8 +220,8 @@ fun <T : WrappedElement> map(element: T, typeMapper: TypeMapping): MapResult<out
 
         return ReplaceWith(
             element.clone().also {
-                it.children.clear()
-                it.children.addAll(resolvedChildren)
+                it.clearChildren()
+                it.addAllChildren(resolvedChildren)
                 it.parent = element.parent
             } as T
         )

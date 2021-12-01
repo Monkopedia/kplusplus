@@ -3,7 +3,7 @@ package com.monkopedia.krapper.generator.model
 class WrappedNamespace(val namespace: String) : WrappedElement() {
     override fun clone(): WrappedElement {
         return WrappedNamespace(namespace).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }

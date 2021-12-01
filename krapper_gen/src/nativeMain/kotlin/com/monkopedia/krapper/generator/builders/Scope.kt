@@ -30,6 +30,7 @@ class Scope<T : LangFactory>(private val parent: Scope<T>? = null) {
         if (isUsed(desiredName)) {
             return allocateName("_$desiredName")
         }
+        names.add(desiredName)
         return desiredName
     }
 }
@@ -57,7 +58,10 @@ inline fun <T : LangFactory> CodeBuilder<T>.functionScope(inScope: CodeBuilder<T
     contract {
         callsInPlace(inScope, kotlin.contracts.InvocationKind.EXACTLY_ONCE)
     }
-    base.pushScope()
-    inScope()
-    base.popScope()
+    try {
+        base.pushScope()
+        inScope()
+    } finally {
+        base.popScope()
+    }
 }

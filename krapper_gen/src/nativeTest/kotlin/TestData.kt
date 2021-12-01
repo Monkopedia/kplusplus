@@ -993,11 +993,11 @@ class TestDataClass {
 
     val TU = WrappedTU()
     val TestLib = WrappedNamespace("TestLib").also {
-        TU.children.add(it)
+        TU.addChild(it)
         it.parent = TU
     }
     val Std = WrappedNamespace("std").also {
-        TU.children.add(it)
+        TU.addChild(it)
         it.parent = TU
     }
 
@@ -1016,15 +1016,15 @@ class TestDataClass {
                 false,
                 MethodType.METHOD
             ).also {
-                it.children.add(WrappedArgument("str", WrappedTemplateRef(template.usr)))
+                it.addChild(WrappedArgument("str", WrappedTemplateRef(template.usr)))
             }
         val tmp =
             WrappedTemplate(
                 "vector",
             ).also {
                 it.parent = Std
-                Std.children.add(it)
-                it.children.addAll(
+                Std.addChild(it)
+                it.addAllChildren(
                     listOf(
                         template,
                         constructor,
@@ -1087,9 +1087,9 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.add(WrappedArgument("a", WrappedType("int")))
-                it.children.add(WrappedArgument("b", WrappedType("long")))
-                it.children.add(WrappedArgument("c", WrappedType("long long")))
+                it.addChild(WrappedArgument("a", WrappedType("int")))
+                it.addChild(WrappedArgument("b", WrappedType("long")))
+                it.addChild(WrappedArgument("c", WrappedType("long long")))
             }
         val setPointers =
             WrappedMethod(
@@ -1098,7 +1098,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedArgument("a", WrappedType("int*")),
                         WrappedArgument("b", WrappedType("long*")),
@@ -1113,7 +1113,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(WrappedArgument("value", WrappedType("std::string"))),
                 )
             }
@@ -1124,7 +1124,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(WrappedArgument("value", WrappedType("TestLib::OtherClass *"))),
                 )
             }
@@ -1137,15 +1137,15 @@ class TestDataClass {
         val constructor = WrappedConstructor("new", type)
         val copyConstructor =
             WrappedConstructor("new", type).also {
-                it.children.addAll(listOf(WrappedArgument("other", type)))
+                it.addAllChildren(listOf(WrappedArgument("other", type)))
             }
         val otherConstructor =
             WrappedConstructor("new", type).also {
-                it.children.addAll(listOf(WrappedArgument("a", WrappedType("int"))))
+                it.addAllChildren(listOf(WrappedArgument("a", WrappedType("int"))))
             }
         val twoParamConstructor =
             WrappedConstructor("new", type).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedArgument("a", WrappedType("int")),
                         WrappedArgument("b", WrappedType("double"))
@@ -1160,7 +1160,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(WrappedArgument("c2", type)),
                 )
             }
@@ -1173,7 +1173,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(WrappedArgument("c2", type)),
                 )
             }
@@ -1186,7 +1186,7 @@ class TestDataClass {
                 false,
                 MethodType.METHOD,
             ).also {
-                it.children.addAll(listOf(WrappedArgument("c2", type)))
+                it.addAllChildren(listOf(WrappedArgument("c2", type)))
             }
         val operatorDiv = WrappedMethod(
             "operator/",
@@ -1194,7 +1194,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(listOf(WrappedArgument("c2", type)))
+            it.addAllChildren(listOf(WrappedArgument("c2", type)))
         }
         val operatorRem = WrappedMethod(
             "operator%",
@@ -1202,7 +1202,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(listOf(WrappedArgument("c2", type)))
+            it.addAllChildren(listOf(WrappedArgument("c2", type)))
         }
         val operatorInc = WrappedMethod("operator++", type, false, MethodType.METHOD)
         val operatorPostInc = WrappedMethod(
@@ -1211,7 +1211,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("dummy", WrappedType("int"))),
             )
         }
@@ -1222,7 +1222,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("dummy", WrappedType("int"))),
             )
         }
@@ -1232,7 +1232,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1242,7 +1242,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1252,7 +1252,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1262,7 +1262,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1272,7 +1272,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1282,7 +1282,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1294,7 +1294,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1304,7 +1304,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1316,7 +1316,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1326,7 +1326,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1336,7 +1336,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1346,7 +1346,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1356,7 +1356,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
             )
         }
@@ -1366,7 +1366,7 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("c2", WrappedType("std::string &"))),
             )
         }
@@ -1375,9 +1375,9 @@ class TestDataClass {
             WrappedClass(
                 "TestClass",
             ).also {
-                TestLib.children.add(it)
+                TestLib.addChild(it)
                 it.parent = TestLib
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         b,
                         st,
@@ -1472,7 +1472,7 @@ class TestDataClass {
             false,
             MethodType.METHOD
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(WrappedArgument("value", WrappedType("std::string"))),
             )
         }
@@ -1482,7 +1482,7 @@ class TestDataClass {
             false,
             MethodType.METHOD
         ).also {
-            it.children.addAll(
+            it.addAllChildren(
                 listOf(
                     WrappedArgument("text", Vector.type)
                 ),
@@ -1514,9 +1514,9 @@ class TestDataClass {
             WrappedClass(
                 "OtherClass",
             ).also {
-                TestLib.children.add(it)
+                TestLib.addChild(it)
                 it.parent = TestLib
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         constructor,
                         destructor,
@@ -1539,7 +1539,7 @@ class TestDataClass {
         val bprop = WrappedField("b", WrappedTemplateRef(templateParam.usr))
         val constructor =
             WrappedConstructor("TestLib::MyPair", type).also {
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         WrappedArgument("first", WrappedTemplateRef(templateParam.usr)),
                         WrappedArgument("second", WrappedTemplateRef(templateParam.usr))
@@ -1553,9 +1553,9 @@ class TestDataClass {
         )
         val template =
             WrappedTemplate("MyPair").also {
-                TestLib.children.add(it)
+                TestLib.addChild(it)
                 it.parent = TestLib
-                it.children.addAll(
+                it.addAllChildren(
                     listOf(
                         templateParam,
                         aprop,

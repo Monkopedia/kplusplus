@@ -3,11 +3,41 @@ package com.monkopedia.krapper.generator.model
 import clang.CXCursor
 import clang.CXTypeKind
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.accessSpecifier
+import com.monkopedia.krapper.generator.arrayElementType
+import com.monkopedia.krapper.generator.availability
+import com.monkopedia.krapper.generator.canonicalCursor
+import com.monkopedia.krapper.generator.canonicalType
+import com.monkopedia.krapper.generator.classType
+import com.monkopedia.krapper.generator.definition
+import com.monkopedia.krapper.generator.displayName
+import com.monkopedia.krapper.generator.elementType
+import com.monkopedia.krapper.generator.extend
+import com.monkopedia.krapper.generator.fullyQualified
+import com.monkopedia.krapper.generator.getArgType
+import com.monkopedia.krapper.generator.getTemplateArgumentType
+import com.monkopedia.krapper.generator.hash
+import com.monkopedia.krapper.generator.isAbstract
+import com.monkopedia.krapper.generator.isAnonymous
+import com.monkopedia.krapper.generator.isDefaulted
+import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.mapChildren
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.modifiedType
+import com.monkopedia.krapper.generator.namedType
+import com.monkopedia.krapper.generator.pointeeType
+import com.monkopedia.krapper.generator.rawCommentText
+import com.monkopedia.krapper.generator.refQualifier
+import com.monkopedia.krapper.generator.referenced
+import com.monkopedia.krapper.generator.result
+import com.monkopedia.krapper.generator.resultType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
+import com.monkopedia.krapper.generator.typeDeclaration
+import com.monkopedia.krapper.generator.typedefDeclUnderlyingType
 import com.monkopedia.krapper.generator.usr
+import com.monkopedia.krapper.generator.valueType
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
 
@@ -82,25 +112,27 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
 
     override fun clone(): WrappedElement {
         return WrappedTemplate(name).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }
 }
 
-class WrappedTemplateParam(val name: String, val usr: String, val defaultType: WrappedType?) : WrappedElement() {
-    constructor(
-        value: CValue<CXCursor>,
-        resolverBuilder: ResolverBuilder
-    ) : this(
+class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement() {
+    val defaultType: WrappedType?
+        get() {
+            if (children.isEmpty()) return null
+            return null
+        }
+
+    constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         value.spelling.toKString() ?: error("Template param without name $value"),
-        value.usr.toKString() ?: error("Template param without USR $value"),
-        determineType(value, resolverBuilder)
+        value.usr.toKString() ?: error("Template param without USR $value")
     )
 
     override fun clone(): WrappedTemplateParam {
-        return WrappedTemplateParam(name, usr, defaultType).also {
-            it.children.addAll(children)
+        return WrappedTemplateParam(name, usr).also {
+            it.addAllChildren(children)
             it.parent = parent
         }
     }
@@ -112,7 +144,7 @@ class WrappedTemplateParam(val name: String, val usr: String, val defaultType: W
         ): WrappedType? {
             val type = value.type
             type.useContents {
-                if (kind == CXTypeKind.CXType_Invalid || kind == CXTypeKind.CXType_Unexposed) {
+                if (kind == CXTypeKind.CXType_Invalid) {
                     return@determineType null
                 }
             }
@@ -132,7 +164,7 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
 
     override fun clone(): WrappedTypedef {
         return WrappedTypedef(name, targetType).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }

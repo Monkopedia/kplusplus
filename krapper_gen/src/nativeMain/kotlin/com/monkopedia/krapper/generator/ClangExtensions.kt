@@ -62,9 +62,11 @@ import clang.clang_IndexAction_create
 import clang.clang_Type_getAlignOf
 import clang.clang_Type_getCXXRefQualifier
 import clang.clang_Type_getClassType
+import clang.clang_Type_getModifiedType
 import clang.clang_Type_getNamedType
 import clang.clang_Type_getNumTemplateArguments
 import clang.clang_Type_getTemplateArgumentAsType
+import clang.clang_Type_getValueType
 import clang.clang_annotateTokens
 import clang.clang_createIndex
 import clang.clang_createTranslationUnit
@@ -149,7 +151,6 @@ import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toCStringArray
 import kotlinx.cinterop.toKString
-import kotlin.native.internal.NativePtr.Companion.NULL
 
 inline fun CXTranslationUnit.annotateTokens(
     token: CPointer<CXToken>,
@@ -333,6 +334,8 @@ inline fun CValue<CXCursor>.getOverload(index: UInt): CValue<CXCursor> {
 
 inline val CValue<CXType>.pointeeType: CValue<CXType>
     get() = clang_getPointeeType(this)
+inline val CValue<CXType>.modifiedType: CValue<CXType>
+    get() = clang_Type_getModifiedType(this)
 
 inline val CValue<CXCursor>.kind: CXCursorKind
     get() = clang_getCursorKind(this)
@@ -514,3 +517,5 @@ inline val CValue<CXType>.refQualifier: CXRefQualifierKind
     get() = clang_Type_getCXXRefQualifier(this)
 inline val CValue<CXType>.namedType: CValue<CXType>
     get() = clang_Type_getNamedType(this)
+inline val CValue<CXType>.valueType: CValue<CXType>
+    get() = clang_Type_getValueType(this)

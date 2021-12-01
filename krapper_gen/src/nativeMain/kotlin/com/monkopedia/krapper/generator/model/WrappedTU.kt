@@ -3,8 +3,8 @@ package com.monkopedia.krapper.generator.model
 class WrappedTU : WrappedElement() {
     operator fun plus(other: WrappedTU): WrappedTU {
         return WrappedTU().also {
-            it.children.addAll(children)
-            it.children.addAll(other.children)
+            it.addAllChildren(children)
+            it.addAllChildren(other.children)
             it.children.forEach { c ->
                 c.parent = it
             }
@@ -13,7 +13,7 @@ class WrappedTU : WrappedElement() {
 
     override fun clone(): WrappedElement {
         return WrappedTU().also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }

@@ -62,6 +62,8 @@ sealed class Operator {
             BasicUnaryOperator.NOT,
             BasicUnaryOperator.INV,
             BasicUnaryOperator.REFERENCE,
+            BasicAssignmentOperator.ASSIGN,
+            BasicAssignmentOperator.PLUS_EQUALS,
         )
 
         fun from(method: WrappedMethod): Operator? {
@@ -118,6 +120,28 @@ class BasicBinaryOperator private constructor(
         )
     }
 }
+
+class BasicAssignmentOperator private constructor(
+    private val cppOp: String,
+    private val cOp: String,
+    override val kotlinOperatorType: KotlinOperatorType
+) : Operator() {
+
+    override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
+        with(namer) {
+            return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
+        }
+
+    override fun matches(method: WrappedMethod): Boolean {
+        return method.args.size == 1 && method.name.substring("operator".length) == cppOp
+    }
+
+    companion object {
+        val ASSIGN = BasicAssignmentOperator("=", "Assign", InfixMethod("assign"))
+        val PLUS_EQUALS = BasicAssignmentOperator("+=", "PlusEquals", InfixMethod("plusEquals"))
+    }
+}
+
 
 class BasicUnaryOperator private constructor(
     private val cppOp: String,

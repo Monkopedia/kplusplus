@@ -3,6 +3,7 @@ package com.monkopedia.krapper.generator.model.type
 import clang.CXCursorKind.CXCursor_ClassDecl
 import clang.CXCursorKind.CXCursor_ClassTemplate
 import clang.CXCursorKind.CXCursor_NoDeclFound
+import clang.CXCursorKind.CXCursor_TemplateTypeParameter
 import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
 import clang.CXTypeKind.CXType_Unexposed
@@ -14,11 +15,16 @@ import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
+import com.monkopedia.krapper.generator.modifiedType
+import com.monkopedia.krapper.generator.namedType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
+import com.monkopedia.krapper.generator.prettyPrinted
+import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
+import com.monkopedia.krapper.generator.typedefName
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
@@ -69,6 +75,9 @@ abstract class WrappedType : WrappedElement() {
                 if (type.endsWith("&")) {
                     return referenceTo(invoke(type.substring(0, type.length - 1).trim()))
                 }
+//                if (type == "_Alloc" || type == "_Alloc*") {
+//                    Throwable("Alloc $type").printStackTrace()
+//                }
                 WrappedTypeReference(type)
             }
         }
@@ -92,8 +101,12 @@ abstract class WrappedType : WrappedElement() {
             type: CValue<CXType>,
             resolverBuilder: ResolverBuilder
         ): WrappedType {
-            if (type.spelling.toKString()?.endsWith("*") == true) {
+            val spelling = type.spelling.toKString()
+            if (spelling?.endsWith("*") == true) {
                 return pointerTo(invoke(type.pointeeType, resolverBuilder)).maybeConst(type.isConstQualifiedType)
+            }
+            if (spelling?.endsWith("&") == true) {
+                return referenceTo(invoke(type.pointeeType, resolverBuilder)).maybeConst(type.isConstQualifiedType)
             }
             if (type.numTemplateArguments > 0) {
                 val templateReference = createForType(type, resolverBuilder)
@@ -128,10 +141,13 @@ abstract class WrappedType : WrappedElement() {
                         referencedDecl.usr.toKString() ?: error("Declaration missing usr")
                     )
                 }
-                referencedDecl.kind == CXCursor_ClassTemplate -> {
+                referencedDecl.kind == CXCursor_TemplateTypeParameter -> {
                     WrappedTemplateRef(
                         referencedDecl.usr.toKString() ?: error("Declaration missing usr")
                     )
+                }
+                referencedDecl.kind == CXCursor_ClassTemplate -> {
+                    invoke(referencedDecl.fullyQualified)
                 }
                 referencedDecl.kind == CXCursor_ClassDecl -> {
                     invoke(referencedDecl.fullyQualified)

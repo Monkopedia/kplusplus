@@ -71,7 +71,7 @@ class NameHandler {
                             Operator.from(this)?.let {
                                 it.name(this@NamerImpl, cls, this)
                             } ?: cName + "_" + name.splitCamelcase()
-                                .joinToString("_") { it.toLowerCase() }
+                                .joinToString("_") { it.toLowerCase() }.replace("=", "_eq")
                         }
                     }
                 )

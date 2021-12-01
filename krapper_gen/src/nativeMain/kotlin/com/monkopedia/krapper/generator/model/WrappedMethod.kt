@@ -45,7 +45,7 @@ class WrappedConstructor(
         children: List<WrappedElement>
     ): WrappedMethod {
         return WrappedConstructor(name, returnType).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }
@@ -53,7 +53,7 @@ class WrappedConstructor(
     override fun clone(): WrappedConstructor {
         return WrappedConstructor(name, returnType).also {
             it.parent = parent
-            it.children.addAll(children)
+            it.addAllChildren(children)
         }
     }
 }
@@ -70,7 +70,7 @@ class WrappedDestructor(
         children: List<WrappedElement>
     ): WrappedMethod {
         return WrappedDestructor(name, returnType).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }
@@ -78,7 +78,7 @@ class WrappedDestructor(
     override fun clone(): WrappedDestructor {
         return WrappedDestructor(name, returnType).also {
             it.parent = parent
-            it.children.addAll(children)
+            it.addAllChildren(children)
         }
     }
 }
@@ -106,7 +106,7 @@ open class WrappedMethod(
         children: List<WrappedElement> = this.children.toList()
     ): WrappedMethod {
         return WrappedMethod(name, returnType, isStatic, methodType).also {
-            it.children.addAll(children)
+            it.addAllChildren(children)
             it.parent = parent
         }
     }
@@ -114,7 +114,7 @@ open class WrappedMethod(
     override fun clone(): WrappedMethod {
         return WrappedMethod(name, returnType, isStatic, methodType).also {
             it.parent = parent
-            it.children.addAll(children)
+            it.addAllChildren(children)
         }
     }
 
@@ -133,7 +133,7 @@ class WrappedArgument(val name: String, val type: WrappedType) : WrappedElement(
     override fun clone(): WrappedArgument {
         return WrappedArgument(name, type).also {
             it.parent = parent
-            it.children.addAll(children)
+            it.addAllChildren(children)
         }
     }
 

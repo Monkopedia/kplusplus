@@ -118,6 +118,9 @@ private fun typeMapper(
                 if (!tracker.canResolve(it)) {
                     try {
                         val cls = resolver.resolve(it)
+                        if (cls.type.toString().startsWith("typename ")) {
+                            println("Adding typename ${cls.type}")
+                        }
                         tracker.classes[cls.type.toString()] = cls
                         val resolved = resolveAll(cls, tracker, resolver, policy)
                         tracker.classes[cls.type.toString()] = resolved
@@ -127,8 +130,11 @@ private fun typeMapper(
                             // Its ok to not have a class if this reference points at a template.
                             resolver.resolveTemplate(it)
                             tracker.otherResolved.add(it.toString())
+                            if (it.toString().startsWith("typename ")) {
+                                println("Adding typename $it")
+                            }
                         } catch (template: Throwable) {
-                            template.printStackTrace()
+//                            template.printStackTrace()
                             return@operateOn RemoveElement
                         }
                     }

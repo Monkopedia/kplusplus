@@ -23,9 +23,31 @@ import platform.posix.usleep
 private val elementLookup = mutableMapOf<String, WrappedElement>()
 
 open class WrappedElement(
-    val children: MutableList<WrappedElement> = mutableListOf()
+    private val mutableChildren: MutableList<WrappedElement> = mutableListOf()
 ) {
+    val children: List<WrappedElement>
+        get() = mutableChildren
     var parent: WrappedElement? = null
+
+    fun clearChildren() {
+        mutableChildren.clear()
+    }
+
+    fun addAllChildren(list: List<WrappedElement>) {
+        list.forEach {
+            require(!children.contains(it)) {
+                "$this already contains $it"
+            }
+        }
+        mutableChildren.addAll(list)
+    }
+
+    fun addChild(child: WrappedElement) {
+        require(!children.contains(child)) {
+            "$this already contains $child"
+        }
+        mutableChildren.add(child)
+    }
 
     open fun clone(): WrappedElement {
         return WrappedElement(children.toMutableList()).also {
@@ -44,7 +66,7 @@ open class WrappedElement(
                 if (parent.children.contains(child)) {
                     throw IllegalArgumentException("$parent already contains $child")
                 }
-                parent.children.add(child)
+                parent.addChild(child)
                 child.parent = parent
             }
             return element
@@ -150,7 +172,7 @@ fun WrappedElement.filterRecursive(
 fun <T : WrappedElement> T.cloneRecursive(): T {
     return clone().also {
         val newChildren = it.children.map { it.cloneRecursive() }
-        it.children.clear()
-        it.children.addAll(newChildren)
+        it.clearChildren()
+        it.addAllChildren(newChildren)
     } as T
 }

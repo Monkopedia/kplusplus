@@ -111,9 +111,9 @@ class FullKotlinTests {
     private val TESTLIB_TESTCLASS_STR =
         "var str: String?\n" +
             "    inline get() {\n" +
-            "        val str: CPointer<ByteVar>? = TestLib_TestClass_str_get(ptr)\n" +
-            "        val ret: String? = str?.toKString()\n" +
-            "        free(str)\n" +
+            "        val _str: CPointer<ByteVar>? = TestLib_TestClass_str_get(ptr)\n" +
+            "        val ret: String? = _str?.toKString()\n" +
+            "        free(_str)\n" +
             "        return ret\n" +
             "    }\n" +
             "    inline set(value) {\n" +
