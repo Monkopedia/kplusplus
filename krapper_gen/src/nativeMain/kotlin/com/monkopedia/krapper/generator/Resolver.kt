@@ -19,6 +19,7 @@ import clang.CXType
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.arrayOf
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
@@ -57,6 +58,7 @@ interface ResolverBuilder {
 
 fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): List<WrappedClass> {
     val baseList = associate { it.type.toString() to it }
+    println("Seeding with ${baseList.keys}")
     val classMap = ResolveTracker(baseList.toMutableMap())
     val mapper = typeMapper(classMap, resolver, policy)
     val results = mapAll(mapper)
@@ -147,23 +149,30 @@ private fun typeMapper(
 }
 
 inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
-    if (this is WrappedModifiedType) {
-        return typeHandler(baseType).wrapOnReplace {
-            WrappedModifiedType(it, modifier)
+    when {
+        this is WrappedModifiedType -> {
+            return typeHandler(baseType).wrapOnReplace {
+                WrappedModifiedType(it, modifier)
+            }
         }
-    }
-    if (this is WrappedTypeReference) {
-        if (isArray) return typeHandler(arrayType).wrapOnReplace {
-            arrayOf(it)
+        this is WrappedPrefixedType -> {
+            return typeHandler(baseType).wrapOnReplace {
+                WrappedPrefixedType(it, modifier)
+            }
         }
+        this is WrappedTypeReference && this.isArray -> {
+            return typeHandler(arrayType).wrapOnReplace {
+                arrayOf(it)
+            }
+        }
+        this.isPointer -> return typeHandler(pointed).wrapOnReplace {
+            pointerTo(it)
+        }
+        this.isReference -> return typeHandler(unreferenced).wrapOnReplace {
+            referenceTo(it)
+        }
+        else -> return typeHandler(this)
     }
-    if (isPointer) return typeHandler(pointed).wrapOnReplace {
-        pointerTo(it)
-    }
-    if (isReference) return typeHandler(unreferenced).wrapOnReplace {
-        referenceTo(it)
-    }
-    return typeHandler(this)
 }
 
 inline fun MapResult<out WrappedType>.wrapOnReplace(

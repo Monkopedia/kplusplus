@@ -548,7 +548,9 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_BNOT =
         "inline operator fun not(): TestClass {\n" +
-            "    return TestClass((TestLib_TestClass_op_not(ptr) to memScope))\n" +
+            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    TestLib_TestClass_op_not(ptr, retValue.ptr)\n" +
+            "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_BAND =

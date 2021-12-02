@@ -142,7 +142,7 @@ class WrappedArgument(val name: String, val type: WrappedType, val usr: String =
     }
 
     override fun toString(): String {
-        return "$name: $type ($usr)"
+        return "$name: $type"
     }
 
     override fun equals(other: Any?): Boolean {

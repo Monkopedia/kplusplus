@@ -206,12 +206,38 @@ class WrappedKotlinWriter(
                         generateOperator(operator, cls, method)
                     } else {
                         inline {
-                            generateBasicMethod(method, uniqueCName)
+                            generateBasicMethod(fixNaming(method), uniqueCName)
                         }
                     }
                 }
             }
         }
+
+    private val INFIX_LIST = setOf(
+        "assign",
+        "plusEquals",
+        "eq",
+        "neq",
+        "lt",
+        "gt",
+        "lteq",
+        "gteq",
+        "binAnd",
+        "binOr",
+        "and",
+        "or",
+        "xor",
+        "shl",
+        "shr"
+    )
+
+    private fun fixNaming(method: WrappedMethod): WrappedMethod {
+        return if (method.name in INFIX_LIST) {
+            method.copy(name = method.name + "_method")
+        } else {
+            method
+        }
+    }
 
     private fun KotlinCodeBuilder.generateBasicMethod(
         method: WrappedMethod,
@@ -227,7 +253,7 @@ class WrappedKotlinWriter(
             var args = method.args.map {
                 define(it.name, it.type)
             }
-            if (!(returnType.isPointer || returnType.isReference) && returnType.kotlinType.isWrapper) {
+            if (!returnType.isPointer && returnType.kotlinType.isWrapper) {
                 args += this@generateBasicMethod.define(
                     "retValue",
                     returnType,
@@ -339,12 +365,12 @@ class WrappedKotlinWriter(
         returnType: WrappedType,
         call: Call
     ) {
+        val kotlinType = returnType.kotlinType
         when {
-            returnType.kotlinType.isWrapper -> {
-                +Return(Call(returnType.kotlinType.name, call pairedTo memScope))
+            kotlinType.isWrapper -> {
+                +Return(Call(kotlinType.name, call pairedTo memScope))
             }
-            returnType.isString ||
-                (returnType.isPointer && returnType.pointed.isString) -> {
+            kotlinType.toString() == "String?" -> {
                 generateStringReturn(call)
             }
             else -> {

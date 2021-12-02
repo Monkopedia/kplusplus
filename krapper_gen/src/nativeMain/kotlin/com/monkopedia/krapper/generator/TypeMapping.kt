@@ -1,5 +1,6 @@
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.generator.model.MethodType.CONSTRUCTOR
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -149,6 +150,9 @@ fun <T : WrappedElement> mapInternal(
             }
             is WrappedMethod -> {
                 if (element.args.size != resolvedChildren.filterIsInstance<WrappedArgument>().size) {
+                    if (element.methodType == CONSTRUCTOR && (parent as? WrappedClass)?.name.toString().contains("TestClass")) {
+                        println("Removing constructor $element\nargs: ${element.args}\nresolved: $resolvedChildren")
+                    }
                     return RemoveElement
                 }
                 val returnType =

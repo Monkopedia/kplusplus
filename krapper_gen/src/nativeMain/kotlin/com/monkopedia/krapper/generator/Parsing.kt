@@ -343,16 +343,12 @@ fun WrappedTemplate.typedAs(templateSpec: WrappedTemplateType): WrappedClass {
 fun removeDuplicateMethods(element: WrappedElement) {
     if (element is WrappedClass) {
         val signaturesSeen = mutableSetOf<String>()
-        println("Starting signature check for ${element.type}")
         for (child in element.children.filterIsInstance<WrappedMethod>()) {
             val signature = child.generateSignatureString()
-            println("  Checking $signature")
             if (!signaturesSeen.add(signature)) {
-                println("  !! Removing $signature")
                 element.removeChild(child)
             }
         }
-        println("Ending signature check for ${element.type}")
     }
     for (child in element.children) {
         removeDuplicateMethods(child)

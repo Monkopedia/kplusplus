@@ -20,10 +20,10 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 
 sealed class KotlinOperatorType
 
-class KotlinOperator(val name: String) : KotlinOperatorType()
-class InfixMethod(val name: String) : KotlinOperatorType()
-class BasicWithDummyMethod(val name: String) : KotlinOperatorType()
-class BasicMethod(val name: String) : KotlinOperatorType()
+data class KotlinOperator(val name: String) : KotlinOperatorType()
+data class InfixMethod(val name: String) : KotlinOperatorType()
+data class BasicWithDummyMethod(val name: String) : KotlinOperatorType()
+data class BasicMethod(val name: String) : KotlinOperatorType()
 
 sealed class Operator {
 
@@ -88,6 +88,10 @@ class BasicBinaryOperator private constructor(
         return method.args.size == 1 && method.name.substring("operator".length) == cppOp
     }
 
+    override fun toString(): String {
+        return "binary($cppOp, $cOp, $kotlinOperatorType)"
+    }
+
     companion object {
         val MINUS = BasicBinaryOperator("-", "Minus", KotlinOperator("minus"))
         val PLUS = BasicBinaryOperator("+", "Plus", KotlinOperator("plus"))
@@ -136,6 +140,10 @@ class BasicAssignmentOperator private constructor(
         return method.args.size == 1 && method.name.substring("operator".length) == cppOp
     }
 
+    override fun toString(): String {
+        return "assignment($cppOp, $cOp, $kotlinOperatorType)"
+    }
+
     companion object {
         val ASSIGN = BasicAssignmentOperator("=", "Assign", InfixMethod("assign"))
         val PLUS_EQUALS = BasicAssignmentOperator("+=", "PlusEquals", InfixMethod("plusEquals"))
@@ -156,6 +164,10 @@ class BasicUnaryOperator private constructor(
 
     override fun matches(method: WrappedMethod): Boolean {
         return method.args.isEmpty() && method.name.substring("operator".length) == cppOp
+    }
+
+    override fun toString(): String {
+        return "unary($cppOp, $cOp, $kotlinOperatorType)"
     }
 
     companion object {
