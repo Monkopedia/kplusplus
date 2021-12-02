@@ -2,6 +2,7 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import clang.CXCursorKind
+import clang.CXCursorKind.CXCursor_FunctionTemplate
 import clang.CXCursorKind.Companion
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolverBuilder
@@ -44,7 +45,7 @@ open class WrappedElement(
 
     fun addChild(child: WrappedElement) {
         require(!children.contains(child)) {
-            "$this already contains $child"
+            "$this already contain a $child"
         }
         mutableChildren.add(child)
     }
@@ -63,6 +64,14 @@ open class WrappedElement(
                 val child = map(child, resolverBuilder) ?: return@forEachRecursive
                 if (child == element) return@forEachRecursive
                 if (child.parent == parent) return@forEachRecursive
+                if (parent is WrappedMethod && child is WrappedArgument) {
+                    // Hack for now to handle complicated parts of the AST from clang.
+                    // There are multiple method declarations with the same usr, but
+                    // containing params with different usr, not sure what to do with that...
+                    if (parent.args.any { it.name == child.name }) {
+                        return@forEachRecursive
+                    }
+                }
                 if (parent.children.contains(child)) {
                     throw IllegalArgumentException("$parent already contains $child")
                 }
@@ -95,7 +104,7 @@ open class WrappedElement(
                 }
             }
 
-            if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate) {
+            if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate || value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected) {
                 return null
             }
             val element = when (value.kind) {

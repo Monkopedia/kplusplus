@@ -68,6 +68,9 @@ abstract class WrappedType : WrappedElement() {
             if (type == "void") return VOID
             if (type == "std::size_t") return invoke("size_t")
             if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
+            if (type.startsWith("typename ")) {
+                return WrappedTypename(type.substring("typename ".length))
+            }
             return existingTypes.getOrPut(type) {
                 if (type.endsWith("*")) {
                     return pointerTo(invoke(type.substring(0, type.length - 1).trim()))

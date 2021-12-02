@@ -640,9 +640,10 @@ class CppCodeTests {
         }
     """.trimIndent()
     private val TESTLIB_TESTCLASS_BNOT = """
-        void* TestLib_TestClass_op_not(void* thiz) {
+        void TestLib_TestClass_op_not(void* thiz, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
-            return thiz_cast->operator!();
+            TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
+            *(ret_value_cast) = thiz_cast->operator!();
         }
     """.trimIndent()
     private val TESTLIB_TESTCLASS_BAND = """

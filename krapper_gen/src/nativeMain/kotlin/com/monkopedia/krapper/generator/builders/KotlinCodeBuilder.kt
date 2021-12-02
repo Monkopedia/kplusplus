@@ -181,7 +181,7 @@ fun KotlinCodeBuilder.define(
 
 inline fun KotlinCodeBuilder.cls(
     name: Symbol,
-    constructorVisibility: Symbol = Private,
+    constructorVisibility: Symbol = Public,
     builder: KotlinCodeBuilder.(LocalVar) -> Unit
 ) {
     functionScope {

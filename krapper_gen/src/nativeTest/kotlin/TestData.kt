@@ -1005,7 +1005,7 @@ class TestDataClass {
 
     inner class VectorClass {
         val localType = WrappedType("std::vector")
-        val template = WrappedTemplateParam("_Tp", "_Tp", null)
+        val template = WrappedTemplateParam("_Tp", "_Tp")
         val type = WrappedTemplateType(localType, listOf(WrappedType("std::string")))
         val constructor = WrappedConstructor("std::vector", WrappedTemplateType(localType, listOf(WrappedTemplateRef(template.usr))))
         val destructor = WrappedDestructor("~std::vector", VOID)
@@ -1534,7 +1534,7 @@ class TestDataClass {
 
     inner class MyPairClass {
         val type = WrappedType("TestLib::MyPair")
-        val templateParam = WrappedTemplateParam("T", "T", null)
+        val templateParam = WrappedTemplateParam("T", "T")
         val aprop = WrappedField("a", WrappedTemplateRef(templateParam.usr))
         val bprop = WrappedField("b", WrappedTemplateRef(templateParam.usr))
         val constructor =

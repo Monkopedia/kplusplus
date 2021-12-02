@@ -169,6 +169,10 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
         }
     }
 
+    override fun toString(): String {
+        return "typedef $name = $targetType"
+    }
+
     companion object {
         private fun determineType(
             value: CValue<CXCursor>,

@@ -54,6 +54,8 @@ import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.staticCFunction
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 enum class ErrorPolicy(val policy: CodeGenerationPolicy) {
     FAIL(ThrowPolicy),
@@ -113,6 +115,9 @@ class KrapperGen : CliktCommand() {
 //                defer {
 //                    tu.dispose()
 //                }
+//                        val info = Utils.CursorTreeInfo(tu.cursor)
+//                        println("Writing ${tu.cursor.usr.toKString()}")
+//                        File("/tmp/full_tree.json").writeText(Json.encodeToString(info))
 //                tu.cursor.filterChildrenRecursive {
 //                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
 //                        val info = Utils.CursorTreeInfo(it)
@@ -123,6 +128,11 @@ class KrapperGen : CliktCommand() {
 //                        val info = Utils.CursorTreeInfo(it)
 //                        println("Writing ${it.usr.toKString()}")
 //                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
+//                    }
+//                    if (it.kind == CXCursorKind.CXCursor_ClassTemplate && it.fullyQualified.contains("basic_string") && !it.fullyQualified.contains("basic_stringbuf")) {
+//                        val info = Utils.CursorTreeInfo(it)
+//                        println("Writing ${it.usr.toKString()}")
+//                        File("/tmp/basic_string.json").writeText(Json.encodeToString(info))
 //                    }
 //                    false
 //                }

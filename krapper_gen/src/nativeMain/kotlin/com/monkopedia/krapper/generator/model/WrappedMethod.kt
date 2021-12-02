@@ -21,9 +21,11 @@ import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.result
+import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
+import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 
 enum class MethodType {
@@ -96,6 +98,7 @@ open class WrappedMethod(
         method.referenced.spelling.toKString() ?: error("Can't find name of $method"),
         WrappedType(method.type.result, resolverBuilder),
         method.isStatic,
+        MethodType.METHOD
     )
 
     open fun copy(
@@ -124,20 +127,25 @@ open class WrappedMethod(
     }
 }
 
-class WrappedArgument(val name: String, val type: WrappedType) : WrappedElement() {
+class WrappedArgument(val name: String, val type: WrappedType, val usr: String = "") : WrappedElement() {
     constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         arg.spelling.toKString() ?: error("Can't find name of $arg"),
-        WrappedType(arg.type, resolverBuilder)
+        WrappedType(arg.type, resolverBuilder),
+        arg.usr.toKString() ?: ""
     )
 
     override fun clone(): WrappedArgument {
-        return WrappedArgument(name, type).also {
+        return WrappedArgument(name, type, usr).also {
             it.parent = parent
             it.addAllChildren(children)
         }
     }
 
     override fun toString(): String {
-        return "$name: $type"
+        return "$name: $type ($usr)"
+    }
+
+    override fun equals(other: Any?): Boolean {
+        return (other as? WrappedArgument)?.name == name && other.type == type
     }
 }

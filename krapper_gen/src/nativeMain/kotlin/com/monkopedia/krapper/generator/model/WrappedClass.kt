@@ -63,6 +63,10 @@ class WrappedClass(
     )
 
     override fun clone(): WrappedClass {
+        return clone(this.specifiedType)
+    }
+
+    fun clone(specifiedType: WrappedType? = this.specifiedType): WrappedClass {
         return WrappedClass(name, specifiedType).also {
             it.parent = parent
             it.addAllChildren(children)

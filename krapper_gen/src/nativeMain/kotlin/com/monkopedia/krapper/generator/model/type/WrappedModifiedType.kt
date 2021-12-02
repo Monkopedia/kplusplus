@@ -2,7 +2,7 @@ package com.monkopedia.krapper.generator.model.type
 
 class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : WrappedType() {
     override val isReturnable: Boolean
-        get() = modifier == "*" || modifier == "&" || baseType.isReturnable
+        get() = modifier == "*" || baseType.isReturnable
     override val cType: WrappedType
         get() = if (baseType.isString) baseType.cType else when (modifier) {
             "*",

@@ -56,7 +56,7 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
             |
-            |value class EmptyClass private constructor(val source: Pair<COpaquePointer, MemScope>) {
+            |value class EmptyClass public constructor(val source: Pair<COpaquePointer, MemScope>) {
             |    val ptr: COpaquePointer
             |        inline get() {
             |            return source.first
@@ -389,7 +389,7 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
             |
-            |value class iterator__string private constructor(val source: Pair<COpaquePointer, MemScope>) {
+            |value class iterator__string public constructor(val source: Pair<COpaquePointer, MemScope>) {
             |    val ptr: COpaquePointer
             |        inline get() {
             |            return source.first

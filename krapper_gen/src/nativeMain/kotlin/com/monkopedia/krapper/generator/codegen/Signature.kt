@@ -100,7 +100,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
         }
     } + listOfNotNull(
         if (method.methodType == MethodType.METHOD && !method.returnType.isReturnable) {
-            val type = method.returnType
+            val type = if (method.returnType.isReference) method.returnType.unreferenced else method.returnType
             if (type.isPointer) {
                 WrapperArgument(null, type, define("ret_value", type.cType), false)
             } else {

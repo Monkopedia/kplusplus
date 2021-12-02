@@ -30,8 +30,6 @@ interface Resolver {
     fun resolve(type: WrappedType): WrappedClass
     fun resolveTemplate(type: WrappedType): WrappedTemplate
     fun findClasses(filter: ClassFilter): List<WrappedClass>
-    fun startCapture()
-    fun endCapture(): List<WrappedClass>
 }
 
 private class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
@@ -39,7 +37,7 @@ private class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
         if (type is WrappedModifiedType) {
             return canResolve(type.baseType)
         }
-        if (type.isNative || type.isVoid || type.isReturnable) return true
+        if (type.isNative || type.isVoid) return true
         if (type !is WrappedTypeReference) {
             return canResolve(type.toString())
         }
@@ -58,12 +56,17 @@ interface ResolverBuilder {
 }
 
 fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): List<WrappedClass> {
-    val classMap = ResolveTracker(associate { it.type.toString() to it }.toMutableMap())
+    val baseList = associate { it.type.toString() to it }
+    val classMap = ResolveTracker(baseList.toMutableMap())
     val mapper = typeMapper(classMap, resolver, policy)
-    resolver.startCapture()
-    val list = mapAll(mapper)
-    val extras = resolver.endCapture()
-    return list + extras
+    val results = mapAll(mapper)
+    for (key in baseList.keys) {
+        classMap.classes.remove(key)
+    }
+    for (cls in results) {
+        classMap.classes[cls.type.toString()] = cls
+    }
+    return classMap.classes.values.toList()
 }
 
 private fun resolveAll(
@@ -73,7 +76,7 @@ private fun resolveAll(
     policy: ReferencePolicy
 ): WrappedClass? {
     val mapper = typeMapper(classMap, resolver, policy)
-    return when (val result = map(cls, mapper)) {
+    return when (val result = map(cls, null, mapper)) {
         RemoveElement -> null
         ElementUnchanged -> cls
         is ReplaceWith -> result.replacement
@@ -86,7 +89,7 @@ private fun typeMapper(
     policy: ReferencePolicy
 ): TypeMapping {
     return when (policy) {
-        ReferencePolicy.IGNORE_MISSING -> return { t ->
+        ReferencePolicy.IGNORE_MISSING -> return { t, _ ->
             t.operateOn {
                 if (tracker.canResolve(it)) {
                     ElementUnchanged
@@ -95,7 +98,7 @@ private fun typeMapper(
                 }
             }
         }
-        ReferencePolicy.OPAQUE_MISSING -> return { t ->
+        ReferencePolicy.OPAQUE_MISSING -> return { t, _ ->
             t.operateOn {
                 if (tracker.canResolve(it)) {
                     ElementUnchanged
@@ -104,7 +107,7 @@ private fun typeMapper(
                 }
             }
         }
-        ReferencePolicy.THROW_MISSING -> return { t ->
+        ReferencePolicy.THROW_MISSING -> return { t, _ ->
             t.operateOn {
                 if (tracker.canResolve(it)) {
                     ElementUnchanged
@@ -113,28 +116,25 @@ private fun typeMapper(
                 }
             }
         }
-        ReferencePolicy.INCLUDE_MISSING -> return { t ->
+        ReferencePolicy.INCLUDE_MISSING -> return { t, _ ->
             t.operateOn {
                 if (!tracker.canResolve(it)) {
                     try {
                         val cls = resolver.resolve(it)
-                        if (cls.type.toString().startsWith("typename ")) {
-                            println("Adding typename ${cls.type}")
+                        tracker.otherResolved.add(cls.type.toString())
+                        try {
+                            val resolved = resolveAll(cls, tracker, resolver, policy)
+                            tracker.classes[cls.type.toString()] = resolved
+                                ?: error("Couldn't include ${cls.type}, resolve failed")
+                        } finally {
+                            tracker.otherResolved.remove(cls.type.toString())
                         }
-                        tracker.classes[cls.type.toString()] = cls
-                        val resolved = resolveAll(cls, tracker, resolver, policy)
-                        tracker.classes[cls.type.toString()] = resolved
-                            ?: error("Couldn't include ${cls.type}, resolve failed")
                     } catch (original: Throwable) {
                         try {
                             // Its ok to not have a class if this reference points at a template.
                             resolver.resolveTemplate(it)
                             tracker.otherResolved.add(it.toString())
-                            if (it.toString().startsWith("typename ")) {
-                                println("Adding typename $it")
-                            }
                         } catch (template: Throwable) {
-//                            template.printStackTrace()
                             return@operateOn RemoveElement
                         }
                     }
@@ -145,7 +145,7 @@ private fun typeMapper(
     }
 }
 
-private inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
+inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
     if (this is WrappedModifiedType) {
         return typeHandler(baseType).wrapOnReplace {
             WrappedModifiedType(it, modifier)
@@ -165,7 +165,7 @@ private inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult
     return typeHandler(this)
 }
 
-private inline fun MapResult<out WrappedType>.wrapOnReplace(
+inline fun MapResult<out WrappedType>.wrapOnReplace(
     typeWrapping: (WrappedType) -> WrappedType
 ): MapResult<out WrappedType> {
     return when (this) {
