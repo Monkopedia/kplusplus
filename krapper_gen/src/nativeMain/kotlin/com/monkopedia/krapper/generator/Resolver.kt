@@ -124,8 +124,9 @@ private fun typeMapper(
                         tracker.otherResolved.add(cls.type.toString())
                         try {
                             val resolved = resolveAll(cls, tracker, resolver, policy)
-                            tracker.classes[cls.type.toString()] = resolved
                                 ?: error("Couldn't include ${cls.type}, resolve failed")
+                            removeDuplicateMethods(resolved)
+                            tracker.classes[cls.type.toString()] = resolved
                         } finally {
                             tracker.otherResolved.remove(cls.type.toString())
                         }

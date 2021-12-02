@@ -56,6 +56,10 @@ open class WrappedElement(
         }
     }
 
+    fun removeChild(child: WrappedElement) {
+        mutableChildren.remove(child)
+    }
+
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
             val element = map(value, resolverBuilder) ?: return null
@@ -125,8 +129,8 @@ open class WrappedElement(
                 CXCursorKind.CXCursor_Constructor -> WrappedConstructor(
                     value.spelling.toKString() ?: "constructor", WrappedType.VOID
                 )
-                CXCursorKind.CXCursor_Destructor -> WrappedConstructor(
-                    value.spelling.toKString() ?: "constructor", WrappedType.VOID
+                CXCursorKind.CXCursor_Destructor -> WrappedDestructor(
+                    value.spelling.toKString() ?: "destructor", WrappedType.VOID
                 )
 //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
                 CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(

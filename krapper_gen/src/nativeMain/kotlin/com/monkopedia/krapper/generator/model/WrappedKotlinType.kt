@@ -84,6 +84,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     }
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     if (type.isString) return fullyQualifiedType("String?")
+    if (type.toString() == "const char*") return fullyQualifiedType("String?")
     if (type.isPointer) {
         if (type == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
@@ -142,6 +143,10 @@ fun nullable(base: WrappedKotlinType): WrappedKotlinType {
             get() = base.name + "?"
         override val pkg: String
             get() = base.pkg
+
+        override fun toString(): String {
+            return "$base?"
+        }
     }
 }
 
@@ -173,6 +178,10 @@ fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKot
             get() = "${baseType.name}<${parseTypes.joinToString(", ") { it.name }}>"
         override val pkg: String
             get() = baseType.pkg
+
+        override fun toString(): String {
+            return "$baseType<${parseTypes.joinToString(", ")}>"
+        }
     }
 }
 

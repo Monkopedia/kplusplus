@@ -27,8 +27,10 @@ import clang.clang_getCString
 import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.model.MethodType.METHOD
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
+import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
@@ -335,6 +337,40 @@ fun WrappedTemplate.typedAs(templateSpec: WrappedTemplateType): WrappedClass {
         RemoveElement -> throw IllegalArgumentException("Can't map $outputClass")
         ElementUnchanged -> outputClass
         is ReplaceWith -> result.replacement
-    }.also {
+    }
+}
+
+fun removeDuplicateMethods(element: WrappedElement) {
+    if (element is WrappedClass) {
+        val signaturesSeen = mutableSetOf<String>()
+        println("Starting signature check for ${element.type}")
+        for (child in element.children.filterIsInstance<WrappedMethod>()) {
+            val signature = child.generateSignatureString()
+            println("  Checking $signature")
+            if (!signaturesSeen.add(signature)) {
+                println("  !! Removing $signature")
+                element.removeChild(child)
+            }
+        }
+        println("Ending signature check for ${element.type}")
+    }
+    for (child in element.children) {
+        removeDuplicateMethods(child)
+    }
+}
+
+private fun WrappedMethod.generateSignatureString(): String {
+    return buildString {
+        append(methodType.ordinal)
+        if (methodType == METHOD) {
+            append(returnType.toString())
+        }
+        append('#')
+        append(name)
+        append(',')
+        for (argument in args) {
+            append(argument.type.toString())
+            append(',')
+        }
     }
 }
