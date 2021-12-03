@@ -117,7 +117,7 @@ class CppCodeTests {
     """.trimIndent()
     private val TESTLIB_TESTCLASS__NEW = """
         void* TestLib_TestClass_new(void* other) {
-            TestLib::TestClass* other_cast = reinterpret_cast<TestLib::TestClass*>(other);
+            const TestLib::TestClass* other_cast = reinterpret_cast<const TestLib::TestClass*>(other);
             return new TestLib::TestClass(*(other_cast));
         }
     """.trimIndent()

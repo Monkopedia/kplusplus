@@ -68,7 +68,9 @@ fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): 
     for (cls in results) {
         classMap.classes[cls.type.toString()] = cls
     }
-    return classMap.classes.values.toList()
+    return classMap.classes.values.map {
+        it.also { it.generateConstructorIfNeeded() }
+    }
 }
 
 private fun resolveAll(
@@ -148,27 +150,27 @@ private fun typeMapper(
     }
 }
 
-inline fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
+fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
     when {
         this is WrappedModifiedType -> {
-            return typeHandler(baseType).wrapOnReplace {
+            return (baseType.operateOn(typeHandler)).wrapOnReplace {
                 WrappedModifiedType(it, modifier)
             }
         }
         this is WrappedPrefixedType -> {
-            return typeHandler(baseType).wrapOnReplace {
+            return (baseType.operateOn(typeHandler)).wrapOnReplace {
                 WrappedPrefixedType(it, modifier)
             }
         }
         this is WrappedTypeReference && this.isArray -> {
-            return typeHandler(arrayType).wrapOnReplace {
+            return (arrayType.operateOn(typeHandler)).wrapOnReplace {
                 arrayOf(it)
             }
         }
-        this.isPointer -> return typeHandler(pointed).wrapOnReplace {
+        this.isPointer -> return (pointed.operateOn(typeHandler)).wrapOnReplace {
             pointerTo(it)
         }
-        this.isReference -> return typeHandler(unreferenced).wrapOnReplace {
+        this.isReference -> return (unreferenced.operateOn(typeHandler)).wrapOnReplace {
             referenceTo(it)
         }
         else -> return typeHandler(this)

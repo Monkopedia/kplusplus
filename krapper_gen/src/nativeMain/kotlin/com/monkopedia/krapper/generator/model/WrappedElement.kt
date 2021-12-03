@@ -2,8 +2,6 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import clang.CXCursorKind
-import clang.CXCursorKind.CXCursor_FunctionTemplate
-import clang.CXCursorKind.Companion
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
@@ -18,7 +16,6 @@ import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
-import platform.posix.usleep
 
 @ThreadLocal
 private val elementLookup = mutableMapOf<String, WrappedElement>()
@@ -62,10 +59,10 @@ open class WrappedElement(
 
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
-            val element = map(value, resolverBuilder) ?: return null
+            val element = map(value, null, resolverBuilder) ?: return null
             value.forEachRecursive { child, parent ->
-                val parent = map(parent, resolverBuilder) ?: return@forEachRecursive
-                val child = map(child, resolverBuilder) ?: return@forEachRecursive
+                val parent = map(parent, null, resolverBuilder) ?: return@forEachRecursive
+                val child = map(child, parent, resolverBuilder) ?: return@forEachRecursive
                 if (child == element) return@forEachRecursive
                 if (child.parent == parent) return@forEachRecursive
                 if (parent is WrappedMethod && child is WrappedArgument) {
@@ -87,13 +84,7 @@ open class WrappedElement(
 
         private fun map(
             value: CValue<CXCursor>,
-            resolverBuilder: ResolverBuilder
-        ): WrappedElement? {
-            return fetchElement(value, resolverBuilder)
-        }
-
-        private fun fetchElement(
-            value: CValue<CXCursor>,
+            parent: WrappedElement?,
             resolverBuilder: ResolverBuilder
         ): WrappedElement? {
             val strTag = value.usr.toKString() ?: "${value.spelling.toKString()}:${value.hash}"
@@ -108,7 +99,11 @@ open class WrappedElement(
                 }
             }
 
-            if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate || value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected) {
+            if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate ||
+                value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected) {
+                if (value.kind == CXCursorKind.CXCursor_Constructor) {
+                    (parent as? WrappedClass)?.hasConstructor = true
+                }
                 return null
             }
             val element = when (value.kind) {

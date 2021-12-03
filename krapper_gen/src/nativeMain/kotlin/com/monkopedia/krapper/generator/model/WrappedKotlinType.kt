@@ -98,7 +98,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 )
             )
         }
-        return WrappedKotlinType(type.pointed)
+        return nullable(WrappedKotlinType(type.pointed))
     }
     if (type.isReference) {
         return WrappedKotlinType(type.unreferenced)

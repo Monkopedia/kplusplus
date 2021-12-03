@@ -62,7 +62,7 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
         get() = false
 
     override val pointed: WrappedType
-        get() = if (modifier == "*") baseType else error("Cannot find pointed of non-pointer $this")
+        get() = if (baseType.isPointer) WrappedPrefixedType(baseType.pointed, modifier) else error("Cannot find pointed of non-pointer $this")
     override val isPointer: Boolean
         get() = baseType.isPointer
 
@@ -77,7 +77,7 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
     override val isConst: Boolean
         get() = modifier == "const" || baseType.isConst
     override val unconst: WrappedType
-        get() = if (isConst) baseType.unconst else WrappedPrefixedType(baseType.unconst, modifier)
+        get() = if (modifier == "const") baseType.unconst else WrappedPrefixedType(baseType.unconst, modifier)
 
     override fun toString(): String {
         return "$modifier $baseType"

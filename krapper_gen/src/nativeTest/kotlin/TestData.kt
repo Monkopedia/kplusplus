@@ -30,6 +30,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 
@@ -1137,7 +1138,7 @@ class TestDataClass {
         val constructor = WrappedConstructor("new", type)
         val copyConstructor =
             WrappedConstructor("new", type).also {
-                it.addAllChildren(listOf(WrappedArgument("other", type)))
+                it.addAllChildren(listOf(WrappedArgument("other", referenceTo(const(type)))))
             }
         val otherConstructor =
             WrappedConstructor("new", type).also {

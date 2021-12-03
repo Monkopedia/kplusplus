@@ -62,11 +62,10 @@ import com.monkopedia.krapper.generator.model.WrappedDestructor
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
 import com.monkopedia.krapper.generator.model.nullable
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.typedWith
-
 
 class WrappedKotlinWriter(
     private val nameHandler: NameHandler,
@@ -189,7 +188,7 @@ class WrappedKotlinWriter(
                             }
                             +Return(
                                 Call(
-                                    cls.type.kotlinType.name,
+                                    cls.type.kotlinType.name.trimEnd('?'),
                                     obj.reference pairedTo thiz.reference
                                 )
                             )
@@ -336,7 +335,13 @@ class WrappedKotlinWriter(
 
     private fun reference(v: LocalVar): Symbol {
         (v as? KotlinLocalVar) ?: error("Non-kotlin local var $v")
-        return if (v.type.isWrapper) v.reference dot ptr else v.reference
+        return if (v.type.isWrapper) {
+                if (v.type.toString().endsWith("?")) {
+                    v.reference qdot ptr
+                } else {
+                    v.reference dot ptr
+                }
+            } else v.reference
     }
 
     override fun KotlinCodeBuilder.onGenerate(cls: WrappedClass, field: WrappedField) =
@@ -368,7 +373,17 @@ class WrappedKotlinWriter(
         val kotlinType = returnType.kotlinType
         when {
             kotlinType.isWrapper -> {
-                +Return(Call(kotlinType.name, call pairedTo memScope))
+                +Return(
+                    Call(
+                        kotlinType.name.trimEnd('?'),
+                        (
+                            if (kotlinType.toString()
+                                .endsWith("?")
+                            ) call elvis Return(Raw("null"))
+                            else call
+                            ) pairedTo memScope
+                    )
+                )
             }
             kotlinType.toString() == "String?" -> {
                 generateStringReturn(call)

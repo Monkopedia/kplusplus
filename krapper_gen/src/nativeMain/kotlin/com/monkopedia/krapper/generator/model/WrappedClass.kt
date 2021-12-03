@@ -24,7 +24,6 @@ import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -41,6 +40,8 @@ class WrappedClass(
     val name: String,
     val specifiedType: WrappedType? = null
 ) : WrappedElement() {
+    var hasConstructor: Boolean = false
+        get() = field || children.any { (it as? WrappedConstructor) != null }
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
 
@@ -50,7 +51,8 @@ class WrappedClass(
     private val qualified: String
         get() = withParents.mapNotNull { it.named }.joinToString("::")
     private val WrappedElement.withParents: List<WrappedElement>
-        get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents)) ?: listOf(this@withParents)
+        get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents))
+            ?: listOf(this@withParents)
     private val WrappedElement.named: String?
         get() = when (this) {
             is WrappedClass -> this@named.name
@@ -70,6 +72,12 @@ class WrappedClass(
         return WrappedClass(name, specifiedType).also {
             it.parent = parent
             it.addAllChildren(children)
+        }
+    }
+
+    fun generateConstructorIfNeeded() {
+        if (!hasConstructor) {
+            addChild(WrappedConstructor("new", type))
         }
     }
 

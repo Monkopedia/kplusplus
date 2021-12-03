@@ -15,6 +15,7 @@
  */
 import Complex.Companion.Complex
 import TestClass.Companion.TestClass
+import TestLib.OtherClass
 import TestLib.TestClass.Companion.TestClass
 import kotlinx.cinterop.BooleanVar
 import kotlinx.cinterop.ByteVar
@@ -31,6 +32,7 @@ import kotlinx.cinterop.cValue
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
+import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 
 class App {
@@ -242,7 +244,7 @@ fun main() {
         println("op12 eq comp")
         op12.output()
 
-        val op13 = c1 notEq c2
+        val op13 = c1 neq c2
         println("op13 neq")
         op13.output()
 
@@ -266,11 +268,11 @@ fun main() {
         println("op18 boolean not")
         op18.output()
 
-        val op19 = c1 band c2
+        val op19 = c1 binAnd c2
         println("op19 boolean and")
         op19.output()
 
-        val op20 = c1 bor c2
+        val op20 = c1 binOr c2
         println("op20 boolean or")
         op20.output()
 
@@ -303,7 +305,7 @@ fun main() {
         op27.output()
 
         println("Sum: ${c1.sum()}")
-        println("Long pointer: " + c1.longPointer()?.get(0) + "")
+        println("Long pointer: " + c1.longPointer()?.usePinned { it.get() } + "")
 
         c1.setSome(1, 2, 3)
         println("setSome")
