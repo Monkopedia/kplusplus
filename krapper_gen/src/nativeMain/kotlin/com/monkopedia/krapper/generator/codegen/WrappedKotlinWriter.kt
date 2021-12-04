@@ -335,13 +335,18 @@ class WrappedKotlinWriter(
 
     private fun reference(v: LocalVar): Symbol {
         (v as? KotlinLocalVar) ?: error("Non-kotlin local var $v")
-        return if (v.type.isWrapper) {
-                if (v.type.toString().endsWith("?")) {
-                    v.reference qdot ptr
-                } else {
-                    v.reference dot ptr
-                }
-            } else v.reference
+        val type = v.type
+        return reference(type, v)
+    }
+
+    private fun reference(type: WrappedKotlinType, v: LocalVar): Symbol {
+        return if (type.isWrapper) {
+            if (type.toString().endsWith("?")) {
+                v.reference qdot ptr
+            } else {
+                v.reference dot ptr
+            }
+        } else v.reference
     }
 
     override fun KotlinCodeBuilder.onGenerate(cls: WrappedClass, field: WrappedField) =
@@ -359,7 +364,11 @@ class WrappedKotlinWriter(
                 if (!field.type.isConst) {
                     setter = inline(
                         setter { value ->
-                            +Call(extensionMethod(pkg, field.uniqueCSetter), ptr, value.reference)
+                            +Call(
+                                extensionMethod(pkg, field.uniqueCSetter),
+                                ptr,
+                                reference(field.type.kotlinType, value)
+                            )
                         }
                     )
                 }

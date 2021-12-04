@@ -16,6 +16,7 @@
 import Complex.Companion.Complex
 import TestClass.Companion.TestClass
 import TestLib.OtherClass
+import TestLib.OtherClass.Companion.OtherClass
 import TestLib.TestClass.Companion.TestClass
 import kotlinx.cinterop.BooleanVar
 import kotlinx.cinterop.ByteVar
@@ -325,9 +326,9 @@ fun main() {
             "THIRD"
         )
 
-        other.privateString = "Prefix: "
+        other.setPrivateString("Prefix: ")
         other.appendText(vect)
-        println("Other text: ${other.privateString}")
+        println("Other text: ${other.getPrivateString()}")
 
         c1.setPrivateFrom(other)
         println("Set from other")

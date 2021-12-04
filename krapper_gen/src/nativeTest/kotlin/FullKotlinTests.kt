@@ -73,12 +73,12 @@ class FullKotlinTests {
             "    return TestLib_OtherClass_append_text(ptr, text.ptr)\n" +
             "}"
     private val TESTLIB_OTHERCLASS_COPIES =
-        "inline fun copies(): MyPair__OtherClass {\n" +
-            "    return MyPair__OtherClass((TestLib_OtherClass_copies(ptr) to memScope))\n" +
+        "inline fun copies(): MyPair__OtherClass? {\n" +
+            "    return MyPair__OtherClass(((TestLib_OtherClass_copies(ptr) ?: return null) to memScope))\n" +
             "}"
     private val TESTLIB_OTHERCLASS_INTS =
-        "inline fun ints(): MyPair__Int {\n" +
-            "    return MyPair__Int((TestLib_OtherClass_ints(ptr) to memScope))\n" +
+        "inline fun ints(): MyPair__Int? {\n" +
+            "    return MyPair__Int(((TestLib_OtherClass_ints(ptr) ?: return null) to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_B =
@@ -419,8 +419,8 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS_SET_PRIVATE_FROM =
-        "inline fun setPrivateFrom(value: OtherClass): Unit {\n" +
-            "    return TestLib_TestClass_set_private_from(ptr, value.ptr)\n" +
+        "inline fun setPrivateFrom(value: OtherClass?): Unit {\n" +
+            "    return TestLib_TestClass_set_private_from(ptr, value?.ptr)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_OUTPUT = "inline fun output(): Unit {\n" +
@@ -568,8 +568,8 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS_NOT =
-        "inline fun inv(): TestClass {\n" +
-            "    return TestClass((TestLib_TestClass_op_inv(ptr) to memScope))\n" +
+        "inline fun inv(): TestClass? {\n" +
+            "    return TestClass(((TestLib_TestClass_op_inv(ptr) ?: return null) to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_AND =
