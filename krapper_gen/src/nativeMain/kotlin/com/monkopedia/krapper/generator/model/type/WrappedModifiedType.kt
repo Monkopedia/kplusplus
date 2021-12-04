@@ -77,7 +77,7 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
     override val isConst: Boolean
         get() = modifier == "const" || baseType.isConst
     override val unconst: WrappedType
-        get() = if (modifier == "const") baseType.unconst else WrappedPrefixedType(baseType.unconst, modifier)
+        get() = if (modifier == "const") baseType else WrappedPrefixedType(baseType.unconst, modifier)
 
     override fun toString(): String {
         return "$modifier $baseType"

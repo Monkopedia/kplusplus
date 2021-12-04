@@ -125,6 +125,7 @@ fun find(s: String): String? {
     return error("Can't find $s in $paths")
 }
 
+
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
 val INCLUDE_PATHS = generateIncludes()
 
@@ -359,14 +360,19 @@ private fun WrappedMethod.generateSignatureString(): String {
     return buildString {
         append(methodType.ordinal)
         if (methodType == METHOD) {
-            append(returnType.toString())
+            append(returnType.maybeUnconst.maybeUnreferenced.toString())
         }
         append('#')
         append(name)
         append(',')
         for (argument in args) {
-            append(argument.type.toString())
+            append(argument.type.maybeUnconst.maybeUnreferenced.toString())
             append(',')
         }
     }
 }
+
+private val WrappedType.maybeUnconst: WrappedType
+    get() = if (isConst) unconst else this
+private val WrappedType.maybeUnreferenced: WrappedType
+    get() = if (isReference) unreferenced else this
