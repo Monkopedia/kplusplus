@@ -62,6 +62,7 @@ sealed class Operator {
             BasicUnaryOperator.NOT,
             BasicUnaryOperator.INV,
             BasicUnaryOperator.REFERENCE,
+            BasicUnaryOperator.POINTER_REFERENCE,
             BasicAssignmentOperator.ASSIGN,
             BasicAssignmentOperator.PLUS_EQUALS,
         )
@@ -178,5 +179,6 @@ class BasicUnaryOperator private constructor(
         val NOT = BasicUnaryOperator("!", "Not", KotlinOperator("not"))
         val INV = BasicUnaryOperator("~", "Inv", BasicMethod("inv"))
         val REFERENCE = BasicUnaryOperator("*", "Reference", BasicMethod("reference"))
+        val POINTER_REFERENCE = BasicUnaryOperator("->", "PointerReference", BasicMethod("pointer_reference"))
     }
 }
