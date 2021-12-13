@@ -359,9 +359,6 @@ fun removeDuplicateMethods(element: WrappedElement) {
 private fun WrappedMethod.generateSignatureString(): String {
     return buildString {
         append(methodType.ordinal)
-        if (methodType == METHOD) {
-            append(returnType.maybeUnconst.maybeUnreferenced.toString())
-        }
         append('#')
         append(name)
         append(',')

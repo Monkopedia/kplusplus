@@ -67,14 +67,14 @@ fun main() {
         println("Set boolean")
         c1.output()
 
-//        c1.st = 1UL
-//        println("Set st")
-//        c1.output()
-//
-//        c1.uit = 2U
-//        println("Set uit")
-//        c1.output()
-//
+        c1.st = 1UL
+        println("Set st")
+        c1.output()
+
+        c1.uit = 2U
+        println("Set uit")
+        c1.output()
+
 //        c1.array = intArrayOf(
 //            3,
 //            4,
@@ -85,7 +85,7 @@ fun main() {
 //        println("Set array")
 //        c1.output()
 
-        c1.str = "My test string"
+        c1.str = "My test string".cstr
         println("Set str")
         c1.output()
 
@@ -137,7 +137,7 @@ fun main() {
         println("Set d")
         c1.output()
 
-        c1.ld = 20.0
+//        c1.ld = 20.0
         println("Set ld")
         c1.output()
 
@@ -193,8 +193,8 @@ fun main() {
         println("Set pd")
         c1.output()
 
-        c1.setPrivateString("Unary private string")
-        c2.setPrivateString("My private string")
+        c1.setPrivateString(basic_string__Byte().also { it.assign("Unary private string") })
+        c2.setPrivateString(basic_string__Byte().also { it.assign("My private string") })
         val op1 = c1 - c2
         println("op1 minus")
         op1.output()
@@ -301,7 +301,7 @@ fun main() {
         println("op26 shr")
         op26.output()
 
-        val op27 = c1["something"]
+        val op27 = c1[basic_string__Byte().also { it.assign("something") }]
         println("op27 shr")
         op27.output()
 
@@ -320,13 +320,13 @@ fun main() {
         c1.output()
 
         val other = OtherClass()
-        val vect = listOf(
-            "First!",
-            "second one",
-            "THIRD"
-        )
+        val vect = vector__basic_string__Byte().also {
+            it.push_back(basic_string__Byte().also { it.assign("First!") })
+            it.push_back(basic_string__Byte().also { it.assign("second one") })
+            it.push_back(basic_string__Byte().also { it.assign("THIRD") })
+        }
 
-        other.setPrivateString("Prefix: ")
+        other.setPrivateString(basic_string__Byte().also { it.assign("Prefix: ") })
         other.appendText(vect)
         println("Other text: ${other.getPrivateString()}")
 
