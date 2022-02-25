@@ -56,6 +56,7 @@ class NameHandler {
             .replace("<", "_")
             .replace(">", "")
             .replace("*", "_P")
+            .replace(" ", "_")
         override val WrappedMethod.uniqueCName: String
             get() = name(this) {
                 uniqueNameFor(

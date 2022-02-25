@@ -3,18 +3,8 @@ package com.monkopedia.krapper.generator.model
 import clang.CXCursor
 import clang.CXCursorKind
 import clang.CX_CXXAccessSpecifier
-import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.accessSpecifier
-import com.monkopedia.krapper.generator.forEachRecursive
-import com.monkopedia.krapper.generator.fullyQualified
-import com.monkopedia.krapper.generator.hash
-import com.monkopedia.krapper.generator.kind
-import com.monkopedia.krapper.generator.lexicalParent
+import com.monkopedia.krapper.generator.*
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.spelling
-import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.type
-import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 
 @ThreadLocal
@@ -114,10 +104,20 @@ open class WrappedElement(
 //                CXCursorKind.CXCursor_EnumDecl -> TODO()
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
                 CXCursorKind.CXCursor_FieldDecl -> WrappedField(value, resolverBuilder)
-                CXCursorKind.CXCursor_FunctionDecl -> WrappedMethod(value, resolverBuilder)
                 CXCursorKind.CXCursor_ParmDecl -> WrappedArgument(value, resolverBuilder)
                 CXCursorKind.CXCursor_TypedefDecl -> WrappedTypedef(value, resolverBuilder)
-                CXCursorKind.CXCursor_CXXMethod -> WrappedMethod(value, resolverBuilder)
+                CXCursorKind.CXCursor_FunctionDecl,
+                CXCursorKind.CXCursor_CXXMethod -> {
+                    if (value.referenced.spelling.toKString() in listOf(
+                                    "operator new",
+                            "operator new[]",
+                            "operator delete",
+                            "operator delete[]")
+                    ) {
+                        return null
+                    }
+                    WrappedMethod(value, resolverBuilder)
+                }
                 CXCursorKind.CXCursor_Namespace -> WrappedNamespace(
                     value.spelling.toKString() ?: error("Namespace without name")
                 )
