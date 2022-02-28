@@ -21,7 +21,10 @@ import clang.CXFile
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
+import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
+import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.includedFile
+import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.spelling
@@ -38,12 +41,19 @@ class WrappedBase(val type: WrappedType?) : WrappedElement()
 
 class WrappedClass(
     val name: String,
+    var isAbstract: Boolean = false,
     val specifiedType: WrappedType? = null
 ) : WrappedElement() {
     var hasConstructor: Boolean = false
         get() = field || children.any { (it as? WrappedConstructor) != null }
+    var hasHiddenNew: Boolean = false
+    var hasHiddenDelete: Boolean = false
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
+    val hasDefaultConstructor: Boolean
+        get() = children.filterIsInstance<WrappedConstructor>().any { it.isDefaultConstructor }
+    val hasCopyConstructor: Boolean
+        get() = children.filterIsInstance<WrappedConstructor>().any { it.isCopyConstructor }
 
     val type: WrappedType
         get() = specifiedType ?: WrappedType(qualified)
@@ -61,7 +71,7 @@ class WrappedClass(
         }
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        value.spelling.toKString() ?: error("Missing name")
+        wrapName(value, value.spelling.toKString() ?: error("Missing name")), value.isAbstract
     )
 
     override fun clone(): WrappedClass {
@@ -69,15 +79,51 @@ class WrappedClass(
     }
 
     fun clone(specifiedType: WrappedType? = this.specifiedType): WrappedClass {
-        return WrappedClass(name, specifiedType).also {
+        return WrappedClass(name, isAbstract, specifiedType).also {
             it.parent = parent
             it.addAllChildren(children)
+            if (hasConstructor) {
+                it.hasConstructor = true
+            }
+            if (hasHiddenDelete) {
+                it.hasHiddenDelete = true
+            }
+            if (hasHiddenNew) {
+                it.hasHiddenNew = true
+            }
         }
     }
 
-    fun generateConstructorIfNeeded() {
-        if (!hasConstructor) {
-            addChild(WrappedConstructor("new", type))
+    fun modifyMethodsIfNeeded(baseClasses: List<WrappedClass>) {
+        if (!isAbstract && !hasConstructor && !baseClasses.any { it.hasConstructor }) {
+            addChild(
+                WrappedConstructor(
+                    "new",
+                    type,
+                    isCopyConstructor = false,
+                    isDefaultConstructor = true
+                )
+            )
+        }
+        children.filterIsInstance<WrappedConstructor>().forEach {
+            it.checkCopyConstructor(type)
+        }
+        // Manually pretend all assignment operators are void.
+        val assignments = children.filterIsInstance<WrappedMethod>()
+            .filter { Operator.from(it) is BasicAssignmentOperator }
+        for (assignment in assignments) {
+            removeChild(assignment)
+            addChild(assignment.copy(returnType = WrappedType.VOID))
+        }
+        if (hasHiddenNew) {
+            children.filterIsInstance<WrappedConstructor>().forEach {
+                removeChild(it)
+            }
+        }
+        if (hasHiddenDelete) {
+            children.filterIsInstance<WrappedDestructor>().forEach {
+                removeChild(it)
+            }
         }
     }
 
@@ -147,4 +193,11 @@ private fun List<CValue<CXCursor>>.findBaseClass(
     }?.let {
         WrappedType(it.type, resolverBuilder)
     }
+}
+
+private fun wrapName(value: CValue<CXCursor>, name: String): String {
+    val type = value.type.spelling.toKString() ?: return name
+    val index = type.indexOf(name)
+    if (index < 0) return name
+    return type.substring(index)
 }

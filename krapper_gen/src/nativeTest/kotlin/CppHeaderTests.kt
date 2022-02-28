@@ -273,7 +273,7 @@ class CppHeaderTests {
         "void TestLib_TestClass_op_gteq(void* thiz, void* c2, void* ret_value);\n\n"
 
     private val TESTLIB_TESTCLASS_BNOT =
-        "void TestLib_TestClass_op_not(void* thiz, void* ret_value);\n\n"
+        "void* TestLib_TestClass_op_not(void* thiz);\n\n"
 
     private val TESTLIB_TESTCLASS_BAND =
         "void TestLib_TestClass_op_binary_and(void* thiz, void* c, void* ret_value);\n\n"

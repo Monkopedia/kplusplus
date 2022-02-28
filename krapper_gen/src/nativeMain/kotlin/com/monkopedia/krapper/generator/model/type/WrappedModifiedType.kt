@@ -1,8 +1,23 @@
+/*
+ * Copyright 2021 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.krapper.generator.model.type
 
 class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : WrappedType() {
     override val isReturnable: Boolean
-        get() = modifier == "*" || baseType.isReturnable
+        get() = modifier == "*" || modifier == "&" || baseType.isReturnable
     override val cType: WrappedType
         get() = if (baseType.isString) baseType.cType else when (modifier) {
             "*",
@@ -62,7 +77,9 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
         get() = false
 
     override val pointed: WrappedType
-        get() = if (baseType.isPointer) WrappedPrefixedType(baseType.pointed, modifier) else error("Cannot find pointed of non-pointer $this")
+        get() =
+            if (baseType.isPointer) WrappedPrefixedType(baseType.pointed, modifier)
+            else error("Cannot find pointed of non-pointer $this")
     override val isPointer: Boolean
         get() = baseType.isPointer
 
@@ -77,7 +94,9 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
     override val isConst: Boolean
         get() = modifier == "const" || baseType.isConst
     override val unconst: WrappedType
-        get() = if (modifier == "const") baseType else WrappedPrefixedType(baseType.unconst, modifier)
+        get() =
+            if (modifier == "const") baseType
+            else WrappedPrefixedType(baseType.unconst, modifier)
 
     override fun toString(): String {
         return "$modifier $baseType"

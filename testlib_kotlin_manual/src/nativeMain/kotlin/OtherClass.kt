@@ -15,7 +15,6 @@
  */
 import VectorString.Companion.asVector
 import kotlinx.cinterop.MemScope
-import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toKString
 import testlib.TestLib_MyPair__OtherClass__P
 import testlib.TestLib_OtherClass

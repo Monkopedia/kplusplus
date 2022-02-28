@@ -21,7 +21,6 @@ import com.monkopedia.krapper.generator.codegen.WrappedKotlinWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import kotlin.test.Test
 import kotlin.test.fail
 
@@ -74,11 +73,13 @@ class FullKotlinTests {
             "}"
     private val TESTLIB_OTHERCLASS_COPIES =
         "inline fun copies(): MyPair__OtherClass? {\n" +
-            "    return MyPair__OtherClass(((TestLib_OtherClass_copies(ptr) ?: return null) to memScope))\n" +
+            "    return MyPair__OtherClass(((TestLib_OtherClass_copies(ptr) ?: return null) " +
+            "to memScope))\n" +
             "}"
     private val TESTLIB_OTHERCLASS_INTS =
         "inline fun ints(): MyPair__Int? {\n" +
-            "    return MyPair__Int(((TestLib_OtherClass_ints(ptr) ?: return null) to memScope))\n" +
+            "    return MyPair__Int(((TestLib_OtherClass_ints(ptr) ?: return null) " +
+            "to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_B =

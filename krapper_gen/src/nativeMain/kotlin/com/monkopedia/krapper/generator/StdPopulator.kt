@@ -17,7 +17,6 @@ package com.monkopedia.krapper.generator
 
 import clang.CXType
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import kotlinx.cinterop.CValue
 

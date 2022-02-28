@@ -78,9 +78,12 @@ fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(t
 
 fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     if (type is WrappedTemplateType) {
-        return WrappedKotlinType(WrappedKotlinType(type.baseType).pkg + "." + (listOf(type.baseType) + type.templateArgs).joinToString("__") {
-            WrappedKotlinType(it).name.trimEnd('?').replace(" ", "_")
-        })
+        return WrappedKotlinType(
+            WrappedKotlinType(type.baseType).pkg + "." +
+                (listOf(type.baseType) + type.templateArgs).joinToString("__") {
+                    WrappedKotlinType(it).name.trimEnd('?').replace(" ", "_")
+                }
+        )
     }
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     if (type.isString) return fullyQualifiedType("String?")

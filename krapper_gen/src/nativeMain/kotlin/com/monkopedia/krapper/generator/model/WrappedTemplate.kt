@@ -1,49 +1,40 @@
+/*
+ * Copyright 2021 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import clang.CXTypeKind
 import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.accessSpecifier
-import com.monkopedia.krapper.generator.arrayElementType
-import com.monkopedia.krapper.generator.availability
-import com.monkopedia.krapper.generator.canonicalCursor
-import com.monkopedia.krapper.generator.canonicalType
-import com.monkopedia.krapper.generator.classType
-import com.monkopedia.krapper.generator.definition
-import com.monkopedia.krapper.generator.displayName
-import com.monkopedia.krapper.generator.elementType
-import com.monkopedia.krapper.generator.extend
-import com.monkopedia.krapper.generator.fullyQualified
-import com.monkopedia.krapper.generator.getArgType
-import com.monkopedia.krapper.generator.getTemplateArgumentType
-import com.monkopedia.krapper.generator.hash
-import com.monkopedia.krapper.generator.isAbstract
-import com.monkopedia.krapper.generator.isAnonymous
-import com.monkopedia.krapper.generator.isDefaulted
 import com.monkopedia.krapper.generator.kind
-import com.monkopedia.krapper.generator.mapChildren
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.modifiedType
-import com.monkopedia.krapper.generator.namedType
-import com.monkopedia.krapper.generator.pointeeType
-import com.monkopedia.krapper.generator.rawCommentText
-import com.monkopedia.krapper.generator.refQualifier
-import com.monkopedia.krapper.generator.referenced
-import com.monkopedia.krapper.generator.result
-import com.monkopedia.krapper.generator.resultType
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
-import com.monkopedia.krapper.generator.typeDeclaration
-import com.monkopedia.krapper.generator.typedefDeclUnderlyingType
 import com.monkopedia.krapper.generator.usr
-import com.monkopedia.krapper.generator.valueType
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
 
 data class WrappedTemplate(val name: String) : WrappedElement() {
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
+    var hasConstructor: Boolean = false
+    var hasHiddenNew: Boolean = false
+    var hasHiddenDelete: Boolean = false
 
     val qualified: String
         get() = withParents.mapNotNull { it.named }.joinToString("::")
@@ -114,6 +105,9 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         return WrappedTemplate(name).also {
             it.addAllChildren(children)
             it.parent = parent
+            it.hasHiddenNew = hasHiddenNew
+            it.hasHiddenDelete = hasHiddenDelete
+            it.hasConstructor = hasConstructor
         }
     }
 }
@@ -122,7 +116,9 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
     val defaultType: WrappedType?
         get() {
             if (children.isEmpty()) return null
-            return null
+            val type = children.find { it is WrappedType } ?: return null
+            val template = children.filterIsInstance<WrappedTemplateRef>()
+            return WrappedTemplateType(type as WrappedType, template)
         }
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
@@ -135,6 +131,10 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
             it.addAllChildren(children)
             it.parent = parent
         }
+    }
+
+    override fun toString(): String {
+        return "$name${defaultType?.let { " $it" } ?: ""} ($children)"
     }
 
     companion object {

@@ -27,7 +27,6 @@ import clang.clang_getCString
 import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.generator.codegen.File
-import com.monkopedia.krapper.generator.model.MethodType.METHOD
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedMethod
@@ -40,6 +39,7 @@ import com.monkopedia.krapper.generator.model.forEachRecursive
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.MemScope
@@ -125,7 +125,6 @@ fun find(s: String): String? {
     return error("Can't find $s in $paths")
 }
 
-
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
 val INCLUDE_PATHS = generateIncludes()
 
@@ -145,6 +144,14 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
 
     override fun resolve(type: WrappedType): WrappedClass {
         return classMap.getOrPut(type.toString()) {
+            (
+                tu.filterRecursive {
+                    (it as? WrappedClass)?.type?.toString() == type.toString() &&
+                        it.children.isNotEmpty()
+                }.singleOrNull() as? WrappedClass
+                )?.let {
+                return@getOrPut it
+            }
             when (type) {
                 is WrappedTemplateType -> {
                     val template = resolveTemplate(type.baseType)
@@ -154,10 +161,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
                     throw IllegalArgumentException("Can't resolve $type since it is templated")
                 }
                 else -> {
-                    tu.filterRecursive {
-                        (it as? WrappedClass)?.type?.toString() == type.toString()
-                    }.singleOrNull() as? WrappedClass
-                        ?: error("Can't resolve $type (${type::class.simpleName})")
+                    error("Can't resolve $type (${type::class.simpleName})")
                 }
             }
         }
@@ -298,43 +302,43 @@ fun WrappedTemplate.typedAs(templateSpec: WrappedTemplateType): WrappedClass {
     val fullyQualified = templateSpec.baseType.toString()
     val templates =
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
-    val mapping = (
-        templates.mapIndexedNotNull { index, t ->
-            when {
-                index < templateSpec.templateArgs.size -> t.name to templateSpec.templateArgs[index]
-                t.defaultType != null -> t.name to t.defaultType
-                else -> null
-            }
-        } + templates.mapIndexedNotNull { index, t ->
-            when {
-                index < templateSpec.templateArgs.size -> t.usr to templateSpec.templateArgs[index]
-                t.defaultType != null -> t.usr to t.defaultType
-                else -> null
+    val mapping = mutableMapOf<String, WrappedType?>()
+    for (i in 0 until min(templates.size, templateSpec.templateArgs.size)) {
+        mapping[templates[i].name] = templateSpec.templateArgs[i]
+        mapping[templates[i].usr] = templateSpec.templateArgs[i]
+    }
+    val mapper: TypeMapping = { type, parent ->
+        type.operateOn { type ->
+            if (type is WrappedTemplateRef) {
+                val mapping = mapping[type.target]
+                if (mapping != null) {
+                    ReplaceWith(mapping)
+                } else {
+                    RemoveElement
+                }
+            } else if (parent !is WrappedTemplateType && type.toString() == fullyQualified) {
+                ReplaceWith(templateSpec)
+            } else {
+                ElementUnchanged
             }
         }
-        ).toMap()
+    }
+    for (i in min(templates.size, templateSpec.templateArgs.size) until templates.size) {
+        val defaultType = templates[i].defaultType ?: continue
+        val mappedType = map(defaultType, null, mapper)
+        if (mappedType == RemoveElement) continue
+        val type = if (mappedType is ReplaceWith) mappedType.replacement else defaultType
+        mapping[templates[i].name] = type
+        mapping[templates[i].usr] = type
+    }
     val outputClass =
-        WrappedClass(name, templateSpec)
+        WrappedClass(name, false, templateSpec)
+    outputClass.hasConstructor = hasConstructor
+    outputClass.hasHiddenNew = hasHiddenNew
+    outputClass.hasHiddenDelete = hasHiddenDelete
     outputClass.parent = parent
     outputClass.addAllChildren(children.map { it.cloneRecursive() })
-    return when (
-        val result = map(outputClass, null) { type, parent ->
-            type.operateOn { type ->
-                if (type is WrappedTemplateRef) {
-                    val mapping = mapping[type.target]
-                    if (mapping != null) {
-                        ReplaceWith(mapping)
-                    } else {
-                        RemoveElement
-                    }
-                } else if (parent !is WrappedTemplateType && type.toString() == fullyQualified) {
-                    ReplaceWith(templateSpec)
-                } else {
-                    ElementUnchanged
-                }
-            }
-        }
-    ) {
+    return when (val result = map(outputClass, null, mapper)) {
         RemoveElement -> throw IllegalArgumentException("Can't map $outputClass")
         ElementUnchanged -> outputClass
         is ReplaceWith -> result.replacement

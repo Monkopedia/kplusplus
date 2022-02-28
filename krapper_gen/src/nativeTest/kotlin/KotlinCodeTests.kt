@@ -123,6 +123,8 @@ class KotlinCodeTests {
                         WrappedConstructor(
                             "Constructable",
                             WrappedType("TestLib::Constructable"),
+                            false,
+                            false
                         ),
                         WrappedDestructor(
                             "Constructable",

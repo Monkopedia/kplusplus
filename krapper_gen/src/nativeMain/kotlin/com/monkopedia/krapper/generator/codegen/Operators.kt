@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -74,10 +74,11 @@ sealed class Operator {
     }
 }
 
-class BasicBinaryOperator private constructor(
-    private val cppOp: String,
+data class BasicBinaryOperator private constructor(
+    val cppOp: String,
     private val cOp: String,
-    override val kotlinOperatorType: KotlinOperatorType
+    override val kotlinOperatorType: KotlinOperatorType,
+    val supportsDirectCall: Boolean = true
 ) : Operator() {
 
     override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
@@ -112,21 +113,22 @@ class BasicBinaryOperator private constructor(
         val XOR = BasicBinaryOperator("^", "Xor", InfixMethod("xor"))
         val SHL = BasicBinaryOperator("<<", "Shl", InfixMethod("shl"))
         val SHR = BasicBinaryOperator(">>", "Shr", InfixMethod("shr"))
-        val IND = BasicBinaryOperator("[]", "Ind", KotlinOperator("get"))
+        val IND =
+            BasicBinaryOperator("[]", "Ind", KotlinOperator("get"), supportsDirectCall = false)
         val POST_INC = BasicBinaryOperator(
             "++",
             "PostIncrement",
-            BasicWithDummyMethod("postIncrement")
+            BasicWithDummyMethod("postIncrement"), supportsDirectCall = false
         )
         val POST_DEC = BasicBinaryOperator(
             "--",
             "PostDecrement",
-            BasicWithDummyMethod("postDecrement")
+            BasicWithDummyMethod("postDecrement"), supportsDirectCall = false
         )
     }
 }
 
-class BasicAssignmentOperator private constructor(
+data class BasicAssignmentOperator private constructor(
     private val cppOp: String,
     private val cOp: String,
     override val kotlinOperatorType: KotlinOperatorType
@@ -151,8 +153,7 @@ class BasicAssignmentOperator private constructor(
     }
 }
 
-
-class BasicUnaryOperator private constructor(
+data class BasicUnaryOperator private constructor(
     private val cppOp: String,
     private val cOp: String,
     override val kotlinOperatorType: KotlinOperatorType
@@ -179,6 +180,7 @@ class BasicUnaryOperator private constructor(
         val NOT = BasicUnaryOperator("!", "Not", KotlinOperator("not"))
         val INV = BasicUnaryOperator("~", "Inv", BasicMethod("inv"))
         val REFERENCE = BasicUnaryOperator("*", "Reference", BasicMethod("reference"))
-        val POINTER_REFERENCE = BasicUnaryOperator("->", "PointerReference", BasicMethod("pointer_reference"))
+        val POINTER_REFERENCE =
+            BasicUnaryOperator("->", "PointerReference", BasicMethod("pointer_reference"))
     }
 }

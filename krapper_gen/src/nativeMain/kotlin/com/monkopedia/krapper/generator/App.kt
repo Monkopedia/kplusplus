@@ -18,16 +18,6 @@ package com.monkopedia.krapper.generator
 import clang.CXChildVisitResult
 import clang.CXCursor
 import clang.CXCursorKind
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Declaration
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Expression
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Integral
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Invalid
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Null
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_NullPtr
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Pack
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Template
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_TemplateExpansion
-import clang.CXTemplateArgumentKind.CXTemplateArgumentKind_Type
 import clang.clang_visitChildren
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
@@ -54,8 +44,6 @@ import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.staticCFunction
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 enum class ErrorPolicy(val policy: CodeGenerationPolicy) {
     FAIL(ThrowPolicy),
@@ -91,7 +79,11 @@ class KrapperGen : CliktCommand() {
     val errorPolicy by option("--policy", help = "How to handle errors")
         .enum<ErrorPolicy>()
         .default(ErrorPolicy.LOG)
-    val debug by option("-d", "--debugOutput", help = "Specify file to output debug dump of state").flag()
+    val debug by option(
+        "-d",
+        "--debugOutput",
+        help = "Specify file to output debug dump of state"
+    ).flag()
 
     val referencePolicy by option(
         "-r",
@@ -105,8 +97,8 @@ class KrapperGen : CliktCommand() {
         memScoped {
             val index = createIndex(0, 0) ?: error("Failed to create Index")
             defer { index.dispose() }
-            val args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
-                .toTypedArray()
+            val args: Array<String> = arrayOf("-xc++", "--std=c++14") +
+                INCLUDE_PATHS.map { "-I$it" }.toTypedArray()
             println("Args: ${args.toList()}")
 //            for (file in header) {
 //                val tu =
@@ -136,10 +128,10 @@ class KrapperGen : CliktCommand() {
 //                    }
 //                    false
 //                }
-////                tu.cursor.filterChildren { true }.forEach {
-////                    val cursor = KXCursor.generate(tu.cursor)
-////                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
-////                }
+// //                tu.cursor.filterChildren { true }.forEach {
+// //                    val cursor = KXCursor.generate(tu.cursor)
+// //                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
+// //                }
 //            }
             val resolver = parseHeader(index, header, debug = debug)
             var classes = resolver.findClasses(WrappedClass::defaultFilter)

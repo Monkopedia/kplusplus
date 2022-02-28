@@ -1,3 +1,18 @@
+/*
+ * Copyright 2021 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.krapper.generator.model.type
 
 import clang.CXCursorKind.CXCursor_ClassDecl
@@ -6,6 +21,8 @@ import clang.CXCursorKind.CXCursor_NoDeclFound
 import clang.CXCursorKind.CXCursor_TemplateTypeParameter
 import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
+import clang.CXTypeKind.CXType_Invalid
+import clang.CXTypeKind.CXType_RValueReference
 import clang.CXTypeKind.CXType_Unexposed
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.fullyQualified
@@ -15,16 +32,11 @@ import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
-import com.monkopedia.krapper.generator.modifiedType
-import com.monkopedia.krapper.generator.namedType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
-import com.monkopedia.krapper.generator.prettyPrinted
-import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
-import com.monkopedia.krapper.generator.typedefName
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
@@ -58,7 +70,8 @@ abstract class WrappedType : WrappedElement() {
 
     companion object :
         (String) -> WrappedType,
-        (CValue<CXType>, ResolverBuilder) -> WrappedType {
+        (CValue<CXType>, ResolverBuilder) -> WrappedType,
+        (CValue<CXType>, ResolverBuilder, Boolean) -> WrappedType {
 
         const val LONG_DOUBLE_STR = "long double"
         val LONG_DOUBLE = WrappedTypeReference(LONG_DOUBLE_STR)
@@ -67,11 +80,11 @@ abstract class WrappedType : WrappedElement() {
         override fun invoke(type: String): WrappedType {
             if (type == "void") return VOID
             if (type == "std::size_t") return invoke("size_t")
-            if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
-            if (type.startsWith("typename ")) {
-                return WrappedTypename(type.substring("typename ".length))
-            }
             return existingTypes.getOrPut(type) {
+                if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
+                if (type.startsWith("typename ")) {
+                    return WrappedTypename(type.substring("typename ".length))
+                }
                 if (type.endsWith("*")) {
                     return pointerTo(invoke(type.substring(0, type.length - 1).trim()))
                 }
@@ -81,6 +94,9 @@ abstract class WrappedType : WrappedElement() {
 //                if (type == "_Alloc" || type == "_Alloc*") {
 //                    Throwable("Alloc $type").printStackTrace()
 //                }
+                if (type.isEmpty()) {
+                    throw IllegalArgumentException("Empty type")
+                }
                 WrappedTypeReference(type)
             }
         }
@@ -103,24 +119,51 @@ abstract class WrappedType : WrappedElement() {
         override fun invoke(
             type: CValue<CXType>,
             resolverBuilder: ResolverBuilder
+        ): WrappedType = invoke(type, resolverBuilder, throwOnError = false)
+
+        override fun invoke(
+            type: CValue<CXType>,
+            resolverBuilder: ResolverBuilder,
+            throwOnError: Boolean
         ): WrappedType {
-            val spelling = type.spelling.toKString()
-            if (spelling?.endsWith("*") == true) {
-                return pointerTo(invoke(type.pointeeType, resolverBuilder)).maybeConst(type.isConstQualifiedType)
+            val kind = type.useContents { kind }
+            try {
+                if (kind == CXType_Invalid) {
+                    throw IllegalArgumentException("Invalid type")
+                } else if (kind == CXType_RValueReference) {
+                    throw IllegalArgumentException("RValues unsupported at the moment")
+                }
+                val spelling = type.spelling.toKString()
+                if (spelling?.endsWith("*") == true) {
+                    return pointerTo(invoke(type.pointeeType, resolverBuilder))
+                        .maybeConst(type.isConstQualifiedType)
+                }
+                if (spelling?.endsWith("&") == true) {
+                    return referenceTo(invoke(type.pointeeType, resolverBuilder))
+                        .maybeConst(type.isConstQualifiedType)
+                }
+                if (type.numTemplateArguments > 0) {
+                    val templateReference = createForType(type, resolverBuilder)
+                    return WrappedTemplateType(
+                        templateReference,
+                        List(type.numTemplateArguments) {
+                            val tempType = type.getTemplateArgumentType(it.toUInt())
+                            if (tempType.useContents { kind } == CXType_Invalid) null
+                            else invoke(tempType, resolverBuilder)
+                        }.filterNotNull()
+                    ).maybeConst(type.isConstQualifiedType)
+                }
+                return createForType(type, resolverBuilder).maybeConst(type.isConstQualifiedType)
+            } catch (t: IllegalArgumentException) {
+                if (throwOnError) {
+                    throw IllegalArgumentException(
+                        "Failed to create type for ${type.spelling.toKString()}",
+                        t
+                    )
+                } else {
+                    return UNRESOLVABLE
+                }
             }
-            if (spelling?.endsWith("&") == true) {
-                return referenceTo(invoke(type.pointeeType, resolverBuilder)).maybeConst(type.isConstQualifiedType)
-            }
-            if (type.numTemplateArguments > 0) {
-                val templateReference = createForType(type, resolverBuilder)
-                return WrappedTemplateType(
-                    templateReference,
-                    List(type.numTemplateArguments) {
-                        invoke(type.getTemplateArgumentType(it.toUInt()), resolverBuilder)
-                    }
-                ).maybeConst(type.isConstQualifiedType)
-            }
-            return createForType(type, resolverBuilder).maybeConst(type.isConstQualifiedType)
         }
 
         private inline fun WrappedType.maybeConst(isConst: Boolean): WrappedType {
@@ -155,7 +198,9 @@ abstract class WrappedType : WrappedElement() {
                 referencedDecl.kind == CXCursor_ClassDecl -> {
                     invoke(referencedDecl.fullyQualified)
                 }
-                type.useContents { kind } == CXType_Unexposed && referencedDecl.kind == CXCursor_NoDeclFound && !spelling.startsWith("typename ") -> {
+                type.useContents { kind } == CXType_Unexposed &&
+                    referencedDecl.kind == CXCursor_NoDeclFound &&
+                    !spelling.startsWith("typename ") -> {
                     WrappedTemplateRef(spelling)
                 }
                 else -> {
@@ -179,6 +224,8 @@ abstract class WrappedType : WrappedElement() {
         fun const(type: WrappedType): WrappedType {
             return WrappedPrefixedType(type, "const")
         }
+
+        val UNRESOLVABLE: WrappedTypeReference
+            get() = WrappedTypeReference("unresolveable")
     }
 }
-

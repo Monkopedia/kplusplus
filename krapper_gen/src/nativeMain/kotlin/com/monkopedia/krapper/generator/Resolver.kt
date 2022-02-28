@@ -35,6 +35,7 @@ interface Resolver {
 
 private class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     fun canResolve(type: WrappedType): Boolean {
+        if (type == WrappedType.UNRESOLVABLE) return false
         if (type is WrappedModifiedType) {
             return canResolve(type.baseType)
         }
@@ -46,7 +47,7 @@ private class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     }
 
     private fun canResolve(str: String): Boolean {
-        return classes.containsKey(str) || otherResolved.contains(str)
+        return (classes[str]?.children?.isNotEmpty() == true) || otherResolved.contains(str)
     }
 
     val otherResolved = mutableSetOf<String>()
@@ -68,9 +69,20 @@ fun List<WrappedClass>.resolveAll(resolver: Resolver, policy: ReferencePolicy): 
     for (cls in results) {
         classMap.classes[cls.type.toString()] = cls
     }
-    return classMap.classes.values.map {
-        it.also { it.generateConstructorIfNeeded() }
+    var finalMap = classMap.classes
+    finalMap = finalMap.filterValues { cls ->
+        cls.children.isNotEmpty()
+    } as MutableMap
+    for (cls in finalMap.values) {
+        var baseCls = finalMap[cls.baseClass?.toString()]
+        val list = mutableListOf<WrappedClass>()
+        while (baseCls != null) {
+            list.add(baseCls)
+            baseCls = finalMap[baseCls.baseClass?.toString()]
+        }
+        cls.modifyMethodsIfNeeded(list)
     }
+    return finalMap.values.toList()
 }
 
 private fun resolveAll(
@@ -150,7 +162,9 @@ private fun typeMapper(
     }
 }
 
-fun WrappedType.operateOn(typeHandler: (WrappedType) -> MapResult<out WrappedType>): MapResult<out WrappedType> {
+fun WrappedType.operateOn(
+    typeHandler: (WrappedType) -> MapResult<out WrappedType>
+): MapResult<out WrappedType> {
     when {
         this is WrappedModifiedType -> {
             return (baseType.operateOn(typeHandler)).wrapOnReplace {

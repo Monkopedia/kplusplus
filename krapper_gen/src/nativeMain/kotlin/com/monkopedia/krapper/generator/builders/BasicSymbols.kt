@@ -15,8 +15,6 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.type.WrappedType
-
 class Reference(private val arg: LocalVar) : Symbol {
     override fun build(builder: CodeStringBuilder) {
         builder.append(arg.name)
@@ -35,6 +33,21 @@ class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
         builder.append(")")
     }
 }
+
+class Address(private val arg: Symbol) : Symbol, SymbolContainer {
+    override val symbols: List<Symbol>
+        get() = listOf(arg)
+    override fun build(builder: CodeStringBuilder) {
+        builder.append("&(")
+        arg.build(builder)
+        builder.append(")")
+    }
+}
+inline val LocalVar.addressOf: Symbol
+    get() = Address(reference)
+
+inline val Symbol.addressOf: Symbol
+    get() = Address(this)
 
 inline val LocalVar.dereference: Symbol
     get() = Dereference(reference)
@@ -108,13 +121,19 @@ class Arrow(private val first: Symbol, private val second: Symbol) : Symbol, Sym
     }
 }
 
-class Assign(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class Assign(
+    private val first: Symbol,
+    private val second: Symbol,
+    private val plusEqual: Boolean = false
+) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
     override fun build(builder: CodeStringBuilder) {
+        builder.append('(')
         first.build(builder)
-        builder.append(" = ")
+        builder.append(if (plusEqual) " += " else " = ")
         second.build(builder)
+        builder.append(')')
     }
 }
 
@@ -134,6 +153,7 @@ inline fun Symbol.op(operand: String, other: Symbol): Symbol = Op(operand, this,
 inline infix fun Symbol.dot(other: Symbol): Symbol = Dot(this, other)
 inline infix fun Symbol.arrow(other: Symbol): Symbol = Arrow(this, other)
 inline infix fun Symbol.assign(other: Symbol): Symbol = Assign(this, other)
+inline fun Symbol.assign(other: Symbol, plusEqual: Boolean): Symbol = Assign(this, other, plusEqual)
 
 class Raw(val content: String) : Symbol {
     override fun build(builder: CodeStringBuilder) {

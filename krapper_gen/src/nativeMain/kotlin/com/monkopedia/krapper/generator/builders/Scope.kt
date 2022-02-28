@@ -27,6 +27,7 @@ class Scope<T : LangFactory>(private val parent: Scope<T>? = null) {
     }
 
     fun allocateName(desiredName: String): String {
+        if (desiredName.isEmpty()) return allocateName("_")
         if (isUsed(desiredName)) {
             return allocateName("_$desiredName")
         }

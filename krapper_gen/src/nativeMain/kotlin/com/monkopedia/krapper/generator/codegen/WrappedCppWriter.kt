@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,11 +30,13 @@ import com.monkopedia.krapper.generator.builders.RawCast
 import com.monkopedia.krapper.generator.builders.Return
 import com.monkopedia.krapper.generator.builders.Symbol
 import com.monkopedia.krapper.generator.builders.ThrowPolicy
+import com.monkopedia.krapper.generator.builders.addressOf
 import com.monkopedia.krapper.generator.builders.appendLine
 import com.monkopedia.krapper.generator.builders.arrow
 import com.monkopedia.krapper.generator.builders.assign
 import com.monkopedia.krapper.generator.builders.comment
 import com.monkopedia.krapper.generator.builders.define
+import com.monkopedia.krapper.generator.builders.dereference
 import com.monkopedia.krapper.generator.builders.dot
 import com.monkopedia.krapper.generator.builders.function
 import com.monkopedia.krapper.generator.builders.include
@@ -56,6 +58,13 @@ class WrappedCppWriter(
     codeBuilder: CppCodeBuilder,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGenerator<CppCodeBuilder>(codeBuilder, policy) {
+
+    private var lookup: ClassLookup = ClassLookup(emptyList())
+
+    override fun generate(moduleName: String, headers: List<String>, classes: List<WrappedClass>) {
+        lookup = ClassLookup(classes)
+        super.generate(moduleName, headers, classes)
+    }
 
     override fun CppCodeBuilder.onGenerate(
         cls: WrappedClass,
@@ -99,8 +108,8 @@ class WrappedCppWriter(
         nameHandler.withNamer(cls) {
             function {
                 val type = cls.type
-                generateMethodSignature(type, method, this@withNamer)
-                val args = addArgs(type, method)
+                generateMethodSignature(lookup, type, method, this@withNamer)
+                val args = addArgs(lookup, type, method)
                 body {
                     generateMethodBody(cls, method, args)
                 }
@@ -113,7 +122,7 @@ class WrappedCppWriter(
         nameHandler.withNamer(cls) {
             function {
                 val type = cls.type
-                val args = generateFieldGet(type, field, this@withNamer)
+                val args = generateFieldGet(lookup, type, field, this@withNamer)
                 body {
                     generateFieldGetBody(cls, field, args)
                 }
@@ -121,7 +130,7 @@ class WrappedCppWriter(
             appendLine()
             function {
                 val type = cls.type
-                val args = generateFieldSet(type, field, this@withNamer)
+                val args = generateFieldSet(lookup, type, field, this@withNamer)
                 body {
                     generateFieldSetBody(cls, field, args)
                 }
@@ -172,6 +181,7 @@ class WrappedCppWriter(
                     method.name.substring("operator".length),
                     argCasts.map { it.reference }.single()
                 )
+                comment("Static op ${Operator.from(method)}")
                 if (returnCast != null) {
                     +(returnCast.reference assign call)
                 } else if (method.returnType.isString) {
@@ -185,17 +195,43 @@ class WrappedCppWriter(
                 }
             }
             MethodType.METHOD -> {
+                val thizRef = thizCast?.pointerReference ?: error("Missing this in method")
+                val operator = Operator.from(method)
                 val call =
-                    (thizCast?.pointerReference ?: error("Missing this in method")) arrow Call(
-                        method.name,
-                        *(argCasts.map { it.reference }.toTypedArray())
-                    )
+                    when {
+                        operator is BasicBinaryOperator && operator.supportsDirectCall -> {
+                            thizRef.dereference.op(operator.cppOp, argCasts.first().reference)
+                        }
+                        operator is BasicAssignmentOperator -> {
+                            thizRef.dereference.assign(
+                                argCasts.first().reference,
+                                operator == BasicAssignmentOperator.PLUS_EQUALS
+                            )
+                        }
+                        else -> {
+                            thizRef arrow Call(
+                                method.name,
+                                *(argCasts.map { it.reference }.toTypedArray())
+                            )
+                        }
+                    }
+                // comment("Method $operator $method")
                 if (returnCast != null) {
                     +(returnCast.reference assign call)
                 } else if (method.returnType.isString) {
                     createStringReturn(call)
                 } else if (method.returnType.isPointer && method.returnType.pointed.isString) {
                     createPointedStringReturn(call)
+                } else if (!method.returnType.isReturnable) {
+                    +Return(New(Call(method.returnType.toString(), call)))
+                } else if (method.returnType.cType.toString() == "void*") {
+                    +Return(
+                        RawCast(
+                            "void*",
+                            if (method.returnType.isReference) call.addressOf
+                            else call
+                        )
+                    )
                 } else if (!method.returnType.isVoid) {
                     +Return(call)
                 } else {
@@ -265,8 +301,9 @@ class WrappedCppWriter(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                if (arg.targetType == LONG_DOUBLE) RawCast(arg.targetType.toString(), arg.localVar.reference)
-                    else reinterpret(arg.localVar, arg.targetType)
+                if (arg.targetType == LONG_DOUBLE)
+                    RawCast(arg.targetType.toString(), arg.localVar.reference)
+                else reinterpret(arg.localVar, arg.targetType)
             )
         )
     }

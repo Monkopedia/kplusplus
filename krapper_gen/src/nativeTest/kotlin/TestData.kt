@@ -1008,7 +1008,12 @@ class TestDataClass {
         val localType = WrappedType("std::vector")
         val template = WrappedTemplateParam("_Tp", "_Tp")
         val type = WrappedTemplateType(localType, listOf(WrappedType("std::string")))
-        val constructor = WrappedConstructor("std::vector", WrappedTemplateType(localType, listOf(WrappedTemplateRef(template.usr))))
+        val constructor = WrappedConstructor(
+            "std::vector",
+            WrappedTemplateType(localType, listOf(WrappedTemplateRef(template.usr))),
+            false,
+            true
+        )
         val destructor = WrappedDestructor("~std::vector", VOID)
         val pushBack =
             WrappedMethod(
@@ -1135,17 +1140,17 @@ class TestDataClass {
             false,
             MethodType.METHOD,
         )
-        val constructor = WrappedConstructor("new", type)
+        val constructor = WrappedConstructor("new", type, false, true)
         val copyConstructor =
-            WrappedConstructor("new", type).also {
+            WrappedConstructor("new", type, true, false).also {
                 it.addAllChildren(listOf(WrappedArgument("other", referenceTo(const(type)))))
             }
         val otherConstructor =
-            WrappedConstructor("new", type).also {
+            WrappedConstructor("new", type, false, false).also {
                 it.addAllChildren(listOf(WrappedArgument("a", WrappedType("int"))))
             }
         val twoParamConstructor =
-            WrappedConstructor("new", type).also {
+            WrappedConstructor("new", type, false, false).also {
                 it.addAllChildren(
                     listOf(
                         WrappedArgument("a", WrappedType("int")),
@@ -1459,7 +1464,7 @@ class TestDataClass {
 
     inner class OtherClassClass {
         val type = WrappedType("TestLib::OtherClass")
-        val constructor = WrappedConstructor("TestLib::OtherClass", type)
+        val constructor = WrappedConstructor("TestLib::OtherClass", type, false, true)
         val destructor = WrappedDestructor("~TestLib::OtherClass", type)
         val getPrivateString = WrappedMethod(
             "getPrivateString",
@@ -1539,7 +1544,7 @@ class TestDataClass {
         val aprop = WrappedField("a", WrappedTemplateRef(templateParam.usr))
         val bprop = WrappedField("b", WrappedTemplateRef(templateParam.usr))
         val constructor =
-            WrappedConstructor("TestLib::MyPair", type).also {
+            WrappedConstructor("TestLib::MyPair", type, false, false).also {
                 it.addAllChildren(
                     listOf(
                         WrappedArgument("first", WrappedTemplateRef(templateParam.usr)),

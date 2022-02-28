@@ -38,6 +38,7 @@ fun String.splitCamelcase(): List<String> {
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
+    classLookup: ClassLookup,
     type: WrappedType,
     method: WrappedMethod,
     namer: Namer
@@ -53,12 +54,16 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
         }
         MethodType.STATIC_OP,
         MethodType.METHOD -> {
-            retType = method.returnType.takeIf { it.isReturnable }?.cType?.let(
+            retType = method.returnType.takeIf { classLookup.isReturnable(it) }?.cType?.let(
                 functionBuilder::type
             )
             name = method.uniqueCName
         }
     }
+}
+
+fun ClassLookup.isReturnable(type: WrappedType): Boolean {
+    return type.isReturnable || this[type]?.hasCopyConstructor == true
 }
 
 data class WrapperArgument(
@@ -79,6 +84,7 @@ data class WrapperArgument(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
+    classLookup: ClassLookup,
     type: WrappedType,
     method: WrappedMethod
 ): List<WrapperArgument> {
@@ -99,8 +105,12 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
             WrapperArgument(it, type, define(it.name, type.cType), true)
         }
     } + listOfNotNull(
-        if (method.methodType == MethodType.METHOD && !method.returnType.isReturnable) {
-            val type = if (method.returnType.isReference) method.returnType.unreferenced else method.returnType
+        if (method.methodType == MethodType.METHOD &&
+            !classLookup.isReturnable(method.returnType)
+        ) {
+            val type =
+                if (method.returnType.isReference) method.returnType.unreferenced
+                else method.returnType
             if (type.isPointer) {
                 WrapperArgument(null, type, define("ret_value", type.cType), false)
             } else {
@@ -112,6 +122,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
+    classLookup: ClassLookup,
     type: WrappedType,
     field: WrappedField,
     namer: Namer
@@ -121,12 +132,12 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
     }
     name = field.uniqueCGetter
     retType =
-        if (field.type.isReturnable) functionBuilder.type(field.type.cType)
+        if (classLookup.isReturnable(field.type)) functionBuilder.type(field.type.cType)
         else functionBuilder.type(VOID)
     val thiz = WrapperArgument(null, pointerTo(type), define("thiz", pointerTo(type).cType), true)
     return listOfNotNull(
         thiz,
-        if (!field.type.isReturnable) WrapperArgument(
+        if (!classLookup.isReturnable(field.type)) WrapperArgument(
             null,
             field.type,
             define("ret_value", field.type.cType),
@@ -137,6 +148,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldSet(
+    classLookup: ClassLookup,
     type: WrappedType,
     field: WrappedField,
     namer: Namer

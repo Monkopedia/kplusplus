@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import Complex.Companion.Complex
 import TestClass.Companion.TestClass
 import TestLib.OtherClass
 import TestLib.OtherClass.Companion.OtherClass

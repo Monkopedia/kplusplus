@@ -38,6 +38,13 @@ class WrappedHeaderWriter(
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGenerator<CppCodeBuilder>(codeBuilder, policy) {
 
+    private var lookup: ClassLookup = ClassLookup(emptyList())
+
+    override fun generate(moduleName: String, headers: List<String>, classes: List<WrappedClass>) {
+        lookup = ClassLookup(classes)
+        super.generate(moduleName, headers, classes)
+    }
+
     override fun CppCodeBuilder.onGenerate(
         cls: WrappedClass,
         handleChildren: CppCodeBuilder.() -> Unit
@@ -86,8 +93,8 @@ class WrappedHeaderWriter(
         nameHandler.withNamer(cls) {
             functionDeclaration {
                 val type = cls.type
-                generateMethodSignature(type, method, this@withNamer)
-                addArgs(type, method)
+                generateMethodSignature(lookup, type, method, this@withNamer)
+                addArgs(lookup, type, method)
             }
             appendLine()
         }
@@ -97,12 +104,12 @@ class WrappedHeaderWriter(
         nameHandler.withNamer(cls) {
             functionDeclaration {
                 val type = cls.type
-                generateFieldGet(type, field, this@withNamer)
+                generateFieldGet(lookup, type, field, this@withNamer)
             }
             appendLine()
             functionDeclaration {
                 val type = cls.type
-                generateFieldSet(type, field, this@withNamer)
+                generateFieldSet(lookup, type, field, this@withNamer)
             }
             appendLine()
         }

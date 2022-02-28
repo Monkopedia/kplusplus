@@ -18,7 +18,6 @@ package com.monkopedia.krapper.generator.model
 import clang.CXCursor
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString

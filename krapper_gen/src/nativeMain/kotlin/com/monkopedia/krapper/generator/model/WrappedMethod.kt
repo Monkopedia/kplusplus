@@ -17,11 +17,12 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.isConst
 import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.result
-import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -38,6 +39,8 @@ enum class MethodType {
 class WrappedConstructor(
     name: String,
     returnType: WrappedType,
+    var isCopyConstructor: Boolean,
+    val isDefaultConstructor: Boolean
 ) : WrappedMethod(name, returnType, false, MethodType.CONSTRUCTOR) {
     override fun copy(
         name: String,
@@ -46,16 +49,22 @@ class WrappedConstructor(
         methodType: MethodType,
         children: List<WrappedElement>
     ): WrappedMethod {
-        return WrappedConstructor(name, returnType).also {
+        return WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
             it.addAllChildren(children)
             it.parent = parent
         }
     }
 
     override fun clone(): WrappedConstructor {
-        return WrappedConstructor(name, returnType).also {
+        return WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
             it.parent = parent
             it.addAllChildren(children)
+        }
+    }
+
+    fun checkCopyConstructor(type: WrappedType) {
+        if (args.size == 1 && args.first().type == type) {
+            isCopyConstructor = true
         }
     }
 }
@@ -96,7 +105,9 @@ open class WrappedMethod(
 
     constructor(method: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         method.referenced.spelling.toKString() ?: error("Can't find name of $method"),
-        WrappedType(method.type.result, resolverBuilder),
+        WrappedType(method.type.result, resolverBuilder).let {
+            if (method.isConst) const(it) else it
+        },
         method.isStatic,
         MethodType.METHOD
     )
@@ -127,7 +138,8 @@ open class WrappedMethod(
     }
 }
 
-class WrappedArgument(val name: String, val type: WrappedType, val usr: String = "") : WrappedElement() {
+class WrappedArgument(val name: String, val type: WrappedType, val usr: String = "") :
+    WrappedElement() {
     constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         arg.spelling.toKString() ?: error("Can't find name of $arg"),
         WrappedType(arg.type, resolverBuilder),

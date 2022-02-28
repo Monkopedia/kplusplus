@@ -1,10 +1,39 @@
+/*
+ * Copyright 2021 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.krapper.generator.model
 
+import clang.CXAvailabilityKind
 import clang.CXCursor
 import clang.CXCursorKind
 import clang.CX_CXXAccessSpecifier
-import com.monkopedia.krapper.generator.*
+import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.accessSpecifier
+import com.monkopedia.krapper.generator.availability
+import com.monkopedia.krapper.generator.forEachRecursive
+import com.monkopedia.krapper.generator.isCopyConstructor
+import com.monkopedia.krapper.generator.isDefaultConstructor
+import com.monkopedia.krapper.generator.isStatic
+import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.referenced
+import com.monkopedia.krapper.generator.spelling
+import com.monkopedia.krapper.generator.toKString
+import com.monkopedia.krapper.generator.type
+import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 
 @ThreadLocal
@@ -49,10 +78,15 @@ open class WrappedElement(
 
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
-            val element = map(value, null, resolverBuilder) ?: return null
+            val element = map(value, null, null, resolverBuilder) ?: return null
             value.forEachRecursive { child, parent ->
-                val parent = map(parent, null, resolverBuilder) ?: return@forEachRecursive
-                val child = map(child, parent, resolverBuilder) ?: return@forEachRecursive
+                val parentUsr = parent.usr.toKString()
+                val strTag = child.usr.toKString().orEmpty()
+                    .ifEmpty { "$parentUsr:${child.spelling.toKString()}" }
+
+                val parent = map(parent, null, null, resolverBuilder) ?: return@forEachRecursive
+                val child =
+                    map(child, parent, parentUsr, resolverBuilder) ?: return@forEachRecursive
                 if (child == element) return@forEachRecursive
                 if (child.parent == parent) return@forEachRecursive
                 if (parent is WrappedMethod && child is WrappedArgument) {
@@ -64,7 +98,15 @@ open class WrappedElement(
                     }
                 }
                 if (parent.children.contains(child)) {
-                    throw IllegalArgumentException("$parent already contains $child")
+                    if (child is WrappedTemplateParam ||
+                        parent is WrappedTemplateParam ||
+                        child is WrappedTemplateRef ||
+                        child is WrappedNamespace ||
+                        child == WrappedType.UNRESOLVABLE
+                    ) return@forEachRecursive
+                    throw IllegalArgumentException(
+                        "Parent ($parent) already contains child ($child)"
+                    )
                 }
                 parent.addChild(child)
                 child.parent = parent
@@ -75,24 +117,41 @@ open class WrappedElement(
         private fun map(
             value: CValue<CXCursor>,
             parent: WrappedElement?,
+            parentUsr: String?,
             resolverBuilder: ResolverBuilder
         ): WrappedElement? {
-            val strTag = value.usr.toKString() ?: "${value.spelling.toKString()}:${value.hash}"
+            val strTag =
+                /*if (value.kind == CXCursorKind.CXCursor_TemplateTypeParameter)  "${parentUsr}:${value.spelling.toKString()}" else  */
+                value.usr.toKString().orEmpty()
+                    .ifEmpty { "$parentUsr:${value.spelling.toKString()}" }
 
             elementLookup[strTag]?.let { return it }
-            if (value.fullyQualified == "TestLib::MyPair") {
-                println("TestLib::MyPair ${value.kind}")
-                var parent = value.lexicalParent
-                while (parent.kind < CXCursorKind.CXCursor_FirstInvalid || parent.kind > CXCursorKind.CXCursor_LastInvalid) {
-                    println("Parent ${parent.fullyQualified} ${parent.kind}")
-                    parent = parent.lexicalParent
-                }
-            }
+            // if (value.fullyQualified == "TestLib::MyPair") {
+            // println("TestLib::MyPair ${value.kind}")
+            // var parent = value.lexicalParent
+            // while (parent.kind < CXCursorKind.CXCursor_FirstInvalid || parent.kind > CXCursorKind.CXCursor_LastInvalid) {
+            // println("Parent ${parent.fullyQualified} ${parent.kind}")
+            // parent = parent.lexicalParent
+            // }
+            // }
 
             if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate ||
-                value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected) {
+                value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected ||
+                value.availability == CXAvailabilityKind.CXAvailability_NotAvailable
+            ) {
                 if (value.kind == CXCursorKind.CXCursor_Constructor) {
                     (parent as? WrappedClass)?.hasConstructor = true
+                    (parent as? WrappedTemplate)?.hasConstructor = true
+                }
+                if (value.kind == CXCursorKind.CXCursor_CXXMethod) {
+                    val opName = value.referenced.spelling.toKString()
+                    if (opName == "operator new") {
+                        (parent as? WrappedClass)?.hasHiddenNew = true
+                        (parent as? WrappedTemplate)?.hasHiddenNew = true
+                    } else if (opName == "operator delete") {
+                        (parent as? WrappedClass)?.hasHiddenDelete = true
+                        (parent as? WrappedTemplate)?.hasHiddenDelete = true
+                    }
                 }
                 return null
             }
@@ -105,14 +164,23 @@ open class WrappedElement(
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
                 CXCursorKind.CXCursor_FieldDecl -> WrappedField(value, resolverBuilder)
                 CXCursorKind.CXCursor_ParmDecl -> WrappedArgument(value, resolverBuilder)
-                CXCursorKind.CXCursor_TypedefDecl -> WrappedTypedef(value, resolverBuilder)
+                CXCursorKind.CXCursor_TypedefDecl ->
+                    try {
+                        WrappedTypedef(value, resolverBuilder)
+                    } catch (t: IllegalArgumentException) {
+                        // Don't mind when parsing everything, if this reference is needed,
+                        // it'll come up in resolution
+                        return null
+                    }
                 CXCursorKind.CXCursor_FunctionDecl,
                 CXCursorKind.CXCursor_CXXMethod -> {
+                    if (value.isStatic) return null
                     if (value.referenced.spelling.toKString() in listOf(
-                                    "operator new",
+                            "operator new",
                             "operator new[]",
                             "operator delete",
-                            "operator delete[]")
+                            "operator delete[]"
+                        )
                     ) {
                         return null
                     }
@@ -122,7 +190,8 @@ open class WrappedElement(
                     value.spelling.toKString() ?: error("Namespace without name")
                 )
                 CXCursorKind.CXCursor_Constructor -> WrappedConstructor(
-                    value.spelling.toKString() ?: "constructor", WrappedType.VOID
+                    value.spelling.toKString() ?: "constructor", WrappedType.VOID,
+                    value.isCopyConstructor, value.isDefaultConstructor
                 )
                 CXCursorKind.CXCursor_Destructor -> WrappedDestructor(
                     value.spelling.toKString() ?: "destructor", WrappedType.VOID
@@ -137,17 +206,26 @@ open class WrappedElement(
                 CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
 //                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
 //                CXCursorKind.CXCursor_TypeAliasDecl -> TODO()
-//                CXCursorKind.CXCursor_TypeRef -> TODO()
+                CXCursorKind.CXCursor_TypeRef -> WrappedTemplateRef(
+                    value.spelling.toKString() ?: error("TypeRef without a name")
+                )
                 CXCursorKind.CXCursor_CXXBaseSpecifier -> WrappedBase(
-                    WrappedType(
-                        value.type,
-                        resolverBuilder
-                    )
+                    try {
+                        WrappedType(value.type, resolverBuilder)
+                    } catch (t: IllegalArgumentException) {
+                        // Don't mind when parsing everything, if this reference is needed,
+                        // it'll come up in resolution
+                        return null
+                    }
                 )
-                CXCursorKind.CXCursor_TemplateRef -> WrappedType(
-                    value.type,
-                    resolverBuilder
-                )
+                CXCursorKind.CXCursor_TemplateRef ->
+                    try {
+                        WrappedType(value.type, resolverBuilder)
+                    } catch (t: IllegalArgumentException) {
+                        // Don't mind when parsing everything, if this reference is needed,
+                        // it'll come up in resolution
+                        return null
+                    }
                 CXCursorKind.CXCursor_TranslationUnit -> WrappedTU()
                 else -> return null
             }
