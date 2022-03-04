@@ -15,6 +15,8 @@
  */
 package com.monkopedia.krapper.generator.builders
 
+import com.monkopedia.krapper.generator.resolved_model.type.FqSymbol
+
 inline fun KotlinCodeBuilder.importBlock(pkg: String, target: KotlinCodeBuilder) {
     addSymbol(ImportBlock(pkg, target))
 }
@@ -78,6 +80,3 @@ interface SymbolContainer {
     val symbols: List<Symbol>
 }
 
-interface FqSymbol {
-    val fqNames: List<String>
-}

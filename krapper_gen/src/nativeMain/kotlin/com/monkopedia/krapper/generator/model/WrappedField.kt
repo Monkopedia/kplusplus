@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,9 +16,14 @@
 package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
+import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.referenced
+import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedFieldGetter
+import com.monkopedia.krapper.generator.resolved_model.ResolvedFieldSetter
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -47,4 +52,44 @@ data class WrappedField(
     override fun toString(): String {
         return "$name: $type"
     }
+
+    override fun resolve(resolverContext: ResolveContext): ResolvedField? =
+        with(resolverContext.currentNamer) {
+            val (mappedType, resolvedType) = resolverContext.mapAndResolve(type) ?: return null
+            val type =
+                if (mappedType.isReference) resolverContext.map(mappedType.unreferenced) ?: return null
+                else mappedType
+            val needsDereference =
+                !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE
+            val argType =
+                resolverContext.resolve(if (needsDereference) WrappedType.pointerTo(type) else type)
+                    ?: return null
+            return ResolvedField(
+                name,
+                type.isConst,
+                ResolvedFieldGetter(
+                    uniqueCGetter,
+                    determineReturnStyle(type, resolverContext),
+                    argType,
+                    listOf(
+                        createThisArg(resolverContext) ?: return null
+                    ),
+                    needsDereference = needsDereference
+                ),
+                ResolvedFieldSetter(
+                    uniqueCSetter,
+                    listOf(
+                        createThisArg(resolverContext) ?: return null,
+                        ResolvedArgument(
+                            "value",
+                            resolvedType,
+                            argType,
+                            "",
+                            determineArgumentCastMode(type, resolverContext),
+                            needsDereference
+                        )
+                    )
+                )
+            )
+        }
 }

@@ -13,25 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.monkopedia.krapper.generator.model
+package com.monkopedia.krapper.generator.resolved_model
 
-import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
-
-class WrappedNamespace(val namespace: String) : WrappedElement() {
-    override fun clone(): WrappedElement {
-        return WrappedNamespace(namespace).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
-    }
-
-    override fun resolve(resolverContext: ResolveContext): ResolvedNamespace {
-        return ResolvedNamespace(namespace).also {
-            it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
-        }
-    }
-
+class ResolvedNamespace(val namespace: String) : ResolvedElement() {
     override fun toString(): String {
         return "nm($namespace)"
     }

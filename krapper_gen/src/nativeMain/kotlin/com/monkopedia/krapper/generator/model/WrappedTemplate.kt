@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,11 +17,15 @@ package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
 import clang.CXTypeKind
+import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolved_model.ResolvedTemplate
+import com.monkopedia.krapper.generator.resolved_model.ResolvedTemplateParam
+import com.monkopedia.krapper.generator.resolved_model.ResolvedTypedef
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -59,27 +63,17 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         value.spelling.toKString() ?: error("Missing name")
     )
 
-//    inline fun typedWith(
-//        resolverBuilder: ResolverBuilder,
-//        vararg values: Pair<WrappedTemplateType, WrappedType>
-//    ): WrappedClass = typedWith(resolverBuilder, values.toMap())
-//
-//    fun typedWith(
-//        resolverBuilder: ResolverBuilder,
-//        values: Map<WrappedTemplateType, WrappedType>
-//    ): WrappedClass {
-//        for (t in templateArgs) {
-//            require(t in values.keys) {
-//                "Missing parameter $t in instance"
-//            }
-//        }
-//        return WrappedClass(
-//            type.typedWith(resolverBuilder, values).name,
-//            baseClass?.typedWith(resolverBuilder, values),
-//            fields.map { it.typedWith(resolverBuilder, values) },
-//            methods.map { it.typedWith(resolverBuilder, values) }
-//        )
-//    }
+    override fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
+        return ResolvedTemplate(
+            name,
+            baseClass?.let { resolverContext.resolve(it) ?: return null },
+            hasConstructor,
+            hasHiddenNew,
+            hasHiddenDelete,
+            qualified,
+            templateArgs.mapNotNull { it.resolveTemplateParam(resolverContext) }
+        )
+    }
 
     override fun toString(): String {
         return buildString {
@@ -137,6 +131,16 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         return "$name${defaultType?.let { " $it" } ?: ""} ($children)"
     }
 
+    override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
+
+    fun resolveTemplateParam(resolverContext: ResolveContext): ResolvedTemplateParam? {
+        return ResolvedTemplateParam(
+            name,
+            usr,
+            defaultType?.let { resolverContext.resolve(it) ?: return null }
+        )
+    }
+
     companion object {
         private fun determineType(
             value: CValue<CXCursor>,
@@ -171,6 +175,10 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
 
     override fun toString(): String {
         return "typedef $name = $targetType"
+    }
+
+    override fun resolve(resolverContext: ResolveContext): ResolvedElement? {
+        return ResolvedTypedef(name, resolverContext.resolve(targetType) ?: return null)
     }
 
     companion object {

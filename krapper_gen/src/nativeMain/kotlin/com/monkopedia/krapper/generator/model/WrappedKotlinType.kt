@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -136,22 +136,22 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     return WrappedKotlinType(name)
 }
 
-fun nullable(base: WrappedKotlinType): WrappedKotlinType {
-    return object : WrappedKotlinType {
-        override val isWrapper: Boolean
-            get() = base.isWrapper
-        override val fullyQualified: List<String>
-            get() = base.fullyQualified
-        override val name: String
-            get() = base.name + "?"
-        override val pkg: String
-            get() = base.pkg
+internal class NullableKotlinType(internal val base: WrappedKotlinType) : WrappedKotlinType {
+    override val isWrapper: Boolean
+        get() = base.isWrapper
+    override val fullyQualified: List<String>
+        get() = base.fullyQualified
+    override val name: String
+        get() = base.name + "?"
+    override val pkg: String
+        get() = base.pkg
 
-        override fun toString(): String {
-            return "$base?"
-        }
+    override fun toString(): String {
+        return "$base?"
     }
 }
+
+fun nullable(base: WrappedKotlinType): WrappedKotlinType = NullableKotlinType(base)
 
 fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
     val name = nameIn.trim()
@@ -170,22 +170,26 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
     return fullyQualifiedType(name.replace("::", "."), isWrapper = true)
 }
 
-fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKotlinType {
-    val baseType = this
-    return object : WrappedKotlinType {
-        override val isWrapper: Boolean
-            get() = baseType.isWrapper
-        override val fullyQualified: List<String>
-            get() = parseTypes.flatMap { it.fullyQualified } + baseType.fullyQualified
-        override val name: String
-            get() = "${baseType.name}<${parseTypes.joinToString(", ") { it.name }}>"
-        override val pkg: String
-            get() = baseType.pkg
+internal class TemplatedKotlinType(
+    internal val baseType: WrappedKotlinType,
+    internal val templateTypes: List<WrappedKotlinType>
+) : WrappedKotlinType {
+    override val isWrapper: Boolean
+        get() = baseType.isWrapper
+    override val fullyQualified: List<String>
+        get() = templateTypes.flatMap { it.fullyQualified } + baseType.fullyQualified
+    override val name: String
+        get() = "${baseType.name}<${templateTypes.joinToString(", ") { it.name }}>"
+    override val pkg: String
+        get() = baseType.pkg
 
-        override fun toString(): String {
-            return "$baseType<${parseTypes.joinToString(", ")}>"
-        }
+    override fun toString(): String {
+        return "$baseType<${templateTypes.joinToString(", ")}>"
     }
+}
+
+fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKotlinType {
+    return TemplatedKotlinType(this, parseTypes)
 }
 
 fun parseTypes(argList: String): List<WrappedKotlinType> {

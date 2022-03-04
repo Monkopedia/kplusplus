@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -39,6 +39,7 @@ import com.monkopedia.krapper.generator.model.forEachRecursive
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
@@ -129,10 +130,10 @@ fun find(s: String): String? {
 val INCLUDE_PATHS = generateIncludes()
 
 class ParsedResolver(val tu: WrappedTU) : Resolver {
-    private val classMap = mutableMapOf<String, WrappedClass>()
+    private val classMap = mutableMapOf<String, Pair<ResolvedClass, WrappedClass>?>()
     private val templateMap = mutableMapOf<String, WrappedTemplate>()
 
-    override fun resolveTemplate(type: WrappedType): WrappedTemplate {
+    override fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate {
         return templateMap.getOrPut(type.toString()) {
             val templateCandidates = tu.filterRecursive {
                 ((it as? WrappedTemplate)?.qualified == type.toString())
@@ -142,20 +143,22 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         }
     }
 
-    override fun resolve(type: WrappedType): WrappedClass {
+    override fun resolve(
+        type: WrappedType,
+        context: ResolveContext
+    ): Pair<ResolvedClass, WrappedClass>? {
         return classMap.getOrPut(type.toString()) {
-            (
-                tu.filterRecursive {
-                    (it as? WrappedClass)?.type?.toString() == type.toString() &&
-                        it.children.isNotEmpty()
-                }.singleOrNull() as? WrappedClass
-                )?.let {
-                return@getOrPut it
+            val existingClass = tu.filterRecursive {
+                (it as? WrappedClass)?.type?.toString() == type.toString() &&
+                    it.children.isNotEmpty()
+            }.singleOrNull() as? WrappedClass
+            existingClass?.let { cls ->
+                return@getOrPut cls.resolve(context)?.let { it to cls }
             }
             when (type) {
                 is WrappedTemplateType -> {
-                    val template = resolveTemplate(type.baseType)
-                    template.typedAs(type)
+                    val template = resolveTemplate(type.baseType, context)
+                    template.typedAs(type, context)
                 }
                 is WrappedTemplateRef -> {
                     throw IllegalArgumentException("Can't resolve $type since it is templated")
@@ -298,7 +301,10 @@ fun CXTranslationUnit.printDiagnostics() {
     }
 }
 
-fun WrappedTemplate.typedAs(templateSpec: WrappedTemplateType): WrappedClass {
+fun WrappedTemplate.typedAs(
+    templateSpec: WrappedTemplateType,
+    baseContext: ResolveContext
+): Pair<ResolvedClass, WrappedClass>? {
     val fullyQualified = templateSpec.baseType.toString()
     val templates =
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
@@ -307,42 +313,47 @@ fun WrappedTemplate.typedAs(templateSpec: WrappedTemplateType): WrappedClass {
         mapping[templates[i].name] = templateSpec.templateArgs[i]
         mapping[templates[i].usr] = templateSpec.templateArgs[i]
     }
-    val mapper: TypeMapping = { type, parent ->
-        type.operateOn { type ->
+    val mapper: TypeMapping = { type, context ->
+        if (type.toString() == fullyQualified) ReplaceWith(templateSpec)
+        else type.operateOn { type ->
             if (type is WrappedTemplateRef) {
                 val mapping = mapping[type.target]
                 if (mapping != null) {
-                    ReplaceWith(mapping)
+                    val result = baseContext.typeMapping(mapping, context)
+                    if (result == ElementUnchanged) {
+                        ReplaceWith(mapping)
+                    } else result
                 } else {
-                    RemoveElement
+                    baseContext.typeMapping(type, context)
                 }
-            } else if (parent !is WrappedTemplateType && type.toString() == fullyQualified) {
-                ReplaceWith(templateSpec)
+//            } else if (parent !is WrappedTemplateType && type.toString() == fullyQualified) {
+            } else if (type.toString() == fullyQualified) {
+                val result = baseContext.typeMapping(templateSpec, context)
+                if (result == ElementUnchanged) {
+                    ReplaceWith(templateSpec)
+                } else result
             } else {
-                ElementUnchanged
+                baseContext.typeMapping(type, context)
             }
         }
     }
+    val localContext = baseContext.copy(typeMapping = mapper)
     for (i in min(templates.size, templateSpec.templateArgs.size) until templates.size) {
         val defaultType = templates[i].defaultType ?: continue
-        val mappedType = map(defaultType, null, mapper)
-        if (mappedType == RemoveElement) continue
+        val mappedType = mapper(defaultType, localContext)
+        if (mappedType is RemoveElement) continue
         val type = if (mappedType is ReplaceWith) mappedType.replacement else defaultType
         mapping[templates[i].name] = type
         mapping[templates[i].usr] = type
     }
-    val outputClass =
-        WrappedClass(name, false, templateSpec)
+    val outputClass = WrappedClass(name, false, templateSpec)
     outputClass.hasConstructor = hasConstructor
     outputClass.hasHiddenNew = hasHiddenNew
     outputClass.hasHiddenDelete = hasHiddenDelete
     outputClass.parent = parent
     outputClass.addAllChildren(children.map { it.cloneRecursive() })
-    return when (val result = map(outputClass, null, mapper)) {
-        RemoveElement -> throw IllegalArgumentException("Can't map $outputClass")
-        ElementUnchanged -> outputClass
-        is ReplaceWith -> result.replacement
-    }
+    removeDuplicateMethods(outputClass)
+    return outputClass.resolve(localContext)?.let { it to outputClass }
 }
 
 fun removeDuplicateMethods(element: WrappedElement) {

@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ import clang.CXAvailabilityKind
 import clang.CXCursor
 import clang.CXCursorKind
 import clang.CX_CXXAccessSpecifier
+import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.availability
@@ -30,6 +31,7 @@ import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.referenced
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -39,7 +41,7 @@ import kotlinx.cinterop.CValue
 @ThreadLocal
 private val elementLookup = mutableMapOf<String, WrappedElement>()
 
-open class WrappedElement(
+abstract class WrappedElement(
     private val mutableChildren: MutableList<WrappedElement> = mutableListOf()
 ) {
     val children: List<WrappedElement>
@@ -57,6 +59,7 @@ open class WrappedElement(
             }
         }
         mutableChildren.addAll(list)
+        list.forEach { it.parent = this }
     }
 
     fun addChild(child: WrappedElement) {
@@ -64,17 +67,15 @@ open class WrappedElement(
             "$this already contain a $child"
         }
         mutableChildren.add(child)
-    }
-
-    open fun clone(): WrappedElement {
-        return WrappedElement(children.toMutableList()).also {
-            it.parent = parent
-        }
+        child.parent = this
     }
 
     fun removeChild(child: WrappedElement) {
         mutableChildren.remove(child)
     }
+
+    abstract fun clone(): WrappedElement
+    abstract fun resolve(resolverContext: ResolveContext): ResolvedElement?
 
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
@@ -121,19 +122,10 @@ open class WrappedElement(
             resolverBuilder: ResolverBuilder
         ): WrappedElement? {
             val strTag =
-                /*if (value.kind == CXCursorKind.CXCursor_TemplateTypeParameter)  "${parentUsr}:${value.spelling.toKString()}" else  */
                 value.usr.toKString().orEmpty()
                     .ifEmpty { "$parentUsr:${value.spelling.toKString()}" }
 
             elementLookup[strTag]?.let { return it }
-            // if (value.fullyQualified == "TestLib::MyPair") {
-            // println("TestLib::MyPair ${value.kind}")
-            // var parent = value.lexicalParent
-            // while (parent.kind < CXCursorKind.CXCursor_FirstInvalid || parent.kind > CXCursorKind.CXCursor_LastInvalid) {
-            // println("Parent ${parent.fullyQualified} ${parent.kind}")
-            // parent = parent.lexicalParent
-            // }
-            // }
 
             if (value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPrivate ||
                 value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXProtected ||

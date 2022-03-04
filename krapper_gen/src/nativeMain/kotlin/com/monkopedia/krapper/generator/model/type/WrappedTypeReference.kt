@@ -101,7 +101,7 @@ data class WrappedTypeReference(val name: String) : WrappedType() {
             if (name == LONG_DOUBLE_STR) {
                 return WrappedType("double")
             }
-            throw IllegalStateException("Don't know how to convert $name to C")
+            return pointerTo(VOID)
         }
 
     override fun toString(): String {

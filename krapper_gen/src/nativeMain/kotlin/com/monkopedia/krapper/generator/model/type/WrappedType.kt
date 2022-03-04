@@ -24,6 +24,7 @@ import clang.CXType
 import clang.CXTypeKind.CXType_Invalid
 import clang.CXTypeKind.CXType_RValueReference
 import clang.CXTypeKind.CXType_Unexposed
+import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.getTemplateArgumentType
@@ -34,6 +35,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
@@ -67,6 +69,10 @@ abstract class WrappedType : WrappedElement() {
     abstract val isReference: Boolean
     abstract val isConst: Boolean
     abstract val unconst: WrappedType
+
+    override fun resolve(resolverContext: ResolveContext): ResolvedElement? {
+        return resolverContext.resolve(this)
+    }
 
     companion object :
         (String) -> WrappedType,
@@ -179,6 +185,9 @@ abstract class WrappedType : WrappedElement() {
                 type.spelling.toKString()?.trim() ?: error("Missing spelling for type $type")
             if (spelling.startsWith("const ")) {
                 spelling = spelling.substring("const ".length)
+            }
+            if (spelling.contains('<')) {
+                spelling = spelling.substring(0, spelling.indexOf('<'))
             }
             val referencedDecl = type.typeDeclaration
             return when {

@@ -26,6 +26,12 @@ class WrappedTemplateType(
             return pointerTo(VOID)
         }
 
+    init {
+        if (baseType.toString().endsWith("<${templateArgs.joinToString(", ")}>")) {
+            IllegalArgumentException("Looping templates $baseType $templateArgs").printStackTrace()
+        }
+    }
+
     override val isReturnable: Boolean
         get() = false
     override val isNative: Boolean

@@ -55,6 +55,10 @@ kotlin {
             }
         }
     }
+    sourceSets["commonMain"].dependencies {
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1-native-mt")
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.2.2")
+    }
     sourceSets["nativeMain"].dependencies {
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1-native-mt")
         implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.2.2")

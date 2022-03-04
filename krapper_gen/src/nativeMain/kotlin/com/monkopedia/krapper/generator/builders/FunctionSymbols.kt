@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 inline fun <T : LangFactory> CodeBuilder<T>.funSig(
     name: String,
@@ -36,7 +36,7 @@ sealed class FunctionBuilder<T : LangFactory>(
         body!!.apply(block)
     }
 
-    fun define(name: String, type: WrappedType): LocalVar {
+    fun define(name: String, type: ResolvedType): LocalVar {
         return functionBuilder.define(name, type).also(args::add).also {
             (it as? KotlinLocalVar)?.isVal = null
         }

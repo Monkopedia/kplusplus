@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,11 +18,13 @@ package com.monkopedia.krapper.generator.builders
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.MEM_SCOPE
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.PAIR
-import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
-import com.monkopedia.krapper.generator.model.typedWith
+import com.monkopedia.krapper.generator.resolved_model.type.FqSymbol
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
+import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
+import com.monkopedia.krapper.generator.resolved_model.type.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
 
@@ -31,17 +33,22 @@ fun KotlinCodeBuilder(): KotlinCodeBuilder {
 }
 
 class KotlinFactory : LangFactory {
-    override fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar {
-        return KotlinLocalVar(name, type.kotlinType, initializer)
+    override fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar {
+        return KotlinLocalVar(
+            name,
+            (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
+                ?: error("Cannot define $type in kotlin"),
+            initializer
+        )
     }
 
     override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol {
         return KotlinFunctionSig(name, retType ?: KotlinType(VOID), args)
     }
 
-    override fun createType(type: WrappedType): Symbol = KotlinType(type)
+    override fun createType(type: ResolvedType): Symbol = KotlinType(type)
 
-    fun define(name: String, type: WrappedKotlinType, initializer: Symbol?): LocalVar {
+    fun define(name: String, type: ResolvedKotlinType, initializer: Symbol?): LocalVar {
         return KotlinLocalVar(name, type, initializer)
     }
 
@@ -57,6 +64,7 @@ class KotlinFactory : LangFactory {
 class QDot(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         first.build(builder)
         builder.append("?.")
@@ -172,7 +180,7 @@ inline fun KotlinCodeBuilder.defer(
 
 fun KotlinCodeBuilder.define(
     desiredName: String,
-    type: WrappedKotlinType,
+    type: ResolvedKotlinType,
     initializer: Symbol? = null
 ): LocalVar {
     val name = scope.allocateName(desiredName)
@@ -209,6 +217,7 @@ class ClassStartSymbol(
 ) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(clsName, constructorVisibility) + constructorArgs
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("value class ")
         clsName.build(builder)
@@ -293,13 +302,14 @@ class KotlinFunctionSig(
 
 class KotlinLocalVar(
     override val name: String,
-    val type: WrappedKotlinType,
+    val type: ResolvedKotlinType,
     private val initializer: Symbol?
 ) : LocalVar, SymbolContainer {
     var isVal: Boolean? = false
     private val typeSymbol = KotlinType(type)
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
+
     override fun build(builder: CodeStringBuilder) {
         isVal?.let { isVal ->
             builder.append(if (isVal) "val " else "var ")
@@ -333,8 +343,12 @@ class KotlinType(
     private val typeStr: String,
     override val fqNames: List<String>
 ) : Symbol, FqSymbol {
-    constructor(type: WrappedType) : this(type.kotlinType)
-    constructor(type: WrappedKotlinType) : this(type.name, type.fullyQualified)
+    constructor(type: ResolvedType) : this(
+        (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
+            ?: error("Cannot create KotlinType with $type")
+    )
+
+    constructor(type: ResolvedKotlinType) : this(type.name, type.fqNames)
 
     override fun build(builder: CodeStringBuilder) {
         builder.append(typeStr)
@@ -359,12 +373,14 @@ inline fun KotlinCodeBuilder.inline(build: KotlinCodeBuilder.() -> Unit) {
         +inline(it)
     }
 }
+
 inline fun inline(target: Symbol): Symbol =
     Inline(target)
 
 class Inline(private val target: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("inline ")
         target.build(builder)
@@ -388,6 +404,7 @@ inline fun operator(target: Symbol): Symbol =
 class Operator(private val target: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("operator ")
         target.build(builder)
@@ -407,6 +424,7 @@ inline fun infix(target: Symbol): Symbol =
 class Infix(private val target: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("infix ")
         target.build(builder)
@@ -455,8 +473,8 @@ class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
     }
 }
 
-fun KotlinCodeBuilder.fqType(fq: String): Symbol = fqType(WrappedKotlinType(fq))
-fun KotlinCodeBuilder.fqType(kotlinType: WrappedKotlinType): Symbol = KotlinType(kotlinType)
+fun KotlinCodeBuilder.fqType(fq: String): Symbol = fqType(fullyQualifiedType(fq))
+fun KotlinCodeBuilder.fqType(kotlinType: ResolvedKotlinType): Symbol = KotlinType(kotlinType)
 
 inline fun KotlinCodeBuilder.extensionFunction(
     functionBuilder: KotlinFunctionSymbol.() -> Unit
@@ -472,6 +490,7 @@ inline fun KotlinCodeBuilder.extensionFunction(
 class Elvis(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append('(')
         first.build(builder)
@@ -486,6 +505,7 @@ inline infix fun Symbol.elvis(other: Symbol): Symbol = Elvis(this, other)
 class Pair(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append('(')
         first.build(builder)

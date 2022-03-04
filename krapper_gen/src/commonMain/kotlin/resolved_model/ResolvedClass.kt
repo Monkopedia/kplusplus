@@ -13,23 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.monkopedia.krapper.generator.codegen
+package com.monkopedia.krapper.generator.resolved_model
 
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
-class ClassLookup(private val classes: List<ResolvedClass>) {
-    private val quickLook = mutableMapOf<String, ResolvedClass?>()
+data class ResolvedClass(
+    val name: String,
+    var isAbstract: Boolean = false,
+    val specifiedType: ResolvedType? = null,
+    var hasConstructor: Boolean = false,
+    var hasHiddenNew: Boolean = false,
+    var hasHiddenDelete: Boolean = false,
+    var baseClass: ResolvedType?,
+    var hasDefaultConstructor: Boolean,
+    var hasCopyConstructor: Boolean,
+    var type: ResolvedCppType
+) : ResolvedElement() {
 
-    operator fun get(type: ResolvedType): ResolvedClass? {
-        return this[type.toString()]
-    }
-
-    operator fun get(str: String): ResolvedClass? {
-        return quickLook.getOrPut(str) {
-            classes.find { it.type.toString() == str } ?: null.also {
-                println("Warning: Couldn't find class $str")
-            }
-        }
+    override fun toString(): String {
+        return "cls($name)"
     }
 }

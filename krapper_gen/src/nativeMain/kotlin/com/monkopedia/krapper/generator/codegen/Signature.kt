@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,13 +22,16 @@ import com.monkopedia.krapper.generator.builders.Symbol
 import com.monkopedia.krapper.generator.builders.dereference
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.model.MethodType
-import com.monkopedia.krapper.generator.model.WrappedArgument
-import com.monkopedia.krapper.generator.model.WrappedField
-import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.MethodType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
 private const val BEFORE_UPPER_AND_LOWER = "(?<=\\p{L})(?=\\p{Lu}\\p{Ll})"
@@ -38,15 +41,12 @@ fun String.splitCamelcase(): List<String> {
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
-    classLookup: ClassLookup,
-    type: WrappedType,
-    method: WrappedMethod,
-    namer: Namer
-) = with(namer) {
+    method: ResolvedMethod
+) {
     when (method.methodType) {
         MethodType.CONSTRUCTOR -> {
             name = method.uniqueCName
-            retType = functionBuilder.type(pointerTo(type).cType)
+            retType = functionBuilder.type(method.returnType.cType)
         }
         MethodType.DESTRUCTOR -> {
             retType = null
@@ -54,24 +54,23 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
         }
         MethodType.STATIC_OP,
         MethodType.METHOD -> {
-            retType = method.returnType.takeIf { classLookup.isReturnable(it) }?.cType?.let(
-                functionBuilder::type
-            )
+            retType =
+                method.returnType.takeIf {
+                    method.returnStyle != ARG_CAST && method.returnStyle != ReturnStyle.VOID
+                }?.cType?.let(functionBuilder::type)
             name = method.uniqueCName
         }
     }
 }
 
-fun ClassLookup.isReturnable(type: WrappedType): Boolean {
-    return type.isReturnable || this[type]?.hasCopyConstructor == true
-}
-
-data class WrapperArgument(
-    val arg: WrappedArgument?,
-    val targetType: WrappedType,
+data class SignatureArgument(
+    val arg: ResolvedArgument,
     val localVar: LocalVar,
-    val needsDereference: Boolean
 ) {
+    val targetType: ResolvedCppType
+        get() = arg.signatureType
+    private val needsDereference: Boolean
+        get() = arg.needsDereference
     val reference: Symbol
         get() = if (needsDereference) localVar.dereference else localVar.reference
     val pointerReference: Symbol
@@ -85,86 +84,54 @@ data class WrapperArgument(
 
 inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
     classLookup: ClassLookup,
-    type: WrappedType,
-    method: WrappedMethod
-): List<WrapperArgument> {
-    return listOfNotNull(
-        if (method.methodType != MethodType.CONSTRUCTOR) WrapperArgument(
-            null,
-            pointerTo(type),
-            define("thiz", pointerTo(type).cType),
-            true
-        )
-        else null
-    ) + method.args.map {
-        val type = if (it.type.isReference) it.type.unreferenced else it.type
-        if (type.isPointer || type.isNative) {
-            WrapperArgument(it, type, define(it.name, type.cType), false)
-        } else {
-            val type = pointerTo(type)
-            WrapperArgument(it, type, define(it.name, type.cType), true)
-        }
-    } + listOfNotNull(
-        if (method.methodType == MethodType.METHOD &&
-            !classLookup.isReturnable(method.returnType)
-        ) {
-            val type =
-                if (method.returnType.isReference) method.returnType.unreferenced
-                else method.returnType
-            if (type.isPointer) {
-                WrapperArgument(null, type, define("ret_value", type.cType), false)
-            } else {
-                val type = pointerTo(type)
-                WrapperArgument(null, type, define("ret_value", type.cType), true)
-            }
-        } else null
-    )
+    type: ResolvedType,
+    method: ResolvedMethod
+): List<SignatureArgument> {
+    val args = if (method.returnStyle == ARG_CAST) method.args + ResolvedArgument(
+        "ret_value",
+        method.returnType,
+        method.returnType,
+        "",
+        REINT_CAST,
+        method.argCastNeedsPointer
+    ) else method.args
+    return args.map {
+        defineWrapperArgument(it)
+    }
 }
 
+fun <T : LangFactory> FunctionBuilder<T>.defineWrapperArgument(
+    arg: ResolvedArgument
+) = SignatureArgument(arg, define(arg.name, arg.signatureType.cType))
+
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
-    classLookup: ClassLookup,
-    type: WrappedType,
-    field: WrappedField,
-    namer: Namer
-): List<WrapperArgument> = with(namer) {
-    if (field.type.isArray) {
-        throw UnsupportedOperationException("Arrays are not supported")
-    }
-    name = field.uniqueCGetter
+    field: ResolvedField
+): List<SignatureArgument> {
+    name = field.getter.uniqueCName
     retType =
-        if (classLookup.isReturnable(field.type)) functionBuilder.type(field.type.cType)
-        else functionBuilder.type(VOID)
-    val thiz = WrapperArgument(null, pointerTo(type), define("thiz", pointerTo(type).cType), true)
-    return listOfNotNull(
-        thiz,
-        if (!classLookup.isReturnable(field.type)) WrapperArgument(
-            null,
-            field.type,
-            define("ret_value", field.type.cType),
-            true
-        )
-        else null
-    )
+        field.getter.returnType.takeIf {
+            field.getter.returnStyle != ARG_CAST && field.getter.returnStyle != ReturnStyle.VOID
+        }?.cType?.let(functionBuilder::type)
+            ?: functionBuilder.type(VOID)
+    val args = if (field.getter.returnStyle == ARG_CAST) field.getter.args + ResolvedArgument(
+        "ret_value",
+        field.getter.returnType,
+        field.getter.returnType,
+        "",
+        REINT_CAST,
+        field.getter.needsDereference
+    ) else field.getter.args
+    return args.map {
+        defineWrapperArgument(it)
+    }
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldSet(
-    classLookup: ClassLookup,
-    type: WrappedType,
-    field: WrappedField,
-    namer: Namer
-): List<WrapperArgument> = with(namer) {
-    if (field.type.isArray) {
-        throw UnsupportedOperationException("Arrays are not supported")
-    }
-    name = field.uniqueCSetter
+    field: ResolvedField
+): List<SignatureArgument> {
+    name = field.setter.uniqueCName
     retType = functionBuilder.type(VOID)
-    val thiz = WrapperArgument(null, pointerTo(type), define("thiz", pointerTo(type).cType), true)
-    val type = field.type
-    val value = if (type.isPointer || type.isReturnable) {
-        WrapperArgument(null, type, define("ret_value", type.cType), false)
-    } else {
-        val type = pointerTo(type)
-        WrapperArgument(null, type, define("ret_value", type.cType), true)
+    return field.setter.argument.map {
+        defineWrapperArgument(it)
     }
-    return listOf(thiz, value)
 }

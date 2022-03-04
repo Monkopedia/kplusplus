@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ import clang.CXCursor
 import clang.CXCursorKind
 import clang.CXFile
 import clang.CX_CXXAccessSpecifier
+import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
@@ -27,6 +28,8 @@ import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -37,7 +40,15 @@ private val CValue<CXCursor>.fileParent: CXFile?
         return includedFile
     }
 
-class WrappedBase(val type: WrappedType?) : WrappedElement()
+class WrappedBase(val type: WrappedType?) : WrappedElement() {
+    override fun clone(): WrappedElement {
+        return WrappedBase(type).also {
+            it.addAllChildren(children.map { it.clone() })
+        }
+    }
+
+    override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
+}
 
 class WrappedClass(
     val name: String,
@@ -91,6 +102,30 @@ class WrappedClass(
             if (hasHiddenNew) {
                 it.hasHiddenNew = true
             }
+        }
+    }
+
+    override fun resolve(resolverContext: ResolveContext): ResolvedClass? {
+        val baseClasses = resolverContext.findBases(this)
+        modifyMethodsIfNeeded(baseClasses)
+        return ResolvedClass(
+            name,
+            isAbstract,
+            specifiedType?.let {
+                // If no type, thats fine, but if type exists, it needs to resolve.
+                resolverContext.resolve(specifiedType) ?: return null
+            },
+            hasConstructor,
+            hasHiddenNew,
+            hasHiddenDelete,
+            baseClass?.let {
+                resolverContext.resolve(it) ?: return null
+            },
+            hasDefaultConstructor,
+            hasCopyConstructor,
+            resolverContext.resolve(type) ?: return null
+        ).also {
+            it.addAllChildren(children.mapNotNull { it.resolve(resolverContext + this) })
         }
     }
 

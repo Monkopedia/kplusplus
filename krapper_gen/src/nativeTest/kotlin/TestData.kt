@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.generator.ResolveContext.Companion
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -1001,6 +1002,10 @@ class TestDataClass {
         TU.addChild(it)
         it.parent = TU
     }
+    val V8 = WrappedNamespace("v8").also {
+        TU.addChild(it)
+        it.parent = TU
+    }
 
     val Vector = VectorClass()
 
@@ -1039,7 +1044,7 @@ class TestDataClass {
                     )
                 )
             }
-        val cls = tmp.typedAs(type)
+        val cls = tmp to type
     }
 
     val TestClass = TestClassClass()
@@ -1571,6 +1576,35 @@ class TestDataClass {
                     )
                 )
             }
-        val cls = template.typedAs(WrappedTemplateType(type, listOf(pointerTo(OtherClass.type))))
+        val cls = template to WrappedTemplateType(type, listOf(pointerTo(OtherClass.type)))
+    }
+
+    val Maybe = MaybeClass()
+
+    inner class MaybeClass {
+        val localType = WrappedType("v8::Maybe")
+        val template = WrappedTemplateParam("_Tp", "_Tp")
+        val type = WrappedTemplateType(localType, listOf(WrappedType("double")))
+        val ToChecked =
+            WrappedMethod(
+                "ToChecked",
+                const(WrappedTemplateRef(template.usr)),
+                false,
+                MethodType.METHOD
+            )
+        val tmp =
+            WrappedTemplate(
+                "Maybe",
+            ).also {
+                it.parent = V8
+                V8.addChild(it)
+                it.addAllChildren(
+                    listOf(
+                        template,
+                        ToChecked
+                    )
+                )
+            }
+        val cls = tmp to type
     }
 }

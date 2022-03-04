@@ -15,19 +15,13 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedMethod
 
-sealed class KotlinOperatorType
-
-data class KotlinOperator(val name: String) : KotlinOperatorType()
-data class InfixMethod(val name: String) : KotlinOperatorType()
-data class BasicWithDummyMethod(val name: String) : KotlinOperatorType()
-data class BasicMethod(val name: String) : KotlinOperatorType()
-
 sealed class Operator {
 
-    abstract val kotlinOperatorType: KotlinOperatorType
+    abstract val resolvedOperator: ResolvedOperator
 
     abstract fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String
     protected abstract fun matches(method: WrappedMethod): Boolean
@@ -77,7 +71,7 @@ sealed class Operator {
 data class BasicBinaryOperator private constructor(
     val cppOp: String,
     private val cOp: String,
-    override val kotlinOperatorType: KotlinOperatorType,
+    override val resolvedOperator: ResolvedOperator,
     val supportsDirectCall: Boolean = true
 ) : Operator() {
 
@@ -91,39 +85,39 @@ data class BasicBinaryOperator private constructor(
     }
 
     override fun toString(): String {
-        return "binary($cppOp, $cOp, $kotlinOperatorType)"
+        return "binary($cppOp, $cOp, $resolvedOperator)"
     }
 
     companion object {
-        val MINUS = BasicBinaryOperator("-", "Minus", KotlinOperator("minus"))
-        val PLUS = BasicBinaryOperator("+", "Plus", KotlinOperator("plus"))
-        val TIMES = BasicBinaryOperator("*", "Times", KotlinOperator("times"))
-        val DIV = BasicBinaryOperator("/", "Divide", KotlinOperator("div"))
-        val MOD = BasicBinaryOperator("%", "Mod", KotlinOperator("rem"))
-        val EQ = BasicBinaryOperator("==", "Eq", InfixMethod("eq"))
-        val NEQ = BasicBinaryOperator("!=", "Neq", InfixMethod("neq"))
-        val LT = BasicBinaryOperator("<", "Lt", InfixMethod("lt"))
-        val GT = BasicBinaryOperator(">", "Gt", InfixMethod("gt"))
-        val LTEQ = BasicBinaryOperator("<=", "Lteq", InfixMethod("lteq"))
-        val GTEQ = BasicBinaryOperator(">=", "Gteq", InfixMethod("gteq"))
-        val BINARY_AND = BasicBinaryOperator("&&", "Binary_And", InfixMethod("binAnd"))
-        val BINARY_OR = BasicBinaryOperator("||", "Binary_Or", InfixMethod("binOr"))
-        val AND = BasicBinaryOperator("&", "And", InfixMethod("and"))
-        val OR = BasicBinaryOperator("|", "Or", InfixMethod("or"))
-        val XOR = BasicBinaryOperator("^", "Xor", InfixMethod("xor"))
-        val SHL = BasicBinaryOperator("<<", "Shl", InfixMethod("shl"))
-        val SHR = BasicBinaryOperator(">>", "Shr", InfixMethod("shr"))
+        val MINUS = BasicBinaryOperator("-", "Minus", ResolvedOperator.MINUS)
+        val PLUS = BasicBinaryOperator("+", "Plus", ResolvedOperator.PLUS)
+        val TIMES = BasicBinaryOperator("*", "Times", ResolvedOperator.TIMES)
+        val DIV = BasicBinaryOperator("/", "Divide", ResolvedOperator.DIV)
+        val MOD = BasicBinaryOperator("%", "Mod", ResolvedOperator.MOD)
+        val EQ = BasicBinaryOperator("==", "Eq", ResolvedOperator.EQ)
+        val NEQ = BasicBinaryOperator("!=", "Neq", ResolvedOperator.NEQ)
+        val LT = BasicBinaryOperator("<", "Lt", ResolvedOperator.LT)
+        val GT = BasicBinaryOperator(">", "Gt", ResolvedOperator.GT)
+        val LTEQ = BasicBinaryOperator("<=", "Lteq", ResolvedOperator.LTEQ)
+        val GTEQ = BasicBinaryOperator(">=", "Gteq", ResolvedOperator.GTEQ)
+        val BINARY_AND = BasicBinaryOperator("&&", "Binary_And", ResolvedOperator.BINARY_AND)
+        val BINARY_OR = BasicBinaryOperator("||", "Binary_Or", ResolvedOperator.BINARY_OR)
+        val AND = BasicBinaryOperator("&", "And", ResolvedOperator.AND)
+        val OR = BasicBinaryOperator("|", "Or", ResolvedOperator.OR)
+        val XOR = BasicBinaryOperator("^", "Xor", ResolvedOperator.XOR)
+        val SHL = BasicBinaryOperator("<<", "Shl", ResolvedOperator.SHL)
+        val SHR = BasicBinaryOperator(">>", "Shr", ResolvedOperator.SHR)
         val IND =
-            BasicBinaryOperator("[]", "Ind", KotlinOperator("get"), supportsDirectCall = false)
+            BasicBinaryOperator("[]", "Ind", ResolvedOperator.IND, supportsDirectCall = false)
         val POST_INC = BasicBinaryOperator(
             "++",
             "PostIncrement",
-            BasicWithDummyMethod("postIncrement"), supportsDirectCall = false
+            ResolvedOperator.POST_INC, supportsDirectCall = false
         )
         val POST_DEC = BasicBinaryOperator(
             "--",
             "PostDecrement",
-            BasicWithDummyMethod("postDecrement"), supportsDirectCall = false
+            ResolvedOperator.POST_DEC, supportsDirectCall = false
         )
     }
 }
@@ -131,7 +125,7 @@ data class BasicBinaryOperator private constructor(
 data class BasicAssignmentOperator private constructor(
     private val cppOp: String,
     private val cOp: String,
-    override val kotlinOperatorType: KotlinOperatorType
+    override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
     override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
@@ -144,19 +138,19 @@ data class BasicAssignmentOperator private constructor(
     }
 
     override fun toString(): String {
-        return "assignment($cppOp, $cOp, $kotlinOperatorType)"
+        return "assignment($cppOp, $cOp, $resolvedOperator)"
     }
 
     companion object {
-        val ASSIGN = BasicAssignmentOperator("=", "Assign", InfixMethod("assign"))
-        val PLUS_EQUALS = BasicAssignmentOperator("+=", "PlusEquals", InfixMethod("plusEquals"))
+        val ASSIGN = BasicAssignmentOperator("=", "Assign", ResolvedOperator.ASSIGN)
+        val PLUS_EQUALS = BasicAssignmentOperator("+=", "PlusEquals", ResolvedOperator.PLUS_EQUALS)
     }
 }
 
 data class BasicUnaryOperator private constructor(
     private val cppOp: String,
     private val cOp: String,
-    override val kotlinOperatorType: KotlinOperatorType
+    override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
     override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
@@ -169,18 +163,18 @@ data class BasicUnaryOperator private constructor(
     }
 
     override fun toString(): String {
-        return "unary($cppOp, $cOp, $kotlinOperatorType)"
+        return "unary($cppOp, $cOp, $resolvedOperator)"
     }
 
     companion object {
-        val INC = BasicUnaryOperator("++", "Increment", KotlinOperator("inc"))
-        val DEC = BasicUnaryOperator("--", "Decrement", KotlinOperator("dec"))
-        val UNARY_MINUS = BasicUnaryOperator("-", "UnaryMinus", KotlinOperator("unaryMinus"))
-        val UNARY_PLUS = BasicUnaryOperator("+", "UnaryPlus", KotlinOperator("unaryPlus"))
-        val NOT = BasicUnaryOperator("!", "Not", KotlinOperator("not"))
-        val INV = BasicUnaryOperator("~", "Inv", BasicMethod("inv"))
-        val REFERENCE = BasicUnaryOperator("*", "Reference", BasicMethod("reference"))
+        val INC = BasicUnaryOperator("++", "Increment", ResolvedOperator.INC)
+        val DEC = BasicUnaryOperator("--", "Decrement", ResolvedOperator.DEC)
+        val UNARY_MINUS = BasicUnaryOperator("-", "UnaryMinus", ResolvedOperator.UNARY_MINUS)
+        val UNARY_PLUS = BasicUnaryOperator("+", "UnaryPlus", ResolvedOperator.UNARY_PLUS)
+        val NOT = BasicUnaryOperator("!", "Not", ResolvedOperator.NOT)
+        val INV = BasicUnaryOperator("~", "Inv", ResolvedOperator.INV)
+        val REFERENCE = BasicUnaryOperator("*", "Reference", ResolvedOperator.REFERENCE)
         val POINTER_REFERENCE =
-            BasicUnaryOperator("->", "PointerReference", BasicMethod("pointer_reference"))
+            BasicUnaryOperator("->", "PointerReference", ResolvedOperator.POINTER_REFERENCE)
     }
 }

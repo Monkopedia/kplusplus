@@ -15,12 +15,20 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
+import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
-import com.monkopedia.krapper.generator.codegen.WrappedKotlinWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import kotlin.test.Test
 import kotlin.test.fail
 
@@ -365,7 +373,7 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS__NEW =
         "fun MemScope.TestClass(other: TestClass): TestClass {\n" +
-            "    val obj: COpaquePointer = (TestLib_TestClass_new(other.ptr) ?: " +
+            "    val obj: COpaquePointer = (_TestLib_TestClass_new(other.ptr) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -374,7 +382,7 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS___NEW = "fun MemScope.TestClass(a: Int): TestClass {\n" +
-        "    val obj: COpaquePointer = (TestLib_TestClass_new(a) ?: " +
+        "    val obj: COpaquePointer = (__TestLib_TestClass_new(a) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
@@ -384,7 +392,7 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS____NEW =
         "fun MemScope.TestClass(a: Int, b: Double): TestClass {\n" +
-            "    val obj: COpaquePointer = (TestLib_TestClass_new(a, b) ?: " +
+            "    val obj: COpaquePointer = (___TestLib_TestClass_new(a, b) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -549,9 +557,7 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_BNOT =
         "inline operator fun not(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
-            "    TestLib_TestClass_op_not(ptr, retValue.ptr)\n" +
-            "    return retValue\n" +
+            "    return TestClass((TestLib_TestClass_op_not(ptr) to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_BAND =
@@ -618,21 +624,21 @@ class FullKotlinTests {
     @Test
     fun testVector_new() = runTest(
         cls = TestData.Vector.cls,
-        target = (TestData.Vector.cls.children[1] as WrappedMethod),
+        target = (TestData.Vector.cls.first.children[1] as WrappedMethod),
         expected = STD_VECTOR_STRING_NEW,
     )
 
     @Test
     fun testVector_dispose() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.cls.children[2] as WrappedMethod,
+        target = TestData.Vector.cls.first.children[2] as WrappedMethod,
         expected = STD_VECTOR_STRING_DISPOSE,
     )
 
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.cls.children[3] as WrappedMethod,
+        target = TestData.Vector.cls.first.children[3] as WrappedMethod,
         expected = STD_VECTOR_STRING_PUSH_BACK,
     )
 
@@ -1181,7 +1187,6 @@ class FullKotlinTests {
         target = TestData.TestClass.operatorInd,
         expected = TESTLIB_TESTCLASS_IND,
     )
-
     private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
         assertCode(expected, buildCode(cls, target).toString())
     }
@@ -1190,14 +1195,78 @@ class FullKotlinTests {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
+    private fun runTest(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedMethod,
+        expected: String
+    ) {
+        assertCode(expected, buildCode(cls, target).toString())
+    }
+
+    private fun runTest(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedField,
+        expected: String
+    ) {
+        assertCode(expected, buildCode(cls, target).toString())
+    }
+
+    private fun buildCode(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedField,
+    ): KotlinCodeBuilder {
+        val code = codeBuilder()
+        val writer = kotlinWriter(code)
+        val (rcls, element) = resolveType(cls, target)
+        val target = element as ResolvedField
+        with(writer) {
+            code.onGenerate(rcls, target)
+        }
+        return code
+    }
+
+    private fun buildCode(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedMethod,
+    ): KotlinCodeBuilder {
+        val code = codeBuilder()
+        val writer = kotlinWriter(code)
+        val (rcls, element) = resolveType(cls, target)
+        val target = element as ResolvedMethod
+        with(writer) {
+            code.onGenerate(rcls, target)
+        }
+        return code
+    }
+
+    private fun resolveType(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedElement
+    ): Pair<ResolvedClass, ResolvedElement> {
+        val ctx = resolveContext()
+        val index =
+            cls.first.children.filter { it is WrappedMethod || it is WrappedField }.indexOf(target)
+        require(index >= 0) {
+            "Unable to find $target in $cls"
+        }
+        ctx.resolve(cls.second)
+        val rcls =
+            ctx.tracker.resolvedClasses[cls.second.toString()] ?: error("Can't find resolved $cls")
+        val target = rcls.children[index]
+        return rcls to target
+    }
+
     private fun buildCode(
         cls: WrappedClass,
         target: WrappedField
     ): KotlinCodeBuilder {
-        val code = KotlinCodeBuilder()
-        val writer = WrappedKotlinWriter(NameHandler(), "test.pkg")
+        val code = codeBuilder()
+        val writer = kotlinWriter(code)
+        val ctx = resolveContext()
+        val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
+        val target = target.resolve(ctx + cls) ?: throw UnsupportedOperationException("Couldn't resolve $target")
         with(writer) {
-            code.onGenerate(cls, target)
+            code.onGenerate(rcls, target)
         }
         return code
     }
@@ -1206,11 +1275,26 @@ class FullKotlinTests {
         cls: WrappedClass,
         target: WrappedMethod
     ): KotlinCodeBuilder {
-        val code = KotlinCodeBuilder()
-        val writer = WrappedKotlinWriter(NameHandler(), "test.pkg")
+        val code = codeBuilder()
+        val writer = kotlinWriter(code)
+        val ctx =
+            resolveContext()
+        val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
+        val target = target.resolve(ctx + cls) ?: error("Resolve failed for $target")
         with(writer) {
-            code.onGenerate(cls, target)
+            code.onGenerate(rcls, target)
         }
         return code
     }
+
+    private fun resolveContext() = ResolveContext.Empty
+        .withClasses(emptyList())
+        .copy(resolver = ParsedResolver(TestData.TU))
+        .withPolicy(INCLUDE_MISSING)
+
+    private fun codeBuilder() = KotlinCodeBuilder()
+
+    private fun kotlinWriter(code: KotlinCodeBuilder) =
+        KotlinWriter(NameHandler(), "")
+
 }

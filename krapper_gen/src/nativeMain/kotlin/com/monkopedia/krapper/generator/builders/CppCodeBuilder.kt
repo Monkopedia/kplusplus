@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 typealias CppCodeBuilder = CodeBuilder<CppFactory>
 
@@ -24,7 +24,7 @@ fun CppCodeBuilder(): CppCodeBuilder {
 }
 
 class CppFactory : LangFactory {
-    override fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar {
+    override fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar {
         return CppLocalVar(name, type, initializer)
     }
 
@@ -32,7 +32,7 @@ class CppFactory : LangFactory {
         return CppFunctionSig(name, retType ?: CppType("void"), args)
     }
 
-    override fun createType(type: WrappedType): Symbol = CppType(type)
+    override fun createType(type: ResolvedType): Symbol = CppType(type)
 }
 
 class CppFunctionSig(
@@ -58,12 +58,13 @@ class CppFunctionSig(
 
 class CppLocalVar(
     override val name: String,
-    val type: WrappedType,
+    val type: ResolvedType,
     private val initializer: Symbol?
 ) : LocalVar, SymbolContainer {
     private val typeSymbol = CppType(type)
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
+
     override fun build(builder: CodeStringBuilder) {
         typeSymbol.build(builder)
         builder.append(' ')
@@ -76,7 +77,7 @@ class CppLocalVar(
 }
 
 class CppType(private val typeStr: String) : Symbol {
-    constructor(type: WrappedType) : this(type.toString())
+    constructor(type: ResolvedType) : this(type.toString())
 
     override fun build(builder: CodeStringBuilder) {
         builder.append(typeStr)
@@ -86,6 +87,7 @@ class CppType(private val typeStr: String) : Symbol {
 inline fun CppCodeBuilder.include(target: String) {
     addSymbol(PreprocessorSymbol("include \"$target\""))
 }
+
 inline fun CppCodeBuilder.includeSys(target: String) {
     addSymbol(PreprocessorSymbol("include <$target>"))
 }

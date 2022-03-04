@@ -15,12 +15,20 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.NameHandler
-import com.monkopedia.krapper.generator.codegen.WrappedHeaderWriter
+import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.fail
@@ -74,131 +82,131 @@ class CppHeaderTests {
 
     private val TESTLIB_TESTCLASS_B =
         "bool TestLib_TestClass_b_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_b_set(void* thiz, bool ret_value);\n\n"
+            "void TestLib_TestClass_b_set(void* thiz, bool value);\n\n"
 
     private val TESTLIB_TESTCLASS_ST =
         "size_t TestLib_TestClass_st_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_st_set(void* thiz, size_t ret_value);\n\n"
+            "void TestLib_TestClass_st_set(void* thiz, size_t value);\n\n"
 
     private val TESTLIB_TESTCLASS_UIT =
         "uint16_t TestLib_TestClass_uit_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_uit_set(void* thiz, uint16_t ret_value);\n\n"
+            "void TestLib_TestClass_uit_set(void* thiz, uint16_t value);\n\n"
 
     private val TESTLIB_TESTCLASS_STR =
         "const char* TestLib_TestClass_str_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_str_set(void* thiz, const char* ret_value);\n\n"
+            "void TestLib_TestClass_str_set(void* thiz, const char* value);\n\n"
 
     private val TESTLIB_TESTCLASS_C =
         "signed char TestLib_TestClass_c_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_c_set(void* thiz, signed char ret_value);\n\n"
+            "void TestLib_TestClass_c_set(void* thiz, signed char value);\n\n"
 
     private val TESTLIB_TESTCLASS_UC =
         "unsigned char TestLib_TestClass_uc_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_uc_set(void* thiz, unsigned char ret_value);\n\n"
+            "void TestLib_TestClass_uc_set(void* thiz, unsigned char value);\n\n"
 
     private val TESTLIB_TESTCLASS_S =
         "signed short TestLib_TestClass_s_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_s_set(void* thiz, signed short ret_value);\n\n"
+            "void TestLib_TestClass_s_set(void* thiz, signed short value);\n\n"
 
     private val TESTLIB_TESTCLASS_US =
         "unsigned short TestLib_TestClass_us_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_us_set(void* thiz, unsigned short ret_value);\n\n"
+            "void TestLib_TestClass_us_set(void* thiz, unsigned short value);\n\n"
 
     private val TESTLIB_TESTCLASS_I =
         "signed int TestLib_TestClass_i_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_i_set(void* thiz, signed int ret_value);\n\n"
+            "void TestLib_TestClass_i_set(void* thiz, signed int value);\n\n"
 
     private val TESTLIB_TESTCLASS_UI =
         "unsigned int TestLib_TestClass_ui_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ui_set(void* thiz, unsigned int ret_value);\n\n"
+            "void TestLib_TestClass_ui_set(void* thiz, unsigned int value);\n\n"
 
     private val TESTLIB_TESTCLASS_L =
         "signed long TestLib_TestClass_l_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_l_set(void* thiz, signed long ret_value);\n\n"
+            "void TestLib_TestClass_l_set(void* thiz, signed long value);\n\n"
 
     private val TESTLIB_TESTCLASS_UL =
         "unsigned long TestLib_TestClass_ul_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ul_set(void* thiz, unsigned long ret_value);\n\n"
+            "void TestLib_TestClass_ul_set(void* thiz, unsigned long value);\n\n"
 
     private val TESTLIB_TESTCLASS_LL =
         "signed long long TestLib_TestClass_ll_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ll_set(void* thiz, signed long long ret_value);\n\n"
+            "void TestLib_TestClass_ll_set(void* thiz, signed long long value);\n\n"
 
     private val TESTLIB_TESTCLASS_ULL =
         "unsigned long long TestLib_TestClass_ull_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ull_set(void* thiz, unsigned long long ret_value);\n\n"
+            "void TestLib_TestClass_ull_set(void* thiz, unsigned long long value);\n\n"
 
     private val TESTLIB_TESTCLASS_F =
         "float TestLib_TestClass_f_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_f_set(void* thiz, float ret_value);\n\n"
+            "void TestLib_TestClass_f_set(void* thiz, float value);\n\n"
 
     private val TESTLIB_TESTCLASS_D =
         "double TestLib_TestClass_d_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_d_set(void* thiz, double ret_value);\n\n"
+            "void TestLib_TestClass_d_set(void* thiz, double value);\n\n"
 
     private val TESTLIB_TESTCLASS_LD =
         "double TestLib_TestClass_ld_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ld_set(void* thiz, double ret_value);\n\n"
+            "void TestLib_TestClass_ld_set(void* thiz, double value);\n\n"
 
     private val TESTLIB_TESTCLASS_PB =
         "bool* TestLib_TestClass_pb_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pb_set(void* thiz, bool* ret_value);\n\n"
+            "void TestLib_TestClass_pb_set(void* thiz, bool* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PC =
         "signed char* TestLib_TestClass_pc_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pc_set(void* thiz, signed char* ret_value);\n\n"
+            "void TestLib_TestClass_pc_set(void* thiz, signed char* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PUC =
         "unsigned char* TestLib_TestClass_puc_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_puc_set(void* thiz, unsigned char* ret_value);\n\n"
+            "void TestLib_TestClass_puc_set(void* thiz, unsigned char* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PS =
         "signed short* TestLib_TestClass_ps_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_ps_set(void* thiz, signed short* ret_value);\n\n"
+            "void TestLib_TestClass_ps_set(void* thiz, signed short* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PUS =
         "unsigned short* TestLib_TestClass_pus_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pus_set(void* thiz, unsigned short* ret_value);\n\n"
+            "void TestLib_TestClass_pus_set(void* thiz, unsigned short* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PI =
         "signed int* TestLib_TestClass_pi_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pi_set(void* thiz, signed int* ret_value);\n\n"
+            "void TestLib_TestClass_pi_set(void* thiz, signed int* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PUI =
         "unsigned int* TestLib_TestClass_pui_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pui_set(void* thiz, unsigned int* ret_value);\n\n"
+            "void TestLib_TestClass_pui_set(void* thiz, unsigned int* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PL =
         "signed long* TestLib_TestClass_pl_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pl_set(void* thiz, signed long* ret_value);\n\n"
+            "void TestLib_TestClass_pl_set(void* thiz, signed long* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PUL =
         "unsigned long* TestLib_TestClass_pul_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pul_set(void* thiz, unsigned long* ret_value);\n\n"
+            "void TestLib_TestClass_pul_set(void* thiz, unsigned long* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PLL =
         "signed long long* TestLib_TestClass_pll_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pll_set(void* thiz, signed long long* ret_value);\n\n"
+            "void TestLib_TestClass_pll_set(void* thiz, signed long long* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PULL =
         "unsigned long long* TestLib_TestClass_pull_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pull_set(void* thiz, unsigned long long* ret_value);\n\n"
+            "void TestLib_TestClass_pull_set(void* thiz, unsigned long long* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PF =
         "float* TestLib_TestClass_pf_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pf_set(void* thiz, float* ret_value);\n\n"
+            "void TestLib_TestClass_pf_set(void* thiz, float* value);\n\n"
 
     private val TESTLIB_TESTCLASS_PD =
         "double* TestLib_TestClass_pd_get(void* thiz);\n\n" +
-            "void TestLib_TestClass_pd_set(void* thiz, double* ret_value);\n\n"
+            "void TestLib_TestClass_pd_set(void* thiz, double* value);\n\n"
 
     private val TESTLIB_TESTCLASS_NEW = "void* TestLib_TestClass_new();\n\n"
 
-    private val TESTLIB_TESTCLASS__NEW = "void* TestLib_TestClass_new(void* other);\n\n"
+    private val TESTLIB_TESTCLASS__NEW = "void* _TestLib_TestClass_new(void* other);\n\n"
 
-    private val TESTLIB_TESTCLASS___NEW = "void* TestLib_TestClass_new(int a);\n\n"
+    private val TESTLIB_TESTCLASS___NEW = "void* __TestLib_TestClass_new(int a);\n\n"
 
-    private val TESTLIB_TESTCLASS____NEW = "void* TestLib_TestClass_new(int a, double b);\n\n"
+    private val TESTLIB_TESTCLASS____NEW = "void* ___TestLib_TestClass_new(int a, double b);\n\n"
 
     private val TESTLIB_TESTCLASS_DISPOSE = "void TestLib_TestClass_dispose(void* thiz);\n\n"
 
@@ -319,7 +327,7 @@ class CppHeaderTests {
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
-        target = TestData.Vector.cls.children[3] as WrappedMethod,
+        target = TestData.Vector.cls.first.children[3] as WrappedMethod,
         expected = STD_VECTOR_STRING_PUSH_BACK,
     )
 
@@ -868,6 +876,7 @@ class CppHeaderTests {
         target = TestData.TestClass.operatorInd,
         expected = TESTLIB_TESTCLASS_IND,
     )
+
     private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
         assertCode(expected, buildCode(cls, target).toString())
     }
@@ -876,14 +885,78 @@ class CppHeaderTests {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
+    private fun runTest(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedMethod,
+        expected: String
+    ) {
+        assertCode(expected, buildCode(cls, target).toString())
+    }
+
+    private fun runTest(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedField,
+        expected: String
+    ) {
+        assertCode(expected, buildCode(cls, target).toString())
+    }
+
+    private fun buildCode(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedField,
+    ): CppCodeBuilder {
+        val code = codeBuilder()
+        val writer = headerWriter(code)
+        val (rcls, element) = resolveType(cls, target)
+        val target = element as ResolvedField
+        with(writer) {
+            code.onGenerate(rcls, target)
+        }
+        return code
+    }
+
+    private fun buildCode(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedMethod,
+    ): CppCodeBuilder {
+        val code = codeBuilder()
+        val writer = headerWriter(code)
+        val (rcls, element) = resolveType(cls, target)
+        val target = element as ResolvedMethod
+        with(writer) {
+            code.onGenerate(rcls, target)
+        }
+        return code
+    }
+
+    private fun resolveType(
+        cls: Pair<WrappedTemplate, WrappedTemplateType>,
+        target: WrappedElement
+    ): Pair<ResolvedClass, ResolvedElement> {
+        val ctx = resolveContext()
+        val index =
+            cls.first.children.filter { it is WrappedMethod || it is WrappedField }.indexOf(target)
+        require(index >= 0) {
+            "Unable to find $target in $cls"
+        }
+        ctx.resolve(cls.second)
+        val rcls =
+            ctx.tracker.resolvedClasses[cls.second.toString()] ?: error("Can't find resolved $cls")
+        val target = rcls.children[index]
+        return rcls to target
+    }
+
     private fun buildCode(
         cls: WrappedClass,
         target: WrappedField
     ): CppCodeBuilder {
-        val code = CppCodeBuilder()
-        val writer = WrappedHeaderWriter(NameHandler(), code)
+        val code = codeBuilder()
+        val writer = headerWriter(code)
+        val ctx = resolveContext()
+        val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
+        val target = target.resolve(ctx + cls) ?: throw UnsupportedOperationException("Couldn't resolve $target")
         with(writer) {
-            code.onGenerate(cls, target)
+            code.onGenerate(rcls, target)
         }
         return code
     }
@@ -892,30 +965,35 @@ class CppHeaderTests {
         cls: WrappedClass,
         target: WrappedMethod
     ): CppCodeBuilder {
-        val code = CppCodeBuilder()
-        val writer = WrappedHeaderWriter(NameHandler(), code)
+        val code = codeBuilder()
+        val writer = headerWriter(code)
+        val ctx = resolveContext()
+        val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
+        val target = target.resolve(ctx + cls) ?: error("Resolve failed for $target")
         with(writer) {
-            code.onGenerate(cls, target)
+            code.onGenerate(rcls, target)
         }
         return code
     }
 
-    @Test
-    fun testHeaderEmpty() {
-        val code = CppCodeBuilder()
-        val writer = WrappedHeaderWriter(NameHandler(), code)
-        writer.generate("desiredWrapper", emptyList(), emptyList())
-        assertCode(EMPTY, code.toString())
-    }
+    private fun resolveContext() = ResolveContext.Empty
+        .withClasses(emptyList())
+        .copy(resolver = ParsedResolver(TestData.TU))
+        .withPolicy(INCLUDE_MISSING)
+
+    private fun codeBuilder() = CppCodeBuilder()
+
+    private fun headerWriter(code: CppCodeBuilder) =
+        HeaderWriter(NameHandler(), code)
 }
 
 fun assertCode(expected: String, actual: String) {
     assertCodeInner(expected.trim(), actual.trim())
 }
 
-fun assertCodeInner(expected: String, actual: String) {
+fun assertCodeInner(expected: String, fullActual: String) {
     val expectedList = expected.split("\n")
-    val actualList = actual.split("\n")
+    val actualList = fullActual.split("\n")
     expectedList.zip(actualList).forEachIndexed { index, (expected, actual) ->
         assertEquals(
             expected,
@@ -938,6 +1016,8 @@ fun assertCodeInner(expected: String, actual: String) {
                 append("          ^")
                 appendLine()
                 appendLine()
+                append("Full actual:\n")
+                append(fullActual)
             }
         )
     }

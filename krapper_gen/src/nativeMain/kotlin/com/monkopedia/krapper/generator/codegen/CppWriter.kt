@@ -15,6 +15,8 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.OperatorType.ASSIGN
+import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CodeGenerator
@@ -44,15 +46,26 @@ import com.monkopedia.krapper.generator.builders.includeSys
 import com.monkopedia.krapper.generator.builders.op
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.model.MethodType
-import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedField
-import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.MethodType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
-class WrappedCppWriter(
+class CppWriter(
     private val nameHandler: NameHandler,
     private val cppFile: File,
     codeBuilder: CppCodeBuilder,
@@ -61,13 +74,13 @@ class WrappedCppWriter(
 
     private var lookup: ClassLookup = ClassLookup(emptyList())
 
-    override fun generate(moduleName: String, headers: List<String>, classes: List<WrappedClass>) {
+    override fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedClass>) {
         lookup = ClassLookup(classes)
         super.generate(moduleName, headers, classes)
     }
 
     override fun CppCodeBuilder.onGenerate(
-        cls: WrappedClass,
+        cls: ResolvedClass,
         handleChildren: CppCodeBuilder.() -> Unit
     ) {
         comment("BEGIN KRAPPER GEN for ${cls.type}")
@@ -104,64 +117,46 @@ class WrappedCppWriter(
         appendLine()
     }
 
-    override fun CppCodeBuilder.onGenerate(cls: WrappedClass, method: WrappedMethod) {
-        nameHandler.withNamer(cls) {
-            function {
-                val type = cls.type
-                generateMethodSignature(lookup, type, method, this@withNamer)
-                val args = addArgs(lookup, type, method)
-                body {
-                    generateMethodBody(cls, method, args)
-                }
+    override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
+        function {
+            val type = cls.type
+            generateMethodSignature(method)
+            val args = addArgs(lookup, type, method)
+            body {
+                generateMethodBody(cls, method, args)
             }
-            appendLine()
         }
+        appendLine()
     }
 
-    override fun CppCodeBuilder.onGenerate(cls: WrappedClass, field: WrappedField) {
-        nameHandler.withNamer(cls) {
-            function {
-                val type = cls.type
-                val args = generateFieldGet(lookup, type, field, this@withNamer)
-                body {
-                    generateFieldGetBody(cls, field, args)
-                }
+    override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
+        function {
+            val type = cls.type
+            val args = generateFieldGet(field)
+            body {
+                generateFieldGetBody(cls, field, args)
             }
-            appendLine()
-            function {
-                val type = cls.type
-                val args = generateFieldSet(lookup, type, field, this@withNamer)
-                body {
-                    generateFieldSetBody(cls, field, args)
-                }
-            }
-            appendLine()
         }
+        appendLine()
+        function {
+            val type = cls.type
+            val args = generateFieldSet(field)
+            body {
+                generateFieldSetBody(cls, field, args)
+            }
+        }
+        appendLine()
     }
 
     private fun CppCodeBuilder.generateMethodBody(
-        cls: WrappedClass,
-        method: WrappedMethod,
-        args: List<WrapperArgument>
+        cls: ResolvedClass,
+        method: ResolvedMethod,
+        args: List<SignatureArgument>
     ) {
-        var thiz = if (method.methodType != MethodType.CONSTRUCTOR) args[0] else null
-        val returnArg =
-            if ((
-                method.methodType == MethodType.METHOD ||
-                    method.methodType == MethodType.STATIC_OP
-                ) &&
-                !method.returnType.isReturnable
-            ) args.last()
-            else null
-        val thizCast = thiz?.let { createCast(it) }
-        val returnCast = returnArg?.let { createCast(it) }
-        val argCasts = args.filter { it.arg != null }.map { a ->
-            when {
-                a.targetType.isString -> createStringCast(a)
-                a.targetType.isNative -> a
-                else -> createCast(a)
-            }
-        }
+        val argCasts = args.map { a ->
+            generateArgumentCast(a)
+        }.toMutableList()
+        val returnCast = if (method.returnStyle == ARG_CAST) argCasts.removeLast() else null
         when (method.methodType) {
             MethodType.CONSTRUCTOR -> {
                 +Return(
@@ -174,38 +169,30 @@ class WrappedCppWriter(
                 )
             }
             MethodType.DESTRUCTOR -> {
-                +Delete(thizCast?.pointerReference ?: error("Missing this in delete"))
+                val thizCast = argCasts.removeFirst()
+                +Delete(thizCast.pointerReference)
             }
             MethodType.STATIC_OP -> {
-                val call = (thizCast?.reference ?: error("Missing this in method")).op(
+                val thizCast = argCasts.removeFirst()
+                val call = (thizCast.reference).op(
                     method.name.substring("operator".length),
                     argCasts.map { it.reference }.single()
                 )
-                comment("Static op ${Operator.from(method)}")
-                if (returnCast != null) {
-                    +(returnCast.reference assign call)
-                } else if (method.returnType.isString) {
-                    createStringReturn(call)
-                } else if (method.returnType.isPointer && method.returnType.pointed.isString) {
-                    createPointedStringReturn(call)
-                } else if (!method.returnType.isVoid) {
-                    +Return(call)
-                } else {
-                    +call
-                }
+                generateReturn(call, method.returnStyle, method.returnType, returnCast)
             }
             MethodType.METHOD -> {
-                val thizRef = thizCast?.pointerReference ?: error("Missing this in method")
-                val operator = Operator.from(method)
+                val thizCast = argCasts.removeFirst()
+                val thizRef = thizCast.pointerReference
+                val operator = method.operator
                 val call =
                     when {
-                        operator is BasicBinaryOperator && operator.supportsDirectCall -> {
+                        operator?.supportsDirectCall == true -> {
                             thizRef.dereference.op(operator.cppOp, argCasts.first().reference)
                         }
-                        operator is BasicAssignmentOperator -> {
+                        operator?.operatorType == ASSIGN -> {
                             thizRef.dereference.assign(
                                 argCasts.first().reference,
-                                operator == BasicAssignmentOperator.PLUS_EQUALS
+                                operator == ResolvedOperator.PLUS_EQUALS
                             )
                         }
                         else -> {
@@ -215,41 +202,46 @@ class WrappedCppWriter(
                             )
                         }
                     }
-                // comment("Method $operator $method")
-                if (returnCast != null) {
-                    +(returnCast.reference assign call)
-                } else if (method.returnType.isString) {
-                    createStringReturn(call)
-                } else if (method.returnType.isPointer && method.returnType.pointed.isString) {
-                    createPointedStringReturn(call)
-                } else if (!method.returnType.isReturnable) {
-                    +Return(New(Call(method.returnType.toString(), call)))
-                } else if (method.returnType.cType.toString() == "void*") {
-                    +Return(
-                        RawCast(
-                            "void*",
-                            if (method.returnType.isReference) call.addressOf
-                            else call
-                        )
-                    )
-                } else if (!method.returnType.isVoid) {
-                    +Return(call)
-                } else {
-                    +call
-                }
+                generateReturn(call, method.returnStyle, method.returnType, returnCast)
             }
+        }
+    }
+
+    private fun CppCodeBuilder.generateArgumentCast(a: SignatureArgument) =
+        when (a.arg?.castMode) {
+            NATIVE -> a
+            ArgumentCastMode.STRING -> createStringCast(a)
+            RAW_CAST -> createRawCast(a)
+            REINT_CAST, null -> createCast(a)
+        }
+
+    private fun CppCodeBuilder.generateReturn(
+        call: Symbol,
+        returnStyle: ReturnStyle,
+        returnType: ResolvedType,
+        returnCast: SignatureArgument?
+    ) {
+        when (returnStyle) {
+            VOID -> +call
+            VOIDP_REFERENCE -> +Return(RawCast("void*", call.addressOf))
+            VOIDP -> +Return(RawCast("void*", call))
+            ARG_CAST -> +(returnCast!!.reference assign call)
+            STRING -> createStringReturn(call)
+            STRING_POINTER -> createPointedStringReturn(call)
+            COPY_CONSTRUCTOR -> +Return(New(Call(returnType.toString(), call)))
+            RETURN -> +Return(call)
         }
     }
 
     private fun CppCodeBuilder.createPointedStringReturn(call: Symbol) {
         val returnStr = +define(
             "ret_value",
-            pointerTo(WrappedType("std::string")),
+            ResolvedType.PSTRING,
             initializer = call
         )
         val returnArray = +define(
             "ret_value_cast",
-            WrappedType("char *"),
+            ResolvedType.CSTRING,
             initializer = New(Raw("char[${returnStr.name}->length() + 1]"))
         )
         +(
@@ -265,10 +257,10 @@ class WrappedCppWriter(
 
     private fun CppCodeBuilder.createStringReturn(call: Symbol) {
         val returnStr =
-            +define("ret_value", WrappedType("std::string"), initializer = call)
+            +define("ret_value", ResolvedType.STRING, initializer = call)
         val returnArray = +define(
             "ret_value_cast",
-            WrappedType("char *"),
+            ResolvedType.CSTRING,
             initializer = New(Raw("char[${returnStr.name}.length() + 1]"))
         )
         +(
@@ -283,8 +275,8 @@ class WrappedCppWriter(
     }
 
     private fun CppCodeBuilder.createStringCast(
-        arg: WrapperArgument
-    ): WrapperArgument {
+        arg: SignatureArgument
+    ): SignatureArgument {
         return arg.copy(
             localVar = +define(
                 arg.localVar.name + "_cast",
@@ -295,20 +287,30 @@ class WrappedCppWriter(
     }
 
     private fun CppCodeBuilder.createCast(
-        arg: WrapperArgument
-    ): WrapperArgument {
+        arg: SignatureArgument
+    ): SignatureArgument {
         return arg.copy(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                if (arg.targetType == LONG_DOUBLE)
-                    RawCast(arg.targetType.toString(), arg.localVar.reference)
-                else reinterpret(arg.localVar, arg.targetType)
+                reinterpret(arg.localVar, arg.targetType)
             )
         )
     }
 
-    private fun CppCodeBuilder.reinterpret(arg: LocalVar, type: WrappedType): Symbol {
+    private fun CppCodeBuilder.createRawCast(
+        arg: SignatureArgument
+    ): SignatureArgument {
+        return arg.copy(
+            localVar = +define(
+                arg.localVar.name + "_cast",
+                arg.targetType,
+                RawCast(arg.targetType.toString(), arg.localVar.reference)
+            )
+        )
+    }
+
+    private fun CppCodeBuilder.reinterpret(arg: LocalVar, type: ResolvedType): Symbol {
         val type = type(type)
         val reference = arg.reference
         return object : Symbol {
@@ -323,38 +325,23 @@ class WrappedCppWriter(
     }
 
     private fun CppCodeBuilder.generateFieldGetBody(
-        cls: WrappedClass,
-        field: WrappedField,
-        args: List<WrapperArgument>
+        cls: ResolvedClass,
+        field: ResolvedField,
+        args: List<SignatureArgument>
     ) {
-        val thizCast = createCast(args[0])
+        val thizCast = generateArgumentCast(args[0])
         val fetch = thizCast.pointerReference arrow Raw(field.name)
-        if (field.type.isString) {
-            createStringReturn(fetch)
-        } else if (field.type.isPointer && field.type.pointed.isString) {
-            createPointedStringReturn(fetch)
-        } else if (field.type.isReturnable) {
-            +Return(fetch)
-        } else {
-            val valueCast = createCast(args[1])
-            +(valueCast.reference assign fetch)
-        }
+        generateReturn(fetch, field.getter.returnStyle, field.getter.returnType, args.getOrNull(1)?.let { generateArgumentCast(it) })
     }
 
     private fun CppCodeBuilder.generateFieldSetBody(
-        cls: WrappedClass,
-        field: WrappedField,
-        args: List<WrapperArgument>
+        cls: ResolvedClass,
+        field: ResolvedField,
+        args: List<SignatureArgument>
     ) {
-        val thizCast = createCast(args[0])
+        val thizCast = generateArgumentCast(args[0])
         val fetch = thizCast.pointerReference arrow Raw(field.name)
-        if (field.type.isString) {
-            +(fetch assign createStringCast(args[1]).reference)
-        } else if (field.type.isNative) {
-            +(fetch assign args[1].reference)
-        } else {
-            val valueCast = createCast(args[1])
-            +(fetch assign valueCast.reference)
-        }
+        val argumentCast = generateArgumentCast(args[1])
+        +(fetch assign argumentCast.reference)
     }
 }

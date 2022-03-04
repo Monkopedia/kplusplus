@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,11 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.BasicMethod
+import com.monkopedia.krapper.BasicWithDummyMethod
+import com.monkopedia.krapper.InfixMethod
+import com.monkopedia.krapper.KotlinOperator
+import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.CodeBuilder
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
@@ -56,24 +61,25 @@ import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.setter
 import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.model.MethodType
-import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedDestructor
-import com.monkopedia.krapper.generator.model.WrappedField
-import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.WrappedMethod
-import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import com.monkopedia.krapper.generator.model.nullable
-import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.typedWith
+import com.monkopedia.krapper.generator.resolved_model.MethodType
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
+import com.monkopedia.krapper.generator.resolved_model.type.nullable
+import com.monkopedia.krapper.generator.resolved_model.type.typedWith
 
-class WrappedKotlinWriter(
+class KotlinWriter(
     private val nameHandler: NameHandler,
     private val pkg: String,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGeneratorBase<KotlinCodeBuilder>(policy) {
 
-    fun generate(outputDir: File, classes: List<WrappedClass>) {
+    fun generate(outputDir: File, classes: List<ResolvedClass>) {
         if (!outputDir.exists()) {
             outputDir.mkdirs()
         }
@@ -89,16 +95,17 @@ class WrappedKotlinWriter(
     }
 
     override fun KotlinCodeBuilder.onGenerate(
-        cls: WrappedClass,
+        cls: ResolvedClass,
         handleChildren: KotlinCodeBuilder.() -> Unit
     ) {
-        val pkg = cls.type.kotlinType.pkg
+        val type = cls.type.kotlinType ?: error("Cannot generate code with no kotlin type")
+        val pkg = type.pkg
         pkg(pkg)
 
         importBlock(pkg, this)
         comment("BEGIN KRAPPER GEN for ${cls.type}")
         appendLine()
-        cls(named(cls.type.kotlinType)) { source ->
+        cls(named(type)) { source ->
             val ptr = define(ptr.content, fullyQualifiedType(C_OPAQUE_POINTER))
             val memScope = define(memScope.content, fullyQualifiedType(MEM_SCOPE))
             property(ptr) {
@@ -123,8 +130,8 @@ class WrappedKotlinWriter(
         appendLine()
     }
 
-    override fun KotlinCodeBuilder.onGenerateMethods(cls: WrappedClass) {
-        val methods = cls.children.filterIsInstance<WrappedMethod>()
+    override fun KotlinCodeBuilder.onGenerateMethods(cls: ResolvedClass) {
+        val methods = cls.children.filterIsInstance<ResolvedMethod>()
         methods.filter {
             it.methodType == MethodType.STATIC_OP || it.methodType == MethodType.METHOD
         }.forEach { method ->
@@ -145,72 +152,76 @@ class WrappedKotlinWriter(
         }
     }
 
-    private fun named(name: WrappedKotlinType) = Raw(name.name)
+    private fun named(name: ResolvedKotlinType) = Raw(name.name)
 
     private val ptr = Raw("ptr")
     private val memScope = Raw("memScope")
 
-    override fun KotlinCodeBuilder.onGenerate(cls: WrappedClass, method: WrappedMethod) =
-        nameHandler.withNamer(cls) {
-            val uniqueCName = extensionMethod(pkg, method.uniqueCName)
-            when (method.methodType) {
-                MethodType.CONSTRUCTOR -> {
-                    val destructor =
-                        cls.children.filterIsInstance<WrappedDestructor>().firstOrNull()
-                    extensionFunction {
-                        receiver = fqType(MEM_SCOPE)
-                        name = cls.type.kotlinType.name
-                        retType = type(cls.type)
-                        val args = method.args.map {
-                            define(it.name, it.type)
-                        }
-                        body {
-                            val obj = +define(
-                                "obj",
-                                fullyQualifiedType(C_OPAQUE_POINTER),
-                                initializer = (
-                                    Call(
-                                        uniqueCName,
-                                        *args.map { reference(it) }.toTypedArray()
-                                    ) elvis Call("error", "Creation failed".symbol)
-                                    )
-                            )
-                            obj.isVal = true
-                            defer {
-                                if (destructor != null) {
-                                    +Call(
-                                        extensionMethod(pkg, destructor.uniqueCName),
-                                        obj.reference
-                                    )
-                                } else {
-                                    +Call(extensionMethod("platform.linux", "free"), obj.reference)
-                                }
-                            }
-                            +Return(
+    override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
+        val uniqueCName =
+            extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
+        when (method.methodType) {
+            MethodType.CONSTRUCTOR -> {
+                val destructor =
+                    cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
+                extensionFunction {
+                    receiver = fqType(MEM_SCOPE)
+                    name = cls.type.kotlinType!!.name
+                    retType = type(cls.type)
+                    val args = method.args.map {
+                        define(it.name, it.type)
+                    }
+                    body {
+                        val obj = +define(
+                            "obj",
+                            fullyQualifiedType(C_OPAQUE_POINTER),
+                            initializer = (
                                 Call(
-                                    cls.type.kotlinType.name.trimEnd('?'),
-                                    obj.reference pairedTo thiz.reference
+                                    uniqueCName,
+                                    *args.map { reference(it) }.toTypedArray()
+                                ) elvis Call("error", "Creation failed".symbol)
                                 )
-                            )
+                        )
+                        obj.isVal = true
+                        defer {
+                            if (destructor != null) {
+                                +Call(
+                                    extensionMethod(
+                                        pkg,
+                                        destructor.uniqueCName
+                                            ?: error("Unnamed destructor in $cls")
+                                    ),
+                                    obj.reference
+                                )
+                            } else {
+                                +Call(extensionMethod("platform.linux", "free"), obj.reference)
+                            }
                         }
+                        +Return(
+                            Call(
+                                cls.type.kotlinType!!.name.trimEnd('?'),
+                                obj.reference pairedTo thiz.reference
+                            )
+                        )
                     }
                 }
-                MethodType.DESTRUCTOR -> {
-                    // Do nothing
-                }
-                MethodType.METHOD,
-                MethodType.STATIC_OP -> {
-                    val operator = Operator.from(method)
-                    if (operator != null) {
-                        generateOperator(operator, cls, method)
-                    } else {
-                        inline {
-                            generateBasicMethod(fixNaming(method), uniqueCName)
-                        }
+            }
+            MethodType.DESTRUCTOR -> {
+                // Do nothing
+            }
+            MethodType.METHOD,
+            MethodType.STATIC_OP -> {
+                val operator = method.operator
+                if (operator != null) {
+                    generateOperator(operator, cls, method)
+                } else {
+                    inline {
+                        generateBasicMethod(fixNaming(method), uniqueCName)
                     }
                 }
             }
         }
+    }
 
     private val INFIX_LIST = setOf(
         "assign",
@@ -230,7 +241,7 @@ class WrappedKotlinWriter(
         "shr"
     )
 
-    private fun fixNaming(method: WrappedMethod): WrappedMethod {
+    private fun fixNaming(method: ResolvedMethod): ResolvedMethod {
         return if (method.name in INFIX_LIST) {
             method.copy(name = method.name + "_method")
         } else {
@@ -239,7 +250,7 @@ class WrappedKotlinWriter(
     }
 
     private fun KotlinCodeBuilder.generateBasicMethod(
-        method: WrappedMethod,
+        method: ResolvedMethod,
         uniqueCName: Symbol,
         methodName: String = method.name,
         startArgs: List<Symbol> = listOf(ptr)
@@ -247,19 +258,21 @@ class WrappedKotlinWriter(
         function {
             name = methodName
             val returnType = method.returnType
+            println("Generating ${returnType.kotlinType} for ${returnType} in $method")
+            val kotlinType = returnType.kotlinType
             var isGeneratingReturn = false
             retType = type(returnType)
-            var args = method.args.map {
+            var args = if (method.args.isNotEmpty()) method.args.subList(1, method.args.size).map {
                 define(it.name, it.type)
-            }
-            if (!returnType.isPointer && returnType.kotlinType.isWrapper) {
+            } else emptyList()
+            if (method.returnStyle == ReturnStyle.ARG_CAST && kotlinType.isWrapper) {
                 args += this@generateBasicMethod.define(
                     "retValue",
                     returnType,
                     initializer = memScope dot Call(
                         extensionMethod(
-                            returnType.kotlinType.fullyQualified.last() + ".Companion",
-                            returnType.kotlinType.name
+                            kotlinType.fullyQualified.last() + ".Companion",
+                            kotlinType.name
                         )
                     )
                 ).also {
@@ -277,24 +290,24 @@ class WrappedKotlinWriter(
                     +call
                     +Return(args.last().reference)
                 } else {
-                    generateReturn(returnType, call)
+                    generateReturn(kotlinType, call)
                 }
             }
         }
     }
 
     private fun KotlinCodeBuilder.generateOperator(
-        operator: Operator,
-        cls: WrappedClass,
-        method: WrappedMethod
-    ) = nameHandler.withNamer(cls) {
+        operator: ResolvedOperator,
+        cls: ResolvedClass,
+        method: ResolvedMethod
+    ) {
         when (val kotlinType = operator.kotlinOperatorType) {
             is KotlinOperator -> {
                 inline {
                     operator {
                         generateBasicMethod(
                             method,
-                            extensionMethod(pkg, method.uniqueCName),
+                            extensionMethod(pkg, method.uniqueCName!!),
                             kotlinType.name
                         )
                     }
@@ -305,7 +318,7 @@ class WrappedKotlinWriter(
                     infix {
                         generateBasicMethod(
                             method,
-                            extensionMethod(pkg, method.uniqueCName),
+                            extensionMethod(pkg, method.uniqueCName!!),
                             kotlinType.name
                         )
                     }
@@ -314,8 +327,8 @@ class WrappedKotlinWriter(
             is BasicWithDummyMethod -> {
                 inline {
                     generateBasicMethod(
-                        method.copy(children = emptyList()),
-                        extensionMethod(pkg, method.uniqueCName),
+                        method.copy(args = emptyList()),
+                        extensionMethod(pkg, method.uniqueCName!!),
                         kotlinType.name,
                         startArgs = listOf(ptr, Raw("0"))
                     )
@@ -325,7 +338,7 @@ class WrappedKotlinWriter(
                 inline {
                     generateBasicMethod(
                         method,
-                        extensionMethod(pkg, method.uniqueCName),
+                        extensionMethod(pkg, method.uniqueCName!!),
                         kotlinType.name
                     )
                 }
@@ -339,7 +352,7 @@ class WrappedKotlinWriter(
         return reference(type, v)
     }
 
-    private fun reference(type: WrappedKotlinType, v: LocalVar): Symbol {
+    private fun reference(type: ResolvedKotlinType, v: LocalVar): Symbol {
         return if (type.isWrapper) {
             if (type.toString().endsWith("?")) {
                 v.reference qdot ptr
@@ -349,52 +362,45 @@ class WrappedKotlinWriter(
         } else v.reference
     }
 
-    override fun KotlinCodeBuilder.onGenerate(cls: WrappedClass, field: WrappedField) =
-        nameHandler.withNamer(cls) {
-            if (field.type.isArray) {
-                throw UnsupportedOperationException("Arrays not supported yet")
-            }
-            property(define(field.name, field.type)) {
-                getter = inline(
-                    getter {
-                        val call = Call(extensionMethod(pkg, field.uniqueCGetter), ptr)
-                        generateReturn(field.type, call)
+    override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
+        property(define(field.name, field.kotlinType)) {
+            getter = inline(
+                getter {
+                    val call = Call(extensionMethod(pkg, field.getter.uniqueCName!!), ptr)
+                    generateReturn(field.kotlinType, call)
+                }
+            )
+            if (!field.isConst) {
+                setter = inline(
+                    setter { value ->
+                        +Call(
+                            extensionMethod(pkg, field.setter.uniqueCName!!),
+                            ptr,
+                            reference(field.kotlinType, value)
+                        )
                     }
                 )
-                if (!field.type.isConst) {
-                    setter = inline(
-                        setter { value ->
-                            +Call(
-                                extensionMethod(pkg, field.uniqueCSetter),
-                                ptr,
-                                reference(field.type.kotlinType, value)
-                            )
-                        }
-                    )
-                }
             }
         }
+    }
 
     private fun CodeBuilder<KotlinFactory>.generateReturn(
-        returnType: WrappedType,
+        returnType: ResolvedKotlinType,
         call: Call
     ) {
-        val kotlinType = returnType.kotlinType
         when {
-            kotlinType.isWrapper -> {
+            returnType.isWrapper -> {
                 +Return(
                     Call(
-                        kotlinType.name.trimEnd('?'),
+                        returnType.name.trimEnd('?'),
                         (
-                            if (kotlinType.toString()
-                                .endsWith("?")
-                            ) call elvis Return(Raw("null"))
+                            if (returnType.isNullable) call elvis Return(Raw("null"))
                             else call
                             ) pairedTo memScope
                     )
                 )
             }
-            kotlinType.toString() == "String?" -> {
+            returnType.toString() == "String?" -> {
                 generateStringReturn(call)
             }
             else -> {

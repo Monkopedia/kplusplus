@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 interface Symbol {
 
@@ -28,6 +28,7 @@ interface Symbol {
 object Empty : Symbol {
     override val blockSemi: Boolean
         get() = true
+
     override fun build(builder: CodeStringBuilder) = Unit
 }
 
@@ -36,9 +37,9 @@ interface LocalVar : Symbol {
 }
 
 interface LangFactory {
-    fun define(name: String, type: WrappedType, initializer: Symbol?): LocalVar
+    fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar
     fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol
-    fun createType(type: WrappedType): Symbol
+    fun createType(type: ResolvedType): Symbol
 }
 
 interface CodeBuilder<T : LangFactory> {
@@ -93,6 +94,6 @@ inline fun CodeBuilder<*>.appendLine() {
     addSymbol(Empty)
 }
 
-inline fun CodeBuilder<*>.type(type: WrappedType): Symbol {
+inline fun CodeBuilder<*>.type(type: ResolvedType): Symbol {
     return factory.createType(type)
 }

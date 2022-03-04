@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,15 +30,18 @@ import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.builders.LogPolicy
 import com.monkopedia.krapper.generator.builders.ThrowPolicy
+import com.monkopedia.krapper.generator.codegen.CppCompiler
+import com.monkopedia.krapper.generator.codegen.CppWriter
+import com.monkopedia.krapper.generator.codegen.DefWriter
 import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.codegen.HeaderWriter
+import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
-import com.monkopedia.krapper.generator.codegen.WrappedCppCompiler
-import com.monkopedia.krapper.generator.codegen.WrappedCppWriter
-import com.monkopedia.krapper.generator.codegen.WrappedDefWriter
-import com.monkopedia.krapper.generator.codegen.WrappedHeaderWriter
-import com.monkopedia.krapper.generator.codegen.WrappedKotlinWriter
 import com.monkopedia.krapper.generator.codegen.getcwd
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
@@ -134,11 +137,37 @@ class KrapperGen : CliktCommand() {
 // //                }
 //            }
             val resolver = parseHeader(index, header, debug = debug)
-            var classes = resolver.findClasses(WrappedClass::defaultFilter)
+            val initialClasses = resolver.findClasses(WrappedClass::defaultFilter)
             println(
-                "Resolving: [\n    ${classes.joinToString(",\n    ") { it.type.toString() }}\n]"
+                "Resolving: [\n    ${initialClasses.joinToString(",\n    ") { it.type.toString() }}\n]"
             )
-            classes = classes.resolveAll(resolver, referencePolicy)
+            val classes = initialClasses.resolveAll(resolver, referencePolicy)
+            println("Running mapping")
+            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
+                it.uniqueCName == "v8_ScriptOrigin_options"
+//                (it.parent as? ResolvedClass)?.type.toString() == "v8::ScriptOrigin" && it.name == "Options"
+            }.forEach {
+                it.returnStyle = COPY_CONSTRUCTOR
+                it.returnType.typeString =
+                    it.returnType.typeString.removePrefix("const ").removeSuffix("*")
+                println("Setting return type on $it")
+            }
+            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
+                it.returnType.toString().startsWith("const v8::Local<") ||
+                    it.returnType.toString().startsWith("const v8::Maybe<") ||
+                    it.returnType.toString().startsWith("const v8::MaybeLocal<") ||
+                    it.returnType.toString() == "const v8::ScriptOrigin*" ||
+                    it.returnType.toString() == "const v8::Location*"
+            }.forEach {
+                it.returnType.typeString = it.returnType.typeString.removePrefix("const ")
+                println("Clearing const return type on $it")
+            }
+            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
+                it.uniqueCName == "___v8_Persistent_v8_Value_new" || it.uniqueCName == "_v8_Persistent_v8_Value_op_assign"
+            }.forEach {
+                it.parent?.removeChild(it)
+                println("Removing $it")
+            }
 //            debug?.let {
 //                val clsStr = Json.encodeToString(resolver.tu)
 //                File(it).writeText(clsStr)
@@ -151,7 +180,7 @@ class KrapperGen : CliktCommand() {
             val namer = NameHandler()
             File(outputBase, "$moduleName.h").writeText(
                 CppCodeBuilder().also {
-                    WrappedHeaderWriter(
+                    HeaderWriter(
                         namer,
                         it,
                         policy = errorPolicy.policy
@@ -161,7 +190,7 @@ class KrapperGen : CliktCommand() {
             val cppFile = File(outputBase, "$moduleName.cc")
             cppFile.writeText(
                 CppCodeBuilder().also {
-                    WrappedCppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
+                    CppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
                         moduleName,
                         header,
                         classes
@@ -170,7 +199,7 @@ class KrapperGen : CliktCommand() {
             )
             val pkg = pkg ?: "krapper.$moduleName"
             File(outputBase, "$moduleName.def").writeText(
-                WrappedDefWriter(namer).generateDef(
+                DefWriter(namer).generateDef(
                     outputBase,
                     "$pkg.internal",
                     moduleName,
@@ -178,12 +207,12 @@ class KrapperGen : CliktCommand() {
                     library
                 )
             )
-            WrappedCppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
+            CppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
                 cppFile,
                 header,
                 library
             )
-            WrappedKotlinWriter(
+            KotlinWriter(
                 namer,
                 "$pkg.internal",
                 policy = errorPolicy.policy
@@ -228,8 +257,7 @@ val CValue<CXCursor>?.fullyQualified: String
 typealias ChildVisitor = (child: CValue<CXCursor>, parent: CValue<CXCursor>) -> Unit
 
 val recurseVisitor =
-    staticCFunction {
-        child: CValue<CXCursor>,
+    staticCFunction { child: CValue<CXCursor>,
         parent: CValue<CXCursor>,
         children: clang.CXClientData? ->
         children!!.asStableRef<ChildVisitor>().get().invoke(child, parent)
@@ -237,8 +265,7 @@ val recurseVisitor =
     }
 
 val visitor =
-    staticCFunction {
-        child: CValue<CXCursor>,
+    staticCFunction { child: CValue<CXCursor>,
         _: CValue<CXCursor>,
         children: clang.CXClientData? ->
         children!!.asStableRef<(CValue<CXCursor>) -> Unit>().get()

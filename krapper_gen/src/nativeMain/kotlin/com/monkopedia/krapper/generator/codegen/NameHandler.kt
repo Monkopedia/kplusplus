@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,6 +30,19 @@ interface Namer {
 }
 
 class NameHandler {
+    object Empty : Namer {
+        override val cName: String
+            get() = throw NotImplementedError("Root naming unavailable")
+        override val WrappedMethod.uniqueCName: String
+            get() = throw NotImplementedError("Root naming unavailable")
+        override val WrappedField.uniqueCGetter: String
+            get() = throw NotImplementedError("Root naming unavailable")
+        override val WrappedField.uniqueCSetter: String
+            get() = throw NotImplementedError("Root naming unavailable")
+
+        override fun uniqify(source: Any, name: String): String =
+            throw NotImplementedError("Root naming unavailable")
+    }
 
     private val allNames = mutableSetOf<String>()
     private val namerStorage = mutableMapOf<WrappedClass, NamerImpl>()
@@ -54,6 +67,7 @@ class NameHandler {
         override val cName = cls.type.toString()
             .replace("::", "_")
             .replace("<", "_")
+            .replace(",", "__")
             .replace(">", "")
             .replace("*", "_P")
             .replace(" ", "_")
