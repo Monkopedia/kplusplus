@@ -78,6 +78,7 @@ class KotlinWriter(
     private val pkg: String,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGeneratorBase<KotlinCodeBuilder>(policy) {
+    var currentClasses = mapOf<String, ResolvedClass>()
 
     fun generate(outputDir: File, classes: List<ResolvedClass>) {
         if (!outputDir.exists()) {
@@ -86,6 +87,7 @@ class KotlinWriter(
         for (file in outputDir.listFiles()) {
             file.delete()
         }
+        currentClasses = classes.associateBy { it.type.toString() }
         for (cls in classes) {
             val clsFile = File(outputDir, cls.type.kotlinType.name + ".kt")
             val builder = KotlinCodeBuilder()
@@ -122,12 +124,36 @@ class KotlinWriter(
                     }
                 )
             }
+            handleSuperClassesRecursive(cls)
             handleChildren()
         }
         appendLine()
         comment("END KRAPPER GEN for ${cls.type}")
         appendLine()
         appendLine()
+    }
+
+    private fun KotlinCodeBuilder.handleSuperClassesRecursive(cls: ResolvedClass) {
+        if (cls.baseClass == null) return
+        val superClass = currentClasses[cls.baseClass.toString()] ?: error("Can't find specified base class ${cls.baseClass}")
+        val methods = superClass.children.filterIsInstance<ResolvedMethod>()
+        methods.filter {
+            it.methodType == MethodType.STATIC_OP || it.methodType == MethodType.METHOD
+        }.forEach { method ->
+            try {
+                onGenerate(superClass, method)
+            } catch (t: Throwable) {
+                codeGenerationPolicy.onGenerateMethodFailed(cls, method, t)
+            }
+        }
+        for (field in cls.children.filterIsInstance<ResolvedField>()) {
+            try {
+                onGenerate(cls, field)
+            } catch (t: Throwable) {
+                codeGenerationPolicy.onGenerateFieldFailed(cls, field, t)
+            }
+        }
+        handleSuperClassesRecursive(superClass)
     }
 
     override fun KotlinCodeBuilder.onGenerateMethods(cls: ResolvedClass) {
@@ -258,7 +284,6 @@ class KotlinWriter(
         function {
             name = methodName
             val returnType = method.returnType
-            println("Generating ${returnType.kotlinType} for ${returnType} in $method")
             val kotlinType = returnType.kotlinType
             var isGeneratingReturn = false
             retType = type(returnType)
