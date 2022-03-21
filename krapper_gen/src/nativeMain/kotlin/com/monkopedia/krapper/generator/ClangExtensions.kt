@@ -29,6 +29,7 @@ import clang.CXString
 import clang.CXToken
 import clang.CXTokenKind
 import clang.CXTranslationUnit
+import clang.CXTranslationUnit_VisitImplicitAttributes
 import clang.CXType
 import clang.CXUnsavedFile
 import clang.CX_CXXAccessSpecifier
@@ -423,7 +424,7 @@ inline fun CXIndex.parseTranslationUnit(
     script: String,
     command_line_args: Array<String>? = null,
     unsaved_files: Array<CValue<CXUnsavedFile>>? = null,
-    options: UInt = 0U
+    options: UInt = 0U or CXTranslationUnit_VisitImplicitAttributes
 ): CXTranslationUnit? = memScoped {
     val array = unsaved_files?.let {
         allocArray<CXUnsavedFile>(it.size) { index ->

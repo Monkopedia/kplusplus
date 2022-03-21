@@ -28,9 +28,15 @@ class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(arg)
     override fun build(builder: CodeStringBuilder) {
-        builder.append("*(")
-        arg.build(builder)
-        builder.append(")")
+        if (arg is Reference) {
+            builder.append("*")
+            arg.build(builder)
+            builder.append("")
+        } else {
+            builder.append("*(")
+            arg.build(builder)
+            builder.append(")")
+        }
     }
 }
 

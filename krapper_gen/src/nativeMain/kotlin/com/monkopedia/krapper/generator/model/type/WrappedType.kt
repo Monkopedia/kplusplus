@@ -231,6 +231,7 @@ abstract class WrappedType : WrappedElement() {
         }
 
         fun const(type: WrappedType): WrappedType {
+            if (type.isConst) return type
             return WrappedPrefixedType(type, "const")
         }
 

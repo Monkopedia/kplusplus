@@ -118,7 +118,8 @@ enum class ArgumentCastMode {
     NATIVE,
     STRING,
     REINT_CAST,
-    RAW_CAST
+    RAW_CAST,
+    STD_MOVE
 }
 
 data class ResolvedArgument(

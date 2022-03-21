@@ -26,6 +26,7 @@ class CppCompiler(
         val flags = CompileFlags(header, library, linkStatics = true)
         val command = "$compiler -c -o ${outputFile.path} ${flags.includeDirs ?: ""} " +
             "${flags.linkerOpts ?: ""} ${cppFile.path}"
+        println("Running:\n$command")
         val result = system(command)
         require(result == 0) {
             "Command \"$command\" exited with result $result"

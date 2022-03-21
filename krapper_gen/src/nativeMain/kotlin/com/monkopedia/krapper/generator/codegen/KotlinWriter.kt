@@ -296,7 +296,7 @@ class KotlinWriter(
                     returnType,
                     initializer = memScope dot Call(
                         extensionMethod(
-                            kotlinType.fullyQualified.last() + ".Companion",
+                            kotlinType.fullyQualified + ".Companion",
                             kotlinType.name
                         )
                     )

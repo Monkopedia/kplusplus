@@ -30,12 +30,14 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
@@ -166,7 +168,8 @@ class WrappedDestructor(
 fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext) =
     when {
         returnType.isVoid -> VOID
-        !returnType.isReturnable -> ARG_CAST
+        !returnType.isReturnable ->
+            if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
         returnType.isString -> STRING
         returnType.isPointer && returnType.pointed.isString -> STRING_POINTER
         returnType.isNative || returnType == LONG_DOUBLE -> RETURN
@@ -294,16 +297,22 @@ class WrappedArgument(val name: String, val type: WrappedType, val usr: String =
             resolved,
             resolvedArgType,
             usr,
-            determineArgumentCastMode(type, resolverContext),
+            determineArgumentCastMode(type, this.type.isReference, resolverContext),
             needsDereference
         )
     }
 }
 
-fun determineArgumentCastMode(type: WrappedType, resolverContext: ResolveContext) =
-    when {
-        type.isString -> ArgumentCastMode.STRING
-        type.isNative -> NATIVE
-        type == LONG_DOUBLE -> RAW_CAST
-        else -> REINT_CAST
-    }
+fun determineArgumentCastMode(
+    type: WrappedType,
+    // Resolve ditches the reference, so pass it in manually.
+    isReference: Boolean,
+    resolverContext: ResolveContext
+) = when {
+    type.isString -> ArgumentCastMode.STRING
+    type.isNative -> NATIVE
+    type == LONG_DOUBLE -> RAW_CAST
+    // TODO: Real type check rather than prefix.
+    !isReference && !type.isPointer && type.toString().startsWith("std::unique_ptr") -> STD_MOVE
+    else -> REINT_CAST
+}

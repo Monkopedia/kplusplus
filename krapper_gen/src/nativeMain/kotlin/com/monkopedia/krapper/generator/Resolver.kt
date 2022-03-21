@@ -16,12 +16,16 @@
 package com.monkopedia.krapper.generator
 
 import clang.CXType
+import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.Namer
+import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.model.NullableKotlinType
 import com.monkopedia.krapper.generator.model.TemplatedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
+import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
@@ -33,6 +37,8 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointer
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.CAST
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.POINTED_STRING_CAST
@@ -40,6 +46,7 @@ import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.STRING_CA
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import kotlinx.cinterop.CValue
 
 interface Resolver {
@@ -109,10 +116,15 @@ data class ResolveContext(
     val typeMapping: TypeMapping,
     val namer: NameHandler,
     val currentNamer: Namer,
+    val mappingCache: MutableMap<WrappedType, MapResult> = mutableMapOf()
 ) {
     fun map(type: WrappedType): WrappedType? {
         if (type.isArray) return null
-        return when (val mapResult = typeMapping(type, this)) {
+        return when (
+            val mapResult = mappingCache.getOrPut(type) {
+                typeMapping(type, this)
+            }
+        ) {
             RemoveElement -> return null
             ElementUnchanged -> type
             is ReplaceWith -> mapResult.replacement
@@ -142,7 +154,7 @@ data class ResolveContext(
 
     operator fun plus(wrappedClass: WrappedClass): ResolveContext {
         with(namer) {
-            return copy(currentNamer = wrappedClass.namer())
+            return copy(currentNamer = wrappedClass.namer(), mappingCache = mappingCache)
         }
     }
 
@@ -156,6 +168,25 @@ data class ResolveContext(
     fun withPolicy(
         policy: ReferencePolicy
     ) = copy(typeMapping = typeMapper(policy), namer = NameHandler())
+
+    fun canAssign(type: WrappedType): Boolean {
+        resolve(type) ?: return true
+        if (type.isConst) {
+            return false
+        }
+        if (type.isReturnable) {
+            return true
+        }
+        val resolvedClass = tracker.classes[type.toString()] ?: return true
+        resolvedClass.children.filterIsInstance<WrappedMethod>()
+            .find { Operator.from(it) == BasicAssignmentOperator.ASSIGN }
+            ?.let {
+                return true
+            }
+        return resolvedClass.children.filterIsInstance<WrappedField>().all {
+            canAssign(it.type)
+        }
+    }
 
     companion object {
         val Empty: ResolveContext
@@ -228,7 +259,9 @@ private fun typeMapper(
         }
         ReferencePolicy.INCLUDE_MISSING -> return { t, context ->
             t.operateOn {
-                if (it.toString().contains("WasmStreamingImpl") || it.toString().contains("CompiledWasmModule") || it.toString() == "v8::ScriptOrigin") {
+                if (it.toString().contains("WasmStreamingImpl") || it.toString()
+                    .contains("CompiledWasmModule")
+                ) {
                     return@operateOn RemoveElement
                 }
                 if (!context.tracker.canResolve(it, context)) {

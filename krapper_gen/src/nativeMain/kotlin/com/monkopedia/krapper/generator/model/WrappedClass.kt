@@ -125,7 +125,12 @@ class WrappedClass(
             hasCopyConstructor,
             resolverContext.resolve(type) ?: return null
         ).also {
-            it.addAllChildren(children.mapNotNull { it.resolve(resolverContext + this) })
+            it.addAllChildren(
+                children.mapNotNull { child ->
+                    if (isAbstract && child is WrappedConstructor) null
+                    else child.resolve(resolverContext + this)
+                }
+            )
         }
     }
 

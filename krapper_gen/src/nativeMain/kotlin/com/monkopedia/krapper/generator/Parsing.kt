@@ -337,7 +337,7 @@ fun WrappedTemplate.typedAs(
             }
         }
     }
-    val localContext = baseContext.copy(typeMapping = mapper)
+    val localContext = baseContext.copy(typeMapping = mapper, mappingCache = mutableMapOf())
     for (i in min(templates.size, templateSpec.templateArgs.size) until templates.size) {
         val defaultType = templates[i].defaultType ?: continue
         val mappedType = mapper(defaultType, localContext)

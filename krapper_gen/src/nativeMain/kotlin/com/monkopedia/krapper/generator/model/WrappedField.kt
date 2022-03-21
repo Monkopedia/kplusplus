@@ -85,7 +85,7 @@ data class WrappedField(
                             resolvedType,
                             argType,
                             "",
-                            determineArgumentCastMode(type, resolverContext),
+                            determineArgumentCastMode(type, mappedType.isReference, resolverContext),
                             needsDereference
                         )
                     )

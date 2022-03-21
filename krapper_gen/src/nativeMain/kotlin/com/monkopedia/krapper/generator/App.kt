@@ -41,6 +41,7 @@ import com.monkopedia.krapper.generator.codegen.getcwd
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
@@ -145,11 +146,11 @@ class KrapperGen : CliktCommand() {
             println("Running mapping")
             classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
                 it.uniqueCName == "v8_ScriptOrigin_options"
-//                (it.parent as? ResolvedClass)?.type.toString() == "v8::ScriptOrigin" && it.name == "Options"
             }.forEach {
                 it.returnStyle = COPY_CONSTRUCTOR
                 it.returnType.typeString =
-                    it.returnType.typeString.removePrefix("const ").removeSuffix("*")
+                    it.returnType.typeString.removePrefix("const ").trimEnd('*')
+                //it.args[0].type =
                 println("Setting return type on $it")
             }
             classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {

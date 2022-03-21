@@ -50,6 +50,7 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
@@ -63,6 +64,7 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTE
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 class CppWriter(
@@ -212,7 +214,7 @@ class CppWriter(
             NATIVE -> a
             ArgumentCastMode.STRING -> createStringCast(a)
             RAW_CAST -> createRawCast(a)
-            REINT_CAST, null -> createCast(a)
+            STD_MOVE, REINT_CAST, null -> createCast(a)
         }
 
     private fun CppCodeBuilder.generateReturn(
@@ -228,8 +230,15 @@ class CppWriter(
             ARG_CAST -> +(returnCast!!.reference assign call)
             STRING -> createStringReturn(call)
             STRING_POINTER -> createPointedStringReturn(call)
-            COPY_CONSTRUCTOR -> +Return(New(Call(returnType.toString(), call)))
+            COPY_CONSTRUCTOR -> +Return(New(Call(returnType.toConstructor(), call)))
             RETURN -> +Return(call)
+        }
+    }
+
+    private fun ResolvedType.toConstructor(): String {
+        return toString().trimEnd('*').let {
+            if (it.startsWith("const ")) it.substring("const ".length)
+            else it
         }
     }
 

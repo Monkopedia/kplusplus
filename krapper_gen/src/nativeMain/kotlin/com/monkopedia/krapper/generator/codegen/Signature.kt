@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.FunctionBuilder
 import com.monkopedia.krapper.generator.builders.LangFactory
 import com.monkopedia.krapper.generator.builders.LocalVar
@@ -23,6 +24,7 @@ import com.monkopedia.krapper.generator.builders.dereference
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
@@ -72,7 +74,11 @@ data class SignatureArgument(
     private val needsDereference: Boolean
         get() = arg.needsDereference
     val reference: Symbol
-        get() = if (needsDereference) localVar.dereference else localVar.reference
+        get() = when {
+            arg.castMode == STD_MOVE -> Call("std::move", localVar.dereference)
+            needsDereference -> localVar.dereference
+            else -> localVar.reference
+        }
     val pointerReference: Symbol
         get() {
             require(needsDereference) {
