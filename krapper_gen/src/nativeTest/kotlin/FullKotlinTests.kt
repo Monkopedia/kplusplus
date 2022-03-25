@@ -36,14 +36,15 @@ import kotlin.test.fail
 
 class FullKotlinTests {
 
-    private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__String(): vector__String {\n" +
-        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+    private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__string(): vector__string {\n" +
+        "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+        "?: error(\"Allocation failed\"))\n" +
         "    val obj: COpaquePointer = (std_vector_std_string_new(memory) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        std_vector_std_string_dispose(obj)\n" +
         "    }\n" +
-        "    return vector__String((obj to this))\n" +
+        "    return vector__string((obj to this))\n" +
         "}\n\n"
 
     private val STD_VECTOR_STRING_DISPOSE = ""
@@ -55,7 +56,8 @@ class FullKotlinTests {
 
     private val TESTLIB_OTHERCLASS_NEW =
         "fun MemScope.OtherClass(): OtherClass {\n" +
-            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+            "?: error(\"Allocation failed\"))\n" +
             "    val obj: COpaquePointer = (TestLib_OtherClass_new(memory) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
@@ -80,17 +82,17 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_OTHERCLASS_APPEND_TEXT =
-        "inline fun appendText(text: vector__String): Unit {\n" +
+        "inline fun appendText(text: vector__string): Unit {\n" +
             "    return TestLib_OtherClass_append_text(ptr, text.ptr)\n" +
             "}"
     private val TESTLIB_OTHERCLASS_COPIES =
-        "inline fun copies(): MyPair__OtherClass? {\n" +
-            "    return MyPair__OtherClass(((TestLib_OtherClass_copies(ptr) ?: return null) " +
+        "inline fun copies(): MyPair__OtherClass_P? {\n" +
+            "    return MyPair__OtherClass_P(((TestLib_OtherClass_copies(ptr) ?: return null) " +
             "to memScope))\n" +
             "}"
     private val TESTLIB_OTHERCLASS_INTS =
-        "inline fun ints(): MyPair__Int? {\n" +
-            "    return MyPair__Int(((TestLib_OtherClass_ints(ptr) ?: return null) " +
+        "inline fun ints(): MyPair__int? {\n" +
+            "    return MyPair__int(((TestLib_OtherClass_ints(ptr) ?: return null) " +
             "to memScope))\n" +
             "}"
 
@@ -368,7 +370,8 @@ class FullKotlinTests {
             "    }"
 
     private val TESTLIB_TESTCLASS_NEW = "fun MemScope.TestClass(): TestClass {\n" +
-        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+        "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+        "?: error(\"Allocation failed\"))\n" +
         "    val obj: COpaquePointer = (TestLib_TestClass_new(memory) ?: error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
@@ -378,7 +381,8 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS__NEW =
         "fun MemScope.TestClass(other: TestClass): TestClass {\n" +
-            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+            "?: error(\"Allocation failed\"))\n" +
             "    val obj: COpaquePointer = (_TestLib_TestClass_new(memory, other.ptr) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
@@ -388,7 +392,8 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS___NEW = "fun MemScope.TestClass(a: Int): TestClass {\n" +
-        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+        "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+        "?: error(\"Allocation failed\"))\n" +
         "    val obj: COpaquePointer = (__TestLib_TestClass_new(memory, a) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
@@ -399,7 +404,8 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS____NEW =
         "fun MemScope.TestClass(a: Int, b: Double): TestClass {\n" +
-            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
+            "?: error(\"Allocation failed\"))\n" +
             "    val obj: COpaquePointer = (___TestLib_TestClass_new(memory, a, b) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
@@ -565,7 +571,7 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_BNOT =
         "inline operator fun not(): TestClass {\n" +
-            "    return TestClass((TestLib_TestClass_op_not(ptr) to memScope))\n" +
+            "    return TestClass((TestLib_TestClass_op_not(ptr)!! to memScope))\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_BAND =

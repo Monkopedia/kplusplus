@@ -68,17 +68,18 @@ class KotlinCodeTests {
         val rcls =
             ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
         writer.generate(testDir, listOf(rcls))
-        val output = File(testDir, "EmptyClass.kt")
+        val output = File(testDir, "testLib_EmptyClass.kt")
         assertTrue(output.exists())
         assertCode(
             """
-            |package TestLib
+            |package testLib
             |
             |import kotlin.Int
             |import kotlin.Pair
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
+            |import test.pkg.TestLib_EmptyClass_size_of
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
             |
@@ -100,7 +101,7 @@ class KotlinCodeTests {
             |            }
             |
             |        fun MemScope.EmptyClass_Holder(): EmptyClass {
-            |            val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |            return EmptyClass((memory to this))
             |        }
             |    }
@@ -159,7 +160,7 @@ class KotlinCodeTests {
         assertCode(
             """
             |fun MemScope.Constructable(): Constructable {
-            |    val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
             |    return Constructable((obj to this))
             |}
@@ -219,7 +220,7 @@ class KotlinCodeTests {
         assertCode(
             """
             |fun MemScope.Constructable(): Constructable {
-            |    val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
             |    defer {
             |        TestLib_Constructable_dispose(obj)
@@ -569,7 +570,7 @@ class KotlinCodeTests {
         testDir.listFiles().forEach {
             println("Found ${it.path}")
         }
-        val output = File(testDir, "iterator__string.kt")
+        val output = File(testDir, "std_vector_iterator__string.kt")
         assertTrue(output.exists())
         assertCode(
             """
@@ -580,6 +581,7 @@ class KotlinCodeTests {
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
+            |import test.pkg.std_vector_std_string_iterator_size_of
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
             |
@@ -601,7 +603,7 @@ class KotlinCodeTests {
             |            }
             |
             |        fun MemScope.iterator__string_Holder(): iterator__string {
-            |            val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |            return iterator__string((memory to this))
             |        }
             |    }
