@@ -37,7 +37,7 @@ class KotlinFactory : LangFactory {
         return KotlinLocalVar(
             name,
             (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
-            ?: error("Cannot define $type in kotlin"),
+                ?: error("Cannot define $type in kotlin"),
             initializer
         )
     }
@@ -348,7 +348,7 @@ class KotlinType(
 
     constructor(type: ResolvedType) : this(
         (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
-        ?: error("Cannot create KotlinType with $type")
+            ?: error("Cannot create KotlinType with $type")
     )
 
     override fun build(builder: CodeStringBuilder) {

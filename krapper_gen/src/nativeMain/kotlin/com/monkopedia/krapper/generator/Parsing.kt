@@ -197,15 +197,10 @@ private class ResolverBuilderImpl : ResolverBuilder {
                 CXCursorKind.CXCursor_ClassDecl -> {
                     val fullyQualified = declaration.fullyQualified
                     seenNames[strType] = type
-                    val std = StdPopulator.maybeCreate(fullyQualified, type, this)
-                    if (std != null) {
-                        classes.add(std)
+                    if (type.numTemplateArguments <= 0) {
+                        classes.add(WrappedClass(declaration, this))
                     } else {
-                        if (type.numTemplateArguments <= 0) {
-                            classes.add(WrappedClass(declaration, this))
-                        } else {
-                            desiredTemplates.add(type)
-                        }
+                        desiredTemplates.add(type)
                     }
                     type
                 }
@@ -262,20 +257,6 @@ private fun MemScope.parseHeader(
             "cursor_${File(file).name}.json"
         ).writeText(Json.encodeToString(Utils.CursorTreeInfo(cursor)))
     }
-//    val classes = cursor.filterChildrenRecursive {
-//        it.kind == CXCursorKind.CXCursor_ClassDecl
-//    }.map { WrappedClass(it, resolverBuilder) }
-//    val templates = cursor.filterChildrenRecursive {
-//        it.kind == CXCursorKind.CXCursor_ClassTemplate
-//    }.map {
-// //        if (it.fullyQualified.startsWith("std::_Vector_base")) {
-// //            val info = CursorTreeInfo(it)
-// //            File("/tmp/std_vector_base.json").writeText(Json.encodeToString(info))
-// //        }
-//        WrappedTemplate(it, resolverBuilder).also {
-// //            println("Created template $it")
-//        }
-//    }
     val element = WrappedElement.mapAll(tu.cursor, resolverBuilder)
     return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
 }
@@ -326,7 +307,6 @@ fun WrappedTemplate.typedAs(
                 } else {
                     baseContext.typeMapping(type, context)
                 }
-//            } else if (parent !is WrappedTemplateType && type.toString() == fullyQualified) {
             } else if (type.toString() == fullyQualified) {
                 val result = baseContext.typeMapping(templateSpec, context)
                 if (result == ElementUnchanged) {

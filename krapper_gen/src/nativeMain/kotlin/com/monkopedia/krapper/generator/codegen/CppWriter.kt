@@ -22,7 +22,6 @@ import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CodeGenerator
 import com.monkopedia.krapper.generator.builders.CodeStringBuilder
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
-import com.monkopedia.krapper.generator.builders.Delete
 import com.monkopedia.krapper.generator.builders.ExternCClose
 import com.monkopedia.krapper.generator.builders.ExternCOpen
 import com.monkopedia.krapper.generator.builders.LocalVar
@@ -64,7 +63,6 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTE
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 class CppWriter(
@@ -350,7 +348,12 @@ class CppWriter(
     ) {
         val thizCast = generateArgumentCast(args[0])
         val fetch = thizCast.pointerReference arrow Raw(field.name)
-        generateReturn(fetch, field.getter.returnStyle, field.getter.returnType, args.getOrNull(1)?.let { generateArgumentCast(it) })
+        generateReturn(
+            fetch,
+            field.getter.returnStyle,
+            field.getter.returnType,
+            args.getOrNull(1)?.let { generateArgumentCast(it) }
+        )
     }
 
     private fun CppCodeBuilder.generateFieldSetBody(

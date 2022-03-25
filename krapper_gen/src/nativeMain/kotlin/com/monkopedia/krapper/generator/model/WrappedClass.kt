@@ -178,69 +178,6 @@ class WrappedClass(
     override fun toString(): String {
         return "cls($name)"
     }
-
-//    constructor(name: String, children: List<WrappedElement>, resolverBuilder: ResolverBuilder)
-//
-//    init {
-//        println("Created $fullyQualified")
-//        Throwable().printStackTrace()
-//    }
-
-//    override fun toString(): String {
-//        return buildString {
-//            append("class $fullyQualified {\n")
-//            baseClass?.let {
-//                append("    super $it")
-//            }
-//            append("\n")
-//            for (field in fields) {
-//                append("    $field\n")
-//            }
-//            append("\n")
-//            for (method in methods) {
-//                append("    $method\n")
-//            }
-//            append("\n")
-//
-//            append("}\n")
-//        }
-//    }
-}
-
-private fun List<CValue<CXCursor>>.findMethods(
-    resolverBuilder: ResolverBuilder
-): List<WrappedMethod> {
-    return filter {
-        (
-            it.kind == CXCursorKind.CXCursor_CXXMethod ||
-                it.kind == CXCursorKind.CXCursor_Constructor ||
-                it.kind == CXCursorKind.CXCursor_Destructor
-            ) &&
-            it.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPublic
-    }.map {
-        WrappedMethod(it, resolverBuilder)
-    }
-}
-
-private fun List<CValue<CXCursor>>.findFields(
-    resolverBuilder: ResolverBuilder
-): List<WrappedField> {
-    return filter {
-        it.kind == CXCursorKind.CXCursor_FieldDecl &&
-            it.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPublic
-    }.map {
-        WrappedField(it, resolverBuilder)
-    }
-}
-
-private fun List<CValue<CXCursor>>.findBaseClass(
-    resolverBuilder: ResolverBuilder
-): WrappedType? {
-    return find {
-        it.kind == CXCursorKind.CXCursor_CXXBaseSpecifier
-    }?.let {
-        WrappedType(it.type, resolverBuilder)
-    }
 }
 
 private fun wrapName(value: CValue<CXCursor>, name: String): String {

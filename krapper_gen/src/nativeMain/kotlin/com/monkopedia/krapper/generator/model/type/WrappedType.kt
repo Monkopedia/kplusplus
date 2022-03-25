@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -52,6 +52,7 @@ abstract class WrappedType : WrappedElement() {
     override fun clone(): WrappedType {
         return this
     }
+
     abstract val isNative: Boolean
     abstract val isString: Boolean
     val kotlinType: WrappedKotlinType
@@ -97,30 +98,12 @@ abstract class WrappedType : WrappedElement() {
                 if (type.endsWith("&")) {
                     return referenceTo(invoke(type.substring(0, type.length - 1).trim()))
                 }
-//                if (type == "_Alloc" || type == "_Alloc*") {
-//                    Throwable("Alloc $type").printStackTrace()
-//                }
                 if (type.isEmpty()) {
                     throw IllegalArgumentException("Empty type")
                 }
                 WrappedTypeReference(type)
             }
         }
-
-//        fun WrappedTemplateType(
-//            type: CValue<CXType>,
-//            resolverBuilder: ResolverBuilder
-//        ): WrappedType {
-//            return type.useContents {
-//                when (kind) {
-//                    CXTypeKind.CXType_Pointer -> WrappedTemplateType(type.pointeeType, resolverBuilder)
-//                    CXTypeKind.CXType_Elaborated -> WrappedTemplateType(type.namedType, resolverBuilder)
-// //            CXType_Typedef ->
-//                    // CXType_Enum ->
-//                    else -> WrappedType(type, resolverBuilder)
-//                }
-//            }
-//        }
 
         override fun invoke(
             type: CValue<CXType>,

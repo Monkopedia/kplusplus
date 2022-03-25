@@ -210,20 +210,6 @@ data class ResolveContext(
     }
 }
 
-// private fun resolveAll(
-//    cls: WrappedClass,
-//    classMap: ResolveTracker,
-//    resolver: Resolver,
-//    policy: ReferencePolicy
-// ): WrappedClass? {
-//    val mapper = typeMapper(classMap, resolver, policy)
-//    return when (val result = map(cls, null, mapper)) {
-//        RemoveElement -> null
-//        ElementUnchanged -> cls
-//        is ReplaceWith -> result.replacement
-//    }
-// }
-
 private fun typeMapper(
     policy: ReferencePolicy
 ): TypeMapping {
