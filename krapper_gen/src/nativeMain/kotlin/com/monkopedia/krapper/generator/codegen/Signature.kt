@@ -45,7 +45,7 @@ fun String.splitCamelcase(): List<String> {
 inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
     method: ResolvedMethod
 ) {
-    when (method.methodType) {
+    return when (method.methodType) {
         MethodType.CONSTRUCTOR -> {
             name = method.uniqueCName
             retType = functionBuilder.type(method.returnType.cType)
@@ -54,6 +54,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
             retType = null
             name = method.uniqueCName
         }
+        MethodType.SIZE_OF,
         MethodType.STATIC_OP,
         MethodType.METHOD -> {
             retType =

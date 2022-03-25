@@ -24,7 +24,7 @@ class CppCompiler(
 
     fun compile(cppFile: File, header: List<String>, library: List<String>) {
         val flags = CompileFlags(header, library, linkStatics = true)
-        val command = "$compiler -c -o ${outputFile.path} ${flags.includeDirs ?: ""} " +
+        val command = "$compiler -c -fPIE -o ${outputFile.path} ${flags.includeDirs ?: ""} " +
             "${flags.linkerOpts ?: ""} ${cppFile.path}"
         println("Running:\n$command")
         val result = system(command)

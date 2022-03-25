@@ -161,18 +161,28 @@ class CppWriter(
         val returnCast = if (method.returnStyle == ARG_CAST) argCasts.removeLast() else null
         when (method.methodType) {
             MethodType.CONSTRUCTOR -> {
+                val locationCast = argCasts.removeFirst()
                 +Return(
                     New(
                         Call(
                             cls.type.toString(),
                             *(argCasts.map { it.reference }.toTypedArray())
-                        )
+                        ),
+                        locationCast.reference
+                    )
+                )
+            }
+            MethodType.SIZE_OF -> {
+                +Return(
+                    Call(
+                        "sizeof",
+                        Raw(cls.type.toString())
                     )
                 )
             }
             MethodType.DESTRUCTOR -> {
                 val thizCast = argCasts.removeFirst()
-                +Delete(thizCast.pointerReference)
+                +(thizCast.pointerReference arrow Call(method.name.removeTemplate()))
             }
             MethodType.STATIC_OP -> {
                 val thizCast = argCasts.removeFirst()
@@ -353,4 +363,9 @@ class CppWriter(
         val argumentCast = generateArgumentCast(args[1])
         +(fetch assign argumentCast.reference)
     }
+}
+
+private fun String.removeTemplate(): String {
+    if (!contains("<")) return this
+    return substring(0, indexOf('<'))
 }

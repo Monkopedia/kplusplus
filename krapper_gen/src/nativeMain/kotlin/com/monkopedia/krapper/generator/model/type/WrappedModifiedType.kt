@@ -53,7 +53,7 @@ class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : Wra
     override val isConst: Boolean
         get() = baseType.isConst
     override val unconst: WrappedType
-        get() = baseType.unconst
+        get() = WrappedModifiedType(baseType.unconst, modifier)
 
     override fun toString(): String {
         return "${baseType}$modifier"

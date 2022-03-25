@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,16 +16,17 @@
 package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
+import com.monkopedia.krapper.generator.builders.CodeStringBuilder
 import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
+import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.codegen.File
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
+import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedConstructor
 import com.monkopedia.krapper.generator.model.WrappedDestructor
-import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
@@ -53,16 +54,19 @@ class KotlinCodeTests {
             hasConstructor = true
         }
         val tu = WrappedTU().also {
-            it.addChild(WrappedNamespace("TestLib").also {
-                it.addChild(cls)
-            })
+            it.addChild(
+                WrappedNamespace("TestLib").also {
+                    it.addChild(cls)
+                }
+            )
         }
         val ctx = ResolveContext.Empty
             .withClasses(listOf(cls))
             .copy(resolver = ParsedResolver(tu))
             .withPolicy(INCLUDE_MISSING)
         ctx.resolve(cls.type)
-        val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+        val rcls =
+            ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
         writer.generate(testDir, listOf(rcls))
         val output = File(testDir, "EmptyClass.kt")
         assertTrue(output.exists())
@@ -70,9 +74,11 @@ class KotlinCodeTests {
             """
             |package TestLib
             |
+            |import kotlin.Int
             |import kotlin.Pair
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
+            |import kotlinx.cinterop.interpretCPointer
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
             |
@@ -88,6 +94,15 @@ class KotlinCodeTests {
             |        }
             |
             |    companion object {
+            |        val size: Int
+            |            inline get() {
+            |                return TestLib_EmptyClass_size_of()
+            |            }
+            |
+            |        fun MemScope.EmptyClass_Holder(): EmptyClass {
+            |            val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |            return EmptyClass((memory to this))
+            |        }
             |    }
             |}
             |
@@ -116,25 +131,36 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
-            builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            builder.onGenerate(
+                rcls, rcls.children.first() as ResolvedMethod,
+                object : LocalVar {
+                    override val name: String
+                        get() = "size"
+
+                    override fun build(builder: CodeStringBuilder) {
+                        builder.append("size")
+                    }
+                }
+            )
         }
         assertCode(
             """
             |fun MemScope.Constructable(): Constructable {
-            |    val obj: COpaquePointer = (TestLib_Constructable_new() ?: error("Creation failed"))
-            |    defer {
-            |        free(obj)
-            |    }
+            |    val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
             |    return Constructable((obj to this))
             |}
             |""".trimMargin(),
@@ -165,22 +191,36 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
-            builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            builder.onGenerate(
+                rcls, rcls.children.first() as ResolvedMethod,
+                object : LocalVar {
+                    override val name: String
+                        get() = "size"
+
+                    override fun build(builder: CodeStringBuilder) {
+                        builder.append("size")
+                    }
+                }
+            )
         }
         assertCode(
             """
             |fun MemScope.Constructable(): Constructable {
-            |    val obj: COpaquePointer = (TestLib_Constructable_new() ?: error("Creation failed"))
+            |    val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
             |    defer {
             |        TestLib_Constructable_dispose(obj)
             |    }
@@ -203,7 +243,6 @@ class KotlinCodeTests {
                         WrappedMethod(
                             "setSome",
                             WrappedType.VOID,
-                            false,
                             MethodType.METHOD
                         ).also {
                             it.addAllChildren(
@@ -218,16 +257,19 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -252,7 +294,6 @@ class KotlinCodeTests {
                         WrappedMethod(
                             "setPointers",
                             WrappedType.VOID,
-                            false,
                             MethodType.METHOD
                         ).also { m ->
                             m.addAllChildren(
@@ -267,16 +308,19 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -301,23 +345,25 @@ class KotlinCodeTests {
                         WrappedMethod(
                             "sum",
                             WrappedType("long"),
-                            false,
                             MethodType.METHOD
                         )
                     )
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -342,7 +388,6 @@ class KotlinCodeTests {
                         WrappedMethod(
                             "at",
                             WrappedType("std::string"),
-                            false,
                             MethodType.METHOD
                         ).also {
                             it.addAllChildren(
@@ -355,16 +400,19 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("std").also {
-                    it.addChild(cls)
-                })
+                it.addChild(
+                    WrappedNamespace("std").also {
+                        it.addChild(cls)
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -392,7 +440,6 @@ class KotlinCodeTests {
                         WrappedMethod(
                             "setPrivateFrom",
                             WrappedType.VOID,
-                            false,
                             MethodType.METHOD
                         ).also {
                             it.addAllChildren(
@@ -408,20 +455,25 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                    it.addChild(WrappedClass("OtherClass").apply {
-                        addChild(WrappedType("std::string")) // avoid being empty/removed.
-                        hasConstructor = true
-                    })
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                        it.addChild(
+                            WrappedClass("OtherClass").apply {
+                                addChild(WrappedType("std::string")) // avoid being empty/removed.
+                                hasConstructor = true
+                            }
+                        )
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -447,7 +499,6 @@ class KotlinCodeTests {
                             "setPrivateFrom",
                             WrappedType.VOID,
 
-                            false,
                             MethodType.METHOD
                         ).also {
                             it.addAllChildren(
@@ -463,20 +514,25 @@ class KotlinCodeTests {
                 )
             }
             val tu = WrappedTU().also {
-                it.addChild(WrappedNamespace("TestLib").also {
-                    it.addChild(cls)
-                    it.addChild(WrappedClass("OtherClass").apply {
-                        addChild(WrappedType("std::string")) // avoid being empty/removed.
-                        hasConstructor = true
-                    })
-                })
+                it.addChild(
+                    WrappedNamespace("TestLib").also {
+                        it.addChild(cls)
+                        it.addChild(
+                            WrappedClass("OtherClass").apply {
+                                addChild(WrappedType("std::string")) // avoid being empty/removed.
+                                hasConstructor = true
+                            }
+                        )
+                    }
+                )
             }
             val ctx = ResolveContext.Empty
                 .withClasses(listOf(cls))
                 .copy(resolver = ParsedResolver(tu))
                 .withPolicy(INCLUDE_MISSING)
             ctx.resolve(cls.type)
-            val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val rcls =
+                ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(rcls, rcls.children.first() as ResolvedMethod)
         }
         assertCode(
@@ -496,16 +552,19 @@ class KotlinCodeTests {
             hasConstructor = true
         }
         val tu = WrappedTU().also {
-            it.addChild(WrappedNamespace("std").also {
-                it.addChild(cls)
-            })
+            it.addChild(
+                WrappedNamespace("std").also {
+                    it.addChild(cls)
+                }
+            )
         }
         val ctx = ResolveContext.Empty
             .withClasses(listOf(cls))
             .copy(resolver = ParsedResolver(tu))
             .withPolicy(INCLUDE_MISSING)
         ctx.resolve(cls.type)
-        val rcls = ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+        val rcls =
+            ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
         writer.generate(testDir, listOf(rcls))
         testDir.listFiles().forEach {
             println("Found ${it.path}")
@@ -516,9 +575,11 @@ class KotlinCodeTests {
             """
             |package std.vector
             |
+            |import kotlin.Int
             |import kotlin.Pair
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
+            |import kotlinx.cinterop.interpretCPointer
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
             |
@@ -534,6 +595,15 @@ class KotlinCodeTests {
             |        }
             |
             |    companion object {
+            |        val size: Int
+            |            inline get() {
+            |                return std_vector_std_string_iterator_size_of()
+            |            }
+            |
+            |        fun MemScope.iterator__string_Holder(): iterator__string {
+            |            val memory: COpaquePointer = alloc(size, size).reinterpret()
+            |            return iterator__string((memory to this))
+            |        }
             |    }
             |}
             |

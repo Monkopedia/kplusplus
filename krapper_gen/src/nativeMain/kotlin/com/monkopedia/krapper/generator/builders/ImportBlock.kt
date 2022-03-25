@@ -26,17 +26,69 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
     private val prefixLength = prefixedPkg.length
 
     override fun build(builder: CodeStringBuilder) {
-        val fqNames = findFqSymbols(target.base.symbols).flatMap { it.fqNames }.toSet().sorted()
-        for (fqName in fqNames) {
-            // Root pkg, native types, skip
-            if (!fqName.contains(".")) continue
-            // Same pkg as file, skip import
-            if (fqName.startsWith(prefixedPkg) && !fqName.substring(prefixLength).contains(".")) {
-                continue
+        val fqSymbols = findFqSymbols(target.base.symbols)
+        val fqNames = handleDuplicates(
+            fqSymbols.flatMap { it.fqNames }.toSet()
+        ).sortedBy { it.first }
+        for ((fqName, importedName) in fqNames) {
+            if (importedName != null) {
+                ImportAs(fqName, importedName).build(builder)
+            } else {
+                // Root pkg, native types, skip
+                if (!fqName.contains(".")) continue
+                // Same pkg as file, skip import
+                if (fqName.startsWith(prefixedPkg) && !fqName.substring(prefixLength).contains(".")) {
+                    continue
+                }
+                Import(fqName).build(builder)
             }
-            Import(fqName).build(builder)
             builder.append('\n')
         }
+        val mappings = fqNames.mapNotNull { item -> item.second?.let { item.first to it } }
+            .toMap()
+        fqSymbols.forEach {
+            it.setNameRemap(mappings)
+        }
+    }
+
+    private fun handleDuplicates(fqNames: Set<String>): Collection<kotlin.Pair<String, String?>> {
+        val usedNames = mutableSetOf<String>()
+        val mappings = mutableListOf<kotlin.Pair<String, String?>>()
+        for (fqName in fqNames) {
+            val desiredName = fqName.split(".").last()
+            val actualName = selectName(usedNames, fqName, desiredName)
+            mappings.add(if (actualName != desiredName) {
+                fqName to actualName
+            } else {
+                fqName to null
+            })
+        }
+        return mappings
+    }
+
+    private fun selectName(usedNames: MutableSet<String>, fqName: String, desiredName: String): String {
+        if (usedNames.add(desiredName)) {
+            return desiredName
+        }
+        val pkgOptions = fqName.split(".").toMutableList().apply {
+            removeLast()
+        }
+        var modifiedName = desiredName
+        for (pkg in pkgOptions.reversed()) {
+            modifiedName = pkg.replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase() else it.toString()
+            } + modifiedName
+            if (usedNames.add(modifiedName)) {
+                return modifiedName
+            }
+        }
+        for (i in 0 until 5) {
+            modifiedName = desiredName + i
+            if (usedNames.add(modifiedName)) {
+                return modifiedName
+            }
+        }
+        return error("Cannot name $fqName, too many conflicts.")
     }
 
     override fun toString(): String {
@@ -67,12 +119,19 @@ private fun findFqSymbols(
 
 inline fun extensionMethod(pkg: String, method: String): Symbol {
     return object : Symbol, FqSymbol {
+        private val fullyQualified = "$pkg.$method"
+        private var remap: Map<String, String>? = null
+
+        override fun setNameRemap(map: Map<String, String>) {
+            remap = map
+        }
+
         override fun build(builder: CodeStringBuilder) {
-            builder.append(method)
+            builder.append(remap?.get(fullyQualified) ?: method)
         }
 
         override val fqNames: List<String>
-            get() = listOf("$pkg.$method")
+            get() = listOf(fullyQualified)
     }
 }
 

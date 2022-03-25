@@ -56,14 +56,14 @@ class CppHeaderTests {
         |
     """.trimMargin()
 
-    private val STD_VECTOR_STRING_NEW = "void* std_vector_std_string_new();\n\n"
+    private val STD_VECTOR_STRING_NEW = "void* std_vector_std_string_new(void* location);\n\n"
 
     private val STD_VECTOR_STRING_DISPOSE = "void std_vector_std_string_dispose(void* thiz);\n\n"
 
     private val STD_VECTOR_STRING_PUSH_BACK =
         "void std_vector_std_string_push_back(void* thiz, const char* str);\n\n"
 
-    private val TESTLIB_OTHERCLASS_NEW = "void* TestLib_OtherClass_new();\n\n"
+    private val TESTLIB_OTHERCLASS_NEW = "void* TestLib_OtherClass_new(void* location);\n\n"
 
     private val TESTLIB_OTHERCLASS_DISPOSE = "void TestLib_OtherClass_dispose(void* thiz);\n\n"
 
@@ -200,13 +200,13 @@ class CppHeaderTests {
         "double* TestLib_TestClass_pd_get(void* thiz);\n\n" +
             "void TestLib_TestClass_pd_set(void* thiz, double* value);\n\n"
 
-    private val TESTLIB_TESTCLASS_NEW = "void* TestLib_TestClass_new();\n\n"
+    private val TESTLIB_TESTCLASS_NEW = "void* TestLib_TestClass_new(void* location);\n\n"
 
-    private val TESTLIB_TESTCLASS__NEW = "void* _TestLib_TestClass_new(void* other);\n\n"
+    private val TESTLIB_TESTCLASS__NEW = "void* _TestLib_TestClass_new(void* location, void* other);\n\n"
 
-    private val TESTLIB_TESTCLASS___NEW = "void* __TestLib_TestClass_new(int a);\n\n"
+    private val TESTLIB_TESTCLASS___NEW = "void* __TestLib_TestClass_new(void* location, int a);\n\n"
 
-    private val TESTLIB_TESTCLASS____NEW = "void* ___TestLib_TestClass_new(int a, double b);\n\n"
+    private val TESTLIB_TESTCLASS____NEW = "void* ___TestLib_TestClass_new(void* location, int a, double b);\n\n"
 
     private val TESTLIB_TESTCLASS_DISPOSE = "void TestLib_TestClass_dispose(void* thiz);\n\n"
 

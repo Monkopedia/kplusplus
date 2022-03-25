@@ -79,11 +79,16 @@ class Delete(private val s: Symbol) : Symbol, SymbolContainer {
     }
 }
 
-class New(private val s: Symbol) : Symbol, SymbolContainer {
+class New(private val s: Symbol, private val location: Symbol? = null) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
     override fun build(builder: CodeStringBuilder) {
         builder.append("new ")
+        if (location != null) {
+            builder.append('(')
+            location.build(builder)
+            builder.append(") ")
+        }
         s.build(builder)
     }
 }

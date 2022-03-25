@@ -16,6 +16,7 @@
 package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER_VAR
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUES_REF
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
@@ -30,27 +31,31 @@ interface WrappedKotlinType {
 
 private val typeMap = mapOf(
     "size_t" to "platform.posix.size_t",
-    "uint16_t" to "UShort",
     "void" to "Unit",
-    "bool" to "Boolean",
-    "char" to "Byte",
-    "signed char" to "Byte",
-    "unsigned char" to "UByte",
-    "short" to "Short",
-    "signed short" to "Short",
-    "unsigned short" to "UShort",
-    "int" to "Int",
-    "signed int" to "Int",
-    "unsigned int" to "UInt",
-    "long" to "Long",
-    "signed long" to "Long",
-    "unsigned long" to "ULong",
-    "long long" to "Long",
-    "signed long long" to "Long",
-    "unsigned long long" to "ULong",
-    "float" to "Float",
-    "double" to "Double",
-    "long double" to "Double",
+    "bool" to "kotlin.Boolean",
+    "char" to "kotlin.Byte",
+    "signed char" to "kotlin.Byte",
+    "unsigned char" to "kotlin.UByte",
+    "uint8_t" to "kotlin.UShort",
+    "short" to "kotlin.Short",
+    "signed short" to "kotlin.Short",
+    "unsigned short" to "kotlin.UShort",
+    "uint16_t" to "kotlin.UShort",
+    "int" to "kotlin.Int",
+    "signed int" to "kotlin.Int",
+    "unsigned int" to "kotlin.UInt",
+    "uint32_t" to "kotlin.UInt",
+    "long" to "kotlin.Long",
+    "signed long" to "kotlin.Long",
+    "unsigned long" to "kotlin.ULong",
+    "uint64_t" to "kotlin.ULong",
+    "long long" to "kotlin.Long",
+    "signed long long" to "kotlin.Long",
+    "unsigned long long" to "kotlin.ULong",
+    "float" to "kotlin.Float",
+    "double" to "kotlin.Double",
+    "long double" to "kotlin.Double",
+    "uintptr_t" to C_OPAQUE_POINTER
 )
 
 private val pointerTypeMap = mapOf(
@@ -58,15 +63,19 @@ private val pointerTypeMap = mapOf(
     "char" to "kotlinx.cinterop.ByteVar",
     "signed char" to "kotlinx.cinterop.ByteVar",
     "unsigned char" to "kotlinx.cinterop.UByteVar",
+    "uint8_t" to "kotlinx.cinterop.UByteVar",
     "short" to "kotlinx.cinterop.ShortVar",
     "signed short" to "kotlinx.cinterop.ShortVar",
     "unsigned short" to "kotlinx.cinterop.UShortVar",
+    "uint16_t" to "kotlinx.cinterop.UShortVar",
     "int" to "kotlinx.cinterop.IntVar",
     "signed int" to "kotlinx.cinterop.IntVar",
     "unsigned int" to "kotlinx.cinterop.UIntVar",
+    "uint32_t" to "kotlinx.cinterop.UIntVar",
     "long" to "kotlinx.cinterop.LongVar",
     "signed long" to "kotlinx.cinterop.LongVar",
     "unsigned long" to "kotlinx.cinterop.ULongVar",
+    "uint64_t" to "kotlinx.cinterop.ULongVar",
     "long long" to "kotlinx.cinterop.LongVar",
     "signed long long" to "kotlinx.cinterop.LongVar",
     "unsigned long long" to "kotlinx.cinterop.ULongVar",
@@ -81,16 +90,48 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
         return WrappedKotlinType(
             WrappedKotlinType(type.baseType).pkg + "." +
                 (listOf(type.baseType) + type.templateArgs).joinToString("__") {
-                    WrappedKotlinType(it).name.trimEnd('?').replace(" ", "_")
+                    it.toString().split("::").last()
+                        .replace(" ", "_")
+                        .replace("<", "_")
+                        .replace(",", "_")
+                        .replace(">", "_")
+                        .replace("*", "_P")
                 }
         )
     }
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
-    if (type.isString) return fullyQualifiedType("String?")
-    if (type.toString() == "const char*") return fullyQualifiedType("String?")
+    if (type.isString) return fullyQualifiedType("kotlin.String?")
+    if (type.toString() == "const char*") return fullyQualifiedType("kotlin.String?")
+    if (type.isReference) {
+        return WrappedKotlinType(type.unreferenced)
+    }
+    if (type.isConst) {
+        return WrappedKotlinType(type.unconst)
+    }
     if (type.isPointer) {
-        if (type == WrappedType.VOID) {
+        if (type.pointed == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
+        }
+        if (type.pointed.isPointer && type.pointed.pointed.isNative) {
+            if (type.pointed.pointed == WrappedType.VOID) {
+                return nullable(
+                    fullyQualifiedType(C_VALUES_REF).typedWith(
+                        listOf(fullyQualifiedType("kotlinx.cinterop.COpaquePointerVar"))
+                    )
+                )
+            }
+
+            val pointerType = pointerTypeMap[type.pointed.pointed.toString()]
+                ?: return WrappedKotlinType(type.pointed.pointed)
+            return nullable(
+                fullyQualifiedType(C_VALUES_REF).typedWith(
+                    listOf(
+                        fullyQualifiedType(C_POINTER_VAR).typedWith(
+                            listOf(fullyQualifiedType(pointerType))
+                        )
+                    )
+                )
+            )
         }
         if (type.pointed.isNative) {
             val pointerType = pointerTypeMap[type.pointed.toString()]
@@ -102,12 +143,6 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
             )
         }
         return nullable(WrappedKotlinType(type.pointed))
-    }
-    if (type.isReference) {
-        return WrappedKotlinType(type.unreferenced)
-    }
-    if (type.isConst) {
-        return WrappedKotlinType(type.unconst)
     }
     if (type.isNative || type == WrappedType.LONG_DOUBLE) {
         return fullyQualifiedType(typeMap[type.toString()] ?: type.toString())
@@ -167,7 +202,7 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
             )
         )
     }
-    return fullyQualifiedType(name.replace("::", "."), isWrapper = true)
+    return fullyQualifiedType(name.replace("::", ".").replace("*", "_P"), isWrapper = true)
 }
 
 internal class TemplatedKotlinType(

@@ -81,6 +81,9 @@ class NameHandler {
                         MethodType.DESTRUCTOR -> {
                             cName + "_dispose"
                         }
+                        MethodType.SIZE_OF -> {
+                            cName + "_size_of"
+                        }
                         MethodType.STATIC_OP,
                         MethodType.METHOD -> {
                             Operator.from(this)?.let {

@@ -20,9 +20,9 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.isConst
-import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.referenced
@@ -31,17 +31,18 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
+import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.result
@@ -77,11 +78,10 @@ class WrappedConstructor(
     returnType: WrappedType,
     var isCopyConstructor: Boolean,
     val isDefaultConstructor: Boolean
-) : WrappedMethod(name, returnType, false, MethodType.CONSTRUCTOR) {
+) : WrappedMethod(name, returnType, MethodType.CONSTRUCTOR) {
     override fun copy(
         name: String,
         returnType: WrappedType,
-        isStatic: Boolean,
         methodType: MethodType,
         children: List<WrappedElement>
     ): WrappedMethod {
@@ -104,8 +104,18 @@ class WrappedConstructor(
         }
     }
 
-    override fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
-        return emptyList()
+    override fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument> {
+        val type = resolverContext.resolve(pointerTo(VOID))!!
+        return listOf(
+            ResolvedArgument(
+                "location",
+                type,
+                type,
+                "",
+                NATIVE,
+                false
+            )
+        )
     }
 
     override fun resolve(resolverContext: ResolveContext): ResolvedConstructor? =
@@ -120,10 +130,8 @@ class WrappedConstructor(
                 isCopyConstructor,
                 isDefaultConstructor,
                 uniqueCName,
-                args.map {
-                    it.resolveArgument(resolverContext)
-                        ?: return null
-                }
+                thizArg(resolverContext) +
+                    args.map { it.resolveArgument(resolverContext) ?: return null }
             ).also {
                 it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
             }
@@ -133,11 +141,10 @@ class WrappedConstructor(
 class WrappedDestructor(
     name: String,
     returnType: WrappedType,
-) : WrappedMethod(name, returnType, false, MethodType.DESTRUCTOR) {
+) : WrappedMethod(name, returnType, MethodType.DESTRUCTOR) {
     override fun copy(
         name: String,
         returnType: WrappedType,
-        isStatic: Boolean,
         methodType: MethodType,
         children: List<WrappedElement>
     ): WrappedMethod {
@@ -165,9 +172,9 @@ class WrappedDestructor(
         }
 }
 
-fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext) =
+fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext): ReturnStyle =
     when {
-        returnType.isVoid -> VOID
+        returnType.isVoid -> ReturnStyle.VOID
         !returnType.isReturnable ->
             if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
         returnType.isString -> STRING
@@ -180,7 +187,6 @@ fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContex
 open class WrappedMethod(
     val name: String,
     val returnType: WrappedType,
-    val isStatic: Boolean,
     val methodType: MethodType = MethodType.METHOD
 ) : WrappedElement() {
     val args: List<WrappedArgument>
@@ -191,31 +197,30 @@ open class WrappedMethod(
         WrappedType(method.type.result, resolverBuilder).let {
             if (method.isConst) const(it) else it
         },
-        method.isStatic,
         MethodType.METHOD
     )
 
     open fun copy(
         name: String = this.name,
         returnType: WrappedType = this.returnType,
-        isStatic: Boolean = this.isStatic,
         methodType: MethodType = this.methodType,
         children: List<WrappedElement> = this.children.toList()
     ): WrappedMethod {
-        return WrappedMethod(name, returnType, isStatic, methodType).also {
+        return WrappedMethod(name, returnType, methodType).also {
             it.addAllChildren(children)
             it.parent = parent
         }
     }
 
     override fun clone(): WrappedMethod {
-        return WrappedMethod(name, returnType, isStatic, methodType).also {
+        return WrappedMethod(name, returnType, methodType).also {
             it.parent = parent
             it.addAllChildren(children)
         }
     }
 
     protected open fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
+        if (methodType == SIZE_OF) return emptyList()
         return listOf(createThisArg(resolverContext) ?: return null)
     }
 
@@ -223,7 +228,8 @@ open class WrappedMethod(
         with(resolverContext.currentNamer) {
             val (rawMapping, rawResolved) = resolverContext.mapAndResolve(returnType) ?: return null
             val type =
-                if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping) else rawMapping
+                if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping)
+                else rawMapping
             val resolvedReturnType = resolverContext.resolve(type) ?: return null
             resolvedReturnType.kotlinType = rawResolved.kotlinType
             val returnStyle = determineReturnStyle(rawMapping, resolverContext)
@@ -240,7 +246,6 @@ open class WrappedMethod(
             return ResolvedMethod(
                 name,
                 resolvedReturnType,
-                isStatic,
                 methodType,
                 uniqueCName,
                 Operator.from(this@WrappedMethod)?.resolvedOperator,
@@ -254,8 +259,7 @@ open class WrappedMethod(
         }
 
     override fun toString(): String {
-        return "${if (isStatic) "static " else ""}fun $name(${args.joinToString(", ")}): " +
-            returnType
+        return "fun $name(${args.joinToString(", ")}): $returnType"
     }
 }
 

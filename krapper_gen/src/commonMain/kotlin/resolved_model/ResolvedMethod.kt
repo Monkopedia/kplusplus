@@ -16,13 +16,15 @@
 package com.monkopedia.krapper.generator.resolved_model
 
 import com.monkopedia.krapper.ResolvedOperator
+import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 
 enum class MethodType {
     CONSTRUCTOR,
     DESTRUCTOR,
     METHOD,
-    STATIC_OP
+    STATIC_OP,
+    SIZE_OF
 }
 
 enum class ReturnStyle {
@@ -46,7 +48,6 @@ class ResolvedConstructor(
 ) : ResolvedMethod(
     name,
     returnType,
-    false,
     MethodType.CONSTRUCTOR,
     uniqueCName,
     null,
@@ -63,7 +64,6 @@ class ResolvedDestructor(
 ) : ResolvedMethod(
     name,
     returnType,
-    false,
     MethodType.DESTRUCTOR,
     uniqueCName,
     null,
@@ -75,8 +75,7 @@ class ResolvedDestructor(
 open class ResolvedMethod(
     var name: String,
     var returnType: ResolvedCppType,
-    var isStatic: Boolean,
-    var methodType: MethodType = MethodType.METHOD,
+    var methodType: MethodType = METHOD,
     var uniqueCName: String?,
     var operator: ResolvedOperator?,
     var args: List<ResolvedArgument>,
@@ -87,7 +86,6 @@ open class ResolvedMethod(
     fun copy(
         name: String = this.name,
         returnType: ResolvedCppType = this.returnType,
-        isStatic: Boolean = this.isStatic,
         methodType: MethodType = this.methodType,
         uniqueCName: String? = this.uniqueCName,
         operator: ResolvedOperator? = this.operator,
@@ -98,7 +96,6 @@ open class ResolvedMethod(
         return ResolvedMethod(
             name,
             returnType,
-            isStatic,
             methodType,
             uniqueCName,
             operator,
@@ -109,8 +106,7 @@ open class ResolvedMethod(
     }
 
     override fun toString(): String {
-        return "${if (isStatic) "static " else ""}fun $name(${args.joinToString(", ")}): " +
-            returnType
+        return "fun $name(${args.joinToString(", ")}): $returnType"
     }
 }
 

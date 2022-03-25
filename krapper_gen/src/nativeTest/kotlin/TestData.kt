@@ -15,7 +15,6 @@
  */
 package com.monkopedia.krapper.generator
 
-import com.monkopedia.krapper.generator.ResolveContext.Companion
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -1024,7 +1023,6 @@ class TestDataClass {
             WrappedMethod(
                 "push_back",
                 WrappedType("void"),
-                false,
                 MethodType.METHOD
             ).also {
                 it.addChild(WrappedArgument("str", WrappedTemplateRef(template.usr)))
@@ -1084,18 +1082,16 @@ class TestDataClass {
         val pd = WrappedField("pd", WrappedType("double *"))
 
         val sum =
-            WrappedMethod("sum", WrappedType("long"), false, MethodType.METHOD)
+            WrappedMethod("sum", WrappedType("long"), MethodType.METHOD)
         val longPointer = WrappedMethod(
             "longPointer",
             WrappedType("long *"),
-            false,
             MethodType.METHOD,
         )
         val setSome =
             WrappedMethod(
                 "setSome",
                 WrappedType("void"),
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addChild(WrappedArgument("a", WrappedType("int")))
@@ -1106,7 +1102,6 @@ class TestDataClass {
             WrappedMethod(
                 "setPointers",
                 WrappedType("void"),
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(
@@ -1121,7 +1116,6 @@ class TestDataClass {
             WrappedMethod(
                 "setPrivateString",
                 WrappedType("void"),
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(
@@ -1132,7 +1126,6 @@ class TestDataClass {
             WrappedMethod(
                 "setPrivateFrom",
                 WrappedType("void"),
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(
@@ -1142,7 +1135,6 @@ class TestDataClass {
         val output = WrappedMethod(
             "output",
             WrappedType("void"),
-            false,
             MethodType.METHOD,
         )
         val constructor = WrappedConstructor("new", type, false, true)
@@ -1168,7 +1160,6 @@ class TestDataClass {
             WrappedMethod(
                 "operator-",
                 type,
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(
@@ -1176,12 +1167,11 @@ class TestDataClass {
                 )
             }
         val operatorUnaryMinus =
-            WrappedMethod("operator-", type, false, MethodType.METHOD)
+            WrappedMethod("operator-", type, MethodType.METHOD)
         val operatorPlus =
             WrappedMethod(
                 "operator+",
                 type,
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(
@@ -1189,12 +1179,11 @@ class TestDataClass {
                 )
             }
         val operatorUnaryPlus =
-            WrappedMethod("operator+", type, false, MethodType.METHOD)
+            WrappedMethod("operator+", type, MethodType.METHOD)
         val operatorTimes =
             WrappedMethod(
                 "operator*",
                 type,
-                false,
                 MethodType.METHOD,
             ).also {
                 it.addAllChildren(listOf(WrappedArgument("c2", type)))
@@ -1202,7 +1191,6 @@ class TestDataClass {
         val operatorDiv = WrappedMethod(
             "operator/",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(listOf(WrappedArgument("c2", type)))
@@ -1210,27 +1198,24 @@ class TestDataClass {
         val operatorRem = WrappedMethod(
             "operator%",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(listOf(WrappedArgument("c2", type)))
         }
-        val operatorInc = WrappedMethod("operator++", type, false, MethodType.METHOD)
+        val operatorInc = WrappedMethod("operator++", type, MethodType.METHOD)
         val operatorPostInc = WrappedMethod(
             "operator++",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
                 listOf(WrappedArgument("dummy", WrappedType("int"))),
             )
         }
-        val operatorDec = WrappedMethod("operator--", type, false, MethodType.METHOD)
+        val operatorDec = WrappedMethod("operator--", type, MethodType.METHOD)
         val operatorPostDec = WrappedMethod(
             "operator--",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1240,7 +1225,6 @@ class TestDataClass {
         val operatorEq = WrappedMethod(
             "operator==",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1250,7 +1234,6 @@ class TestDataClass {
         val operatorNeq = WrappedMethod(
             "operator!=",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1260,7 +1243,6 @@ class TestDataClass {
         val operatorLt = WrappedMethod(
             "operator<",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1270,7 +1252,6 @@ class TestDataClass {
         val operatorGt = WrappedMethod(
             "operator>",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1280,7 +1261,6 @@ class TestDataClass {
         val operatorLteq = WrappedMethod(
             "operator<=",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1290,7 +1270,6 @@ class TestDataClass {
         val operatorGteq = WrappedMethod(
             "operator>=",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1298,11 +1277,10 @@ class TestDataClass {
             )
         }
         val operatorNot =
-            WrappedMethod("operator!", referenceTo(type), false, MethodType.METHOD)
+            WrappedMethod("operator!", referenceTo(type), MethodType.METHOD)
         val operatorBinaryAnd = WrappedMethod(
             "operator&&",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1312,7 +1290,6 @@ class TestDataClass {
         val operatorBinaryOr = WrappedMethod(
             "operator||",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1320,11 +1297,10 @@ class TestDataClass {
             )
         }
         val operatorInv =
-            WrappedMethod("operator~", pointerTo(type), false, MethodType.METHOD)
+            WrappedMethod("operator~", pointerTo(type), MethodType.METHOD)
         val operatorBitwiseAnd = WrappedMethod(
             "operator&",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1334,7 +1310,6 @@ class TestDataClass {
         val operatorBitwiseOr = WrappedMethod(
             "operator|",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1344,7 +1319,6 @@ class TestDataClass {
         val operatorXor = WrappedMethod(
             "operator^",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1354,7 +1328,6 @@ class TestDataClass {
         val operatorShl = WrappedMethod(
             "operator<<",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1364,7 +1337,6 @@ class TestDataClass {
         val operatorShr = WrappedMethod(
             "operator>>",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1374,7 +1346,6 @@ class TestDataClass {
         val operatorInd = WrappedMethod(
             "operator[]",
             type,
-            false,
             MethodType.METHOD,
         ).also {
             it.addAllChildren(
@@ -1474,13 +1445,11 @@ class TestDataClass {
         val getPrivateString = WrappedMethod(
             "getPrivateString",
             WrappedType("std::string"),
-            false,
             MethodType.METHOD
         )
         val setPrivateString = WrappedMethod(
             "setPrivateString",
             WrappedType("void"),
-            false,
             MethodType.METHOD
         ).also {
             it.addAllChildren(
@@ -1490,7 +1459,6 @@ class TestDataClass {
         val appendText = WrappedMethod(
             "appendText",
             WrappedType("void"),
-            false,
             MethodType.METHOD
         ).also {
             it.addAllChildren(
@@ -1507,7 +1475,6 @@ class TestDataClass {
                     listOf(pointerTo(WrappedType("TestLib::OtherClass")))
                 )
             ),
-            false,
             MethodType.METHOD
         )
         val ints = WrappedMethod(
@@ -1518,7 +1485,6 @@ class TestDataClass {
                     listOf(WrappedType("int"))
                 )
             ),
-            false,
             MethodType.METHOD
         )
         val cls =
@@ -1559,8 +1525,7 @@ class TestDataClass {
             }
         val max = WrappedMethod(
             "getMax",
-            WrappedTemplateRef(templateParam.usr),
-            false
+            WrappedTemplateRef(templateParam.usr)
         )
         val template =
             WrappedTemplate("MyPair").also {
@@ -1589,7 +1554,6 @@ class TestDataClass {
             WrappedMethod(
                 "ToChecked",
                 const(WrappedTemplateRef(template.usr)),
-                false,
                 MethodType.METHOD
             )
         val tmp =

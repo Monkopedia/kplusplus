@@ -28,8 +28,8 @@ import com.monkopedia.krapper.generator.resolved_model.type.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
 
-fun KotlinCodeBuilder(): KotlinCodeBuilder {
-    return CodeBuilderBase(KotlinFactory(), addSemis = false)
+fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuilder {
+    return CodeBuilderBase(KotlinFactory(), rootScope, addSemis = false)
 }
 
 class KotlinFactory : LangFactory {
@@ -37,7 +37,7 @@ class KotlinFactory : LangFactory {
         return KotlinLocalVar(
             name,
             (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
-                ?: error("Cannot define $type in kotlin"),
+            ?: error("Cannot define $type in kotlin"),
             initializer
         )
     }
@@ -55,6 +55,7 @@ class KotlinFactory : LangFactory {
     companion object {
         const val C_OPAQUE_POINTER = "kotlinx.cinterop.COpaquePointer"
         const val C_POINTER = "kotlinx.cinterop.CPointer"
+        const val C_POINTER_VAR = "kotlinx.cinterop.CPointerVar"
         const val C_VALUES_REF = "kotlinx.cinterop.CValuesRef"
         const val MEM_SCOPE = "kotlinx.cinterop.MemScope"
         const val PAIR = "kotlin.Pair"
@@ -340,15 +341,15 @@ class KotlinLocalVar(
 }
 
 class KotlinType(
-    private val typeStr: String,
-    override val fqNames: List<String>
-) : Symbol, FqSymbol {
+    private val type: ResolvedKotlinType
+) : Symbol, FqSymbol by type {
+    private val typeStr: String
+        get() = type.name
+
     constructor(type: ResolvedType) : this(
         (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
-            ?: error("Cannot create KotlinType with $type")
+        ?: error("Cannot create KotlinType with $type")
     )
-
-    constructor(type: ResolvedKotlinType) : this(type.name, type.fqNames)
 
     override fun build(builder: CodeStringBuilder) {
         builder.append(typeStr)
@@ -368,7 +369,7 @@ inline fun KotlinCodeBuilder.pkg(target: String) {
 }
 
 inline fun KotlinCodeBuilder.inline(build: KotlinCodeBuilder.() -> Unit) {
-    val builder = KotlinCodeBuilder().also(build)
+    val builder = KotlinCodeBuilder(scope).also(build)
     (builder as? CodeBuilderBase<KotlinFactory>)?.symbols?.forEach {
         +inline(it)
     }
@@ -392,7 +393,7 @@ class Inline(private val target: Symbol) : Symbol, SymbolContainer {
 }
 
 inline fun KotlinCodeBuilder.operator(build: KotlinCodeBuilder.() -> Unit) {
-    val builder = KotlinCodeBuilder().also(build)
+    val builder = KotlinCodeBuilder(scope).also(build)
     (builder as? CodeBuilderBase<KotlinFactory>)?.symbols?.forEach {
         +operator(it)
     }
@@ -412,7 +413,7 @@ class Operator(private val target: Symbol) : Symbol, SymbolContainer {
 }
 
 inline fun KotlinCodeBuilder.infix(build: KotlinCodeBuilder.() -> Unit) {
-    val builder = KotlinCodeBuilder().also(build)
+    val builder = KotlinCodeBuilder(scope).also(build)
     (builder as? CodeBuilderBase<KotlinFactory>)?.symbols?.forEach {
         +infix(it)
     }
@@ -435,6 +436,15 @@ class Import(private val target: String) : Symbol {
     override fun build(builder: CodeStringBuilder) {
         builder.append("import ")
         builder.append(target)
+    }
+}
+
+class ImportAs(private val target: String, private val name: String) : Symbol {
+    override fun build(builder: CodeStringBuilder) {
+        builder.append("import ")
+        builder.append(target)
+        builder.append(" as ")
+        builder.append(name)
     }
 }
 
@@ -479,12 +489,9 @@ fun KotlinCodeBuilder.fqType(kotlinType: ResolvedKotlinType): Symbol = KotlinTyp
 inline fun KotlinCodeBuilder.extensionFunction(
     functionBuilder: KotlinFunctionSymbol.() -> Unit
 ): Symbol {
-    functionScope {
-        val builder = KotlinFunctionSymbol(this)
-        builder.functionBuilder()
-        builder.init()
-        return@extensionFunction +builder.symbol
-    }
+    val builder = functionScope { KotlinFunctionSymbol(this).also(functionBuilder) }
+    builder.init()
+    return +builder.symbol
 }
 
 class Elvis(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
@@ -497,6 +504,18 @@ class Elvis(private val first: Symbol, private val second: Symbol) : Symbol, Sym
         builder.append(" ?: ")
         second.build(builder)
         builder.append(')')
+    }
+}
+
+inline fun asserting(s: Symbol): Symbol = Asserting(s)
+
+class Asserting(private val s: Symbol) : Symbol, SymbolContainer {
+    override val symbols: List<Symbol>
+        get() = listOf(s)
+
+    override fun build(builder: CodeStringBuilder) {
+        s.build(builder)
+        builder.append("!!")
     }
 }
 

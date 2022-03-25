@@ -57,7 +57,8 @@ data class WrappedField(
         with(resolverContext.currentNamer) {
             val (mappedType, resolvedType) = resolverContext.mapAndResolve(type) ?: return null
             val type =
-                if (mappedType.isReference) resolverContext.map(mappedType.unreferenced) ?: return null
+                if (mappedType.isReference) resolverContext.map(mappedType.unreferenced)
+                    ?: return null
                 else mappedType
             val needsDereference =
                 !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE
@@ -85,7 +86,11 @@ data class WrappedField(
                             resolvedType,
                             argType,
                             "",
-                            determineArgumentCastMode(type, mappedType.isReference, resolverContext),
+                            determineArgumentCastMode(
+                                type,
+                                mappedType.isReference,
+                                resolverContext
+                            ),
                             needsDereference
                         )
                     )

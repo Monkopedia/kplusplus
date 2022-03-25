@@ -37,8 +37,6 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointer
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.CAST
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.POINTED_STRING_CAST
@@ -46,7 +44,7 @@ import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.STRING_CA
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolved_model.type.nullable
 import kotlinx.cinterop.CValue
 
 interface Resolver {
@@ -351,7 +349,8 @@ inline fun MapResult.wrapOnReplace(
 private fun toResolvedCppType(type: WrappedType) =
     ResolvedCppType(
         type.toString(),
-        toResolvedKotlinType(type.kotlinType),
+        if (type.isPointer) nullable(toResolvedKotlinType(type.kotlinType))
+        else toResolvedKotlinType(type.kotlinType),
         toResolvedCType(type.cType),
         when {
             type.isString -> STRING_CAST
@@ -380,7 +379,8 @@ private fun toResolvedKotlinType(kotlinType: WrappedKotlinType): ResolvedKotlinT
         )
     }
     return ResolvedKotlinType(
-        kotlinType.fullyQualified.first(),
-        kotlinType.isWrapper
+        kotlinType.fullyQualified.first().trimEnd('?'),
+        kotlinType.isWrapper,
+        kotlinType.name.endsWith('?')
     )
 }

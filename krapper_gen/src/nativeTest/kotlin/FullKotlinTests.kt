@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,7 +16,9 @@
 package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
+import com.monkopedia.krapper.generator.builders.CodeStringBuilder
 import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
+import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -35,7 +37,8 @@ import kotlin.test.fail
 class FullKotlinTests {
 
     private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__String(): vector__String {\n" +
-        "    val obj: COpaquePointer = (std_vector_std_string_new() ?: " +
+        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+        "    val obj: COpaquePointer = (std_vector_std_string_new(memory) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        std_vector_std_string_dispose(obj)\n" +
@@ -52,7 +55,8 @@ class FullKotlinTests {
 
     private val TESTLIB_OTHERCLASS_NEW =
         "fun MemScope.OtherClass(): OtherClass {\n" +
-            "    val obj: COpaquePointer = (TestLib_OtherClass_new() ?: " +
+            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val obj: COpaquePointer = (TestLib_OtherClass_new(memory) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_OtherClass_dispose(obj)\n" +
@@ -364,7 +368,8 @@ class FullKotlinTests {
             "    }"
 
     private val TESTLIB_TESTCLASS_NEW = "fun MemScope.TestClass(): TestClass {\n" +
-        "    val obj: COpaquePointer = (TestLib_TestClass_new() ?: error(\"Creation failed\"))\n" +
+        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+        "    val obj: COpaquePointer = (TestLib_TestClass_new(memory) ?: error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
         "    }\n" +
@@ -373,7 +378,8 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS__NEW =
         "fun MemScope.TestClass(other: TestClass): TestClass {\n" +
-            "    val obj: COpaquePointer = (_TestLib_TestClass_new(other.ptr) ?: " +
+            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val obj: COpaquePointer = (_TestLib_TestClass_new(memory, other.ptr) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -382,7 +388,8 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS___NEW = "fun MemScope.TestClass(a: Int): TestClass {\n" +
-        "    val obj: COpaquePointer = (__TestLib_TestClass_new(a) ?: " +
+        "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+        "    val obj: COpaquePointer = (__TestLib_TestClass_new(memory, a) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
@@ -392,7 +399,8 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS____NEW =
         "fun MemScope.TestClass(a: Int, b: Double): TestClass {\n" +
-            "    val obj: COpaquePointer = (___TestLib_TestClass_new(a, b) ?: " +
+            "    val memory: COpaquePointer = alloc(size, size).reinterpret()\n" +
+            "    val obj: COpaquePointer = (___TestLib_TestClass_new(memory, a, b) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -438,119 +446,119 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_MINUS =
         "inline operator fun minus(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_minus(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_MINUS_UNARY =
         "inline operator fun unaryMinus(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_unary_minus(ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_PLUS =
         "inline operator fun plus(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_plus(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_PLUS_UNARY =
         "inline operator fun unaryPlus(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_unary_plus(ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_TIMES =
         "inline operator fun times(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_times(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_DIVIDE =
         "inline operator fun div(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_divide(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_MODULO =
         "inline operator fun rem(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_mod(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_PRE_INC =
         "inline operator fun inc(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_increment(ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_POST_INC =
         "inline fun postIncrement(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_post_increment(ptr, 0, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_PRE_DEC =
         "inline operator fun dec(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_decrement(ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_POST_DEC =
         "inline fun postDecrement(): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_post_decrement(ptr, 0, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_EQ_CMP =
         "inline infix fun eq(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_eq(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_NEQ =
         "inline infix fun neq(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_neq(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_LT =
         "inline infix fun lt(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_lt(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_GT =
         "inline infix fun gt(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_gt(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_LTEQ =
         "inline infix fun lteq(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_lteq(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_GTEQ =
         "inline infix fun gteq(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_gteq(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
@@ -562,14 +570,14 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_BAND =
         "inline infix fun binAnd(c: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_binary_and(ptr, c.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_BOR =
         "inline infix fun binOr(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_binary_or(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
@@ -581,42 +589,42 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_AND =
         "inline infix fun and(c: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_and(ptr, c.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_OR =
         "inline infix fun or(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_or(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_XOR =
         "inline infix fun xor(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_xor(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_SHL =
         "inline infix fun shl(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_shl(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_SHR =
         "inline infix fun shr(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_shr(ptr, c2.ptr, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_IND =
         "inline operator fun get(c2: String?): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass()\n" +
+            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
             "    TestLib_TestClass_op_ind(ptr, c2, retValue.ptr)\n" +
             "    return retValue\n" +
             "}"
@@ -1187,6 +1195,7 @@ class FullKotlinTests {
         target = TestData.TestClass.operatorInd,
         expected = TESTLIB_TESTCLASS_IND,
     )
+
     private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
         assertCode(expected, buildCode(cls, target).toString())
     }
@@ -1234,7 +1243,17 @@ class FullKotlinTests {
         val (rcls, element) = resolveType(cls, target)
         val target = element as ResolvedMethod
         with(writer) {
-            code.onGenerate(rcls, target)
+            code.onGenerate(
+                rcls, target,
+                object : LocalVar {
+                    override val name: String
+                        get() = "size"
+
+                    override fun build(builder: CodeStringBuilder) {
+                        builder.append("size")
+                    }
+                }
+            )
         }
         return code
     }
@@ -1264,7 +1283,8 @@ class FullKotlinTests {
         val writer = kotlinWriter(code)
         val ctx = resolveContext()
         val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
-        val target = target.resolve(ctx + cls) ?: throw UnsupportedOperationException("Couldn't resolve $target")
+        val target = target.resolve(ctx + cls)
+            ?: throw UnsupportedOperationException("Couldn't resolve $target")
         with(writer) {
             code.onGenerate(rcls, target)
         }
@@ -1282,7 +1302,18 @@ class FullKotlinTests {
         val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
         val target = target.resolve(ctx + cls) ?: error("Resolve failed for $target")
         with(writer) {
-            code.onGenerate(rcls, target)
+            code.onGenerate(
+                rcls,
+                target,
+                object : LocalVar {
+                    override val name: String
+                        get() = "size"
+
+                    override fun build(builder: CodeStringBuilder) {
+                        builder.append("size")
+                    }
+                }
+            )
         }
         return code
     }
@@ -1296,5 +1327,4 @@ class FullKotlinTests {
 
     private fun kotlinWriter(code: KotlinCodeBuilder) =
         KotlinWriter(NameHandler(), "")
-
 }

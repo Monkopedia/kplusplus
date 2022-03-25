@@ -28,6 +28,7 @@ import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
@@ -134,7 +135,7 @@ class WrappedClass(
         }
     }
 
-    fun modifyMethodsIfNeeded(baseClasses: List<WrappedClass>) {
+    private fun modifyMethodsIfNeeded(baseClasses: List<WrappedClass>) {
         if (!isAbstract && !hasConstructor && !baseClasses.any { it.hasConstructor }) {
             addChild(
                 WrappedConstructor(
@@ -165,6 +166,13 @@ class WrappedClass(
                 removeChild(it)
             }
         }
+        addChild(
+            WrappedMethod(
+                "sizeOf",
+                WrappedTypeReference("int"),
+                MethodType.SIZE_OF
+            )
+        )
     }
 
     override fun toString(): String {

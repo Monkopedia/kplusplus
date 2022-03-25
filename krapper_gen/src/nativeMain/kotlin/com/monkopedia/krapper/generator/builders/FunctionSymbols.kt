@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -62,7 +62,10 @@ open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
         get() = listOf(signature)
 
     open fun init() {
-        signature = functionBuilder.funSig(name ?: error("Name was not specified"), retType, args)
+        signature = functionBuilder.funSig(
+            functionBuilder.scope.allocateName(name ?: error("Name was not specified")),
+            retType, args
+        )
     }
 
     override fun build(builder: CodeStringBuilder) {
@@ -78,12 +81,11 @@ open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
 inline fun <T : LangFactory> CodeBuilder<T>.function(
     functionBuilder: FunctionBuilder<T>.() -> Unit
 ): Symbol {
-    functionScope {
-        val builder = FunctionSymbol(this)
-        builder.functionBuilder()
-        builder.init()
-        return@function +builder.symbol
+    val builder = functionScope {
+        FunctionSymbol(this).also(functionBuilder)
     }
+    builder.init()
+    return +builder.symbol
 }
 
 class FunctionDeclarationSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
@@ -99,9 +101,8 @@ class FunctionDeclarationSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>
 inline fun <T : LangFactory> CodeBuilder<T>.functionDeclaration(
     functionBuilder: FunctionBuilder<T>.() -> Unit
 ): Symbol {
-    functionScope {
-        val builder = FunctionDeclarationSymbol(this)
-        builder.functionBuilder()
-        return@functionDeclaration +builder.init()
+    val builder = functionScope {
+        FunctionDeclarationSymbol(this).also(functionBuilder)
     }
+    return +builder.init()
 }

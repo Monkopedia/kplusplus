@@ -19,20 +19,28 @@ import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
-class Scope<T : LangFactory>(private val parent: Scope<T>? = null) {
-    private val names = mutableSetOf<String>()
+class Scope<T : LangFactory>(internal val parent: Scope<T>? = null) {
+    private val names = mutableSetOf(
+        "object"
+    )
 
     private fun isUsed(name: String): Boolean {
         return names.contains(name) || parent?.isUsed(name) == true
     }
 
     fun allocateName(desiredName: String): String {
-        if (desiredName.isEmpty()) return allocateName("_")
+        if (desiredName.isEmpty()) return allocateName("v")
         if (isUsed(desiredName)) {
             return allocateName("_$desiredName")
         }
         names.add(desiredName)
         return desiredName
+    }
+
+    override fun toString(): String {
+        return "Scope{${hashCode()}} (${
+        names.reversed().take(5).joinToString(", ")
+        }${if (names.size > 5) "..." else ""})"
     }
 }
 
@@ -55,13 +63,13 @@ fun <T : LangFactory> CodeBuilder<T>.define(
 }
 
 @OptIn(ExperimentalContracts::class)
-inline fun <T : LangFactory> CodeBuilder<T>.functionScope(inScope: CodeBuilder<T>.() -> Unit) {
+inline fun <T : LangFactory, R> CodeBuilder<T>.functionScope(inScope: CodeBuilder<T>.() -> R): R {
     contract {
         callsInPlace(inScope, kotlin.contracts.InvocationKind.EXACTLY_ONCE)
     }
     try {
         base.pushScope()
-        inScope()
+        return inScope()
     } finally {
         base.popScope()
     }
