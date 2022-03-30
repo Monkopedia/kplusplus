@@ -35,6 +35,7 @@ import com.monkopedia.krapper.generator.builders.addressOf
 import com.monkopedia.krapper.generator.builders.appendLine
 import com.monkopedia.krapper.generator.builders.arrow
 import com.monkopedia.krapper.generator.builders.assign
+import com.monkopedia.krapper.generator.builders.coloncolon
 import com.monkopedia.krapper.generator.builders.comment
 import com.monkopedia.krapper.generator.builders.define
 import com.monkopedia.krapper.generator.builders.dereference
@@ -187,6 +188,13 @@ class CppWriter(
                 val call = (thizCast.reference).op(
                     method.name.substring("operator".length),
                     argCasts.map { it.reference }.single()
+                )
+                generateReturn(call, method.returnStyle, method.returnType, returnCast)
+            }
+            MethodType.STATIC -> {
+                val call = Raw(cls.type.toString()) coloncolon Call(
+                    method.name,
+                    *(argCasts.map { it.reference }.toTypedArray())
                 )
                 generateReturn(call, method.returnStyle, method.returnType, returnCast)
             }

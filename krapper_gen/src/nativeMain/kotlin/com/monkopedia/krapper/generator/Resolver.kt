@@ -69,14 +69,15 @@ class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     }
 
     private fun canResolve(str: String, context: ResolveContext): Boolean {
-        if ((resolvedClasses[str]?.children?.isNotEmpty() == true) ||
-            otherResolved.contains(str)
-        ) return true
-        if (classes[str]?.children?.isNotEmpty() == true) {
+        resolvedClasses[str]?.let {
+            return it.isNotEmpty()
+        }
+        if (otherResolved.contains(str)) return true
+        if (classes[str]?.isNotEmpty() == true) {
             try {
                 otherResolved.add(str)
                 resolvedClasses[str] = classes[str]?.resolve(context) ?: return false
-                return resolvedClasses[str]?.children?.isNotEmpty() == true
+                return resolvedClasses[str]?.isNotEmpty() == true
             } finally {
                 otherResolved.remove(str)
             }
@@ -255,6 +256,9 @@ private fun typeMapper(
                         try {
                             val (resolved, wrapper) = context.resolver.resolve(it, context)
                                 ?: error("Couldn't include $it, resolve failed")
+                            if (!resolved.isNotEmpty()) {
+                                return@operateOn RemoveElement
+                            }
                             context.tracker.resolvedClasses[resolved.type.toString()] = resolved
                             context.tracker.classes[wrapper.type.toString()] = wrapper
                         } finally {

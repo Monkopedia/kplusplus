@@ -58,6 +58,7 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         get() = children.filterIsInstance<WrappedField>()
     val methods: List<WrappedMethod>
         get() = children.filterIsInstance<WrappedMethod>()
+    var templateArgCounter = 0
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         value.spelling.toKString() ?: error("Missing name")
@@ -73,6 +74,17 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
             qualified,
             templateArgs.mapNotNull { it.resolveTemplateParam(resolverContext) }
         )
+    }
+
+    override fun addChild(child: WrappedElement) {
+        if (child is WrappedTemplateParam) {
+            if (templateArgCounter < templateArgs.size) {
+                templateArgs[templateArgCounter++].merge(child)
+                return
+            }
+            templateArgCounter++
+        }
+        super.addChild(child)
     }
 
     override fun toString(): String {
@@ -114,6 +126,7 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
             val template = children.filterIsInstance<WrappedTemplateRef>()
             return WrappedTemplateType(type as WrappedType, template)
         }
+    val otherParams = mutableListOf<WrappedTemplateParam>()
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         value.spelling.toKString() ?: error("Template param without name $value"),
@@ -139,6 +152,10 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
             usr,
             defaultType?.let { resolverContext.resolve(it) ?: return null }
         )
+    }
+
+    fun merge(child: WrappedTemplateParam) {
+        otherParams.add(child)
     }
 
     companion object {

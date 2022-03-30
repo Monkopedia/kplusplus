@@ -128,6 +128,7 @@ class KotlinCodeTests {
                             false,
                             false,
                         ),
+                        WrappedNamespace("A")
                     )
                 )
             }

@@ -112,6 +112,16 @@ class Call(private val name: Symbol, private vararg val args: Symbol) : Symbol, 
     }
 }
 
+class ColonColon(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+    override val symbols: List<Symbol>
+        get() = listOf(first, second)
+    override fun build(builder: CodeStringBuilder) {
+        first.build(builder)
+        builder.append("::")
+        second.build(builder)
+    }
+}
+
 class Dot(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
@@ -162,6 +172,7 @@ class Op(private val operand: String, private val first: Symbol, private val sec
 inline fun Symbol.op(operand: String, other: Symbol): Symbol = Op(operand, this, other)
 
 inline infix fun Symbol.dot(other: Symbol): Symbol = Dot(this, other)
+inline infix fun Symbol.coloncolon(other: Symbol): Symbol = ColonColon(this, other)
 inline infix fun Symbol.arrow(other: Symbol): Symbol = Arrow(this, other)
 inline infix fun Symbol.assign(other: Symbol): Symbol = Assign(this, other)
 inline fun Symbol.assign(other: Symbol, plusEqual: Boolean): Symbol = Assign(this, other, plusEqual)

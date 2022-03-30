@@ -183,7 +183,11 @@ class KotlinWriter(
                     }
                 )
             }
-            for (method in methods.filter { it.methodType == MethodType.CONSTRUCTOR }) {
+            for (
+                method in methods.filter {
+                    it.methodType == MethodType.CONSTRUCTOR || it.methodType == MethodType.STATIC
+                }
+            ) {
                 try {
                     onGenerate(cls, method, size)
                 } catch (t: Throwable) {
@@ -317,6 +321,16 @@ class KotlinWriter(
             MethodType.DESTRUCTOR -> {
                 // Do nothing
             }
+            MethodType.STATIC -> {
+                inline {
+                    generateBasicMethod(
+                        fixNaming(method),
+                        uniqueCName,
+                        startArgs = emptyList(),
+                        skipFirstArg = false
+                    )
+                }
+            }
             MethodType.METHOD,
             MethodType.STATIC_OP -> {
                 val operator = method.operator
@@ -361,14 +375,18 @@ class KotlinWriter(
         method: ResolvedMethod,
         uniqueCName: Symbol,
         methodName: String = method.name,
-        startArgs: List<Symbol> = listOf(ptr)
+        startArgs: List<Symbol> = listOf(ptr),
+        skipFirstArg: Boolean = true
     ) {
         function {
             name = methodName
             val returnType = method.returnType
             val returnStyle = method.returnStyle
             retType = type(returnType)
-            var args = if (method.args.isNotEmpty()) method.args.subList(1, method.args.size).map {
+            var args = if (method.args.isNotEmpty()) method.args.subList(
+                if (skipFirstArg) 1 else 0,
+                method.args.size
+            ).map {
                 define(it.name, it.type)
             } else emptyList()
             body {

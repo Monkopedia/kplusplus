@@ -84,6 +84,7 @@ class NameHandler {
                         MethodType.SIZE_OF -> {
                             cName + "_size_of"
                         }
+                        MethodType.STATIC,
                         MethodType.STATIC_OP,
                         MethodType.METHOD -> {
                             Operator.from(this)?.let {

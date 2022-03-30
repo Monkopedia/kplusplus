@@ -26,7 +26,7 @@ open class ResolvedElement(
         mutableChildren.clear()
     }
 
-    fun addAllChildren(list: List<ResolvedElement>) {
+    open fun addAllChildren(list: List<ResolvedElement>) {
         list.forEach {
             require(!children.contains(it)) {
                 "$this already contains $it"
@@ -38,7 +38,7 @@ open class ResolvedElement(
         }
     }
 
-    fun addChild(child: ResolvedElement) {
+    open fun addChild(child: ResolvedElement) {
         require(!children.contains(child)) {
             "$this already contain a $child"
         }

@@ -54,6 +54,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
             retType = null
             name = method.uniqueCName
         }
+        MethodType.STATIC,
         MethodType.SIZE_OF,
         MethodType.STATIC_OP,
         MethodType.METHOD -> {

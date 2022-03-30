@@ -24,6 +24,7 @@ enum class MethodType {
     DESTRUCTOR,
     METHOD,
     STATIC_OP,
+    STATIC,
     SIZE_OF
 }
 

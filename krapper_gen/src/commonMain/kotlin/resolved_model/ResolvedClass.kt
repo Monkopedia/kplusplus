@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
+import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
@@ -33,5 +34,26 @@ data class ResolvedClass(
 
     override fun toString(): String {
         return "cls($name)"
+    }
+
+    private var isNotEmptyCache: Boolean? = null
+
+    override fun addAllChildren(list: List<ResolvedElement>) {
+        isNotEmptyCache = null
+        super.addAllChildren(list)
+    }
+
+    override fun addChild(child: ResolvedElement) {
+        isNotEmptyCache = null
+        super.addChild(child)
+    }
+
+    fun isNotEmpty(): Boolean {
+        return isNotEmptyCache ?: children.any {
+            ((it as? ResolvedMethod)?.methodType != SIZE_OF) &&
+                ((it as? ResolvedConstructor)?.children?.isNotEmpty() != false)
+        }.also {
+            isNotEmptyCache = it
+        }
     }
 }

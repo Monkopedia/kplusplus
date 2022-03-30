@@ -16,19 +16,16 @@
 package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
-import clang.CXCursorKind
 import clang.CXFile
-import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.isAbstract
-import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
@@ -177,6 +174,28 @@ class WrappedClass(
 
     override fun toString(): String {
         return "cls($name)"
+    }
+
+    private var isNotEmptyCache: Boolean? = null
+
+    override fun addChild(child: WrappedElement) {
+        isNotEmptyCache = null
+        super.addChild(child)
+    }
+
+    override fun addAllChildren(list: List<WrappedElement>) {
+        isNotEmptyCache = null
+        super.addAllChildren(list)
+    }
+
+    fun isNotEmpty(): Boolean {
+        return isNotEmptyCache ?: children.any {
+            (it !is WrappedBase) &&
+                ((it as? WrappedMethod)?.methodType != SIZE_OF) &&
+                ((it as? WrappedConstructor)?.children?.isNotEmpty() != false)
+        }.also {
+            isNotEmptyCache = it
+        }
     }
 }
 

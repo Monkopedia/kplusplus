@@ -150,7 +150,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         return classMap.getOrPut(type.toString()) {
             val existingClass = tu.filterRecursive {
                 (it as? WrappedClass)?.type?.toString() == type.toString() &&
-                    it.children.isNotEmpty()
+                    it.isNotEmpty()
             }.singleOrNull() as? WrappedClass
             existingClass?.let { cls ->
                 return@getOrPut cls.resolve(context)?.let { it to cls }
@@ -195,7 +195,6 @@ private class ResolverBuilderImpl : ResolverBuilder {
             val declaration = type.typeDeclaration
             when (declaration.kind) {
                 CXCursorKind.CXCursor_ClassDecl -> {
-                    val fullyQualified = declaration.fullyQualified
                     seenNames[strType] = type
                     if (type.numTemplateArguments <= 0) {
                         classes.add(WrappedClass(declaration, this))
@@ -293,6 +292,10 @@ fun WrappedTemplate.typedAs(
     for (i in 0 until min(templates.size, templateSpec.templateArgs.size)) {
         mapping[templates[i].name] = templateSpec.templateArgs[i]
         mapping[templates[i].usr] = templateSpec.templateArgs[i]
+        for (extra in templates[i].otherParams) {
+            mapping[extra.name] = templateSpec.templateArgs[i]
+            mapping[extra.usr] = templateSpec.templateArgs[i]
+        }
     }
     val mapper: TypeMapping = { type, context ->
         if (type.toString() == fullyQualified) ReplaceWith(templateSpec)
@@ -301,13 +304,12 @@ fun WrappedTemplate.typedAs(
                 val mapping = mapping[type.target]
                 if (mapping != null) {
                     val result = baseContext.typeMapping(mapping, context)
-                    if (result == ElementUnchanged) {
+                    return@operateOn if (result == ElementUnchanged) {
                         ReplaceWith(mapping)
                     } else result
-                } else {
-                    baseContext.typeMapping(type, context)
                 }
-            } else if (type.toString() == fullyQualified) {
+            }
+            if (type.toString() == fullyQualified) {
                 val result = baseContext.typeMapping(templateSpec, context)
                 if (result == ElementUnchanged) {
                     ReplaceWith(templateSpec)

@@ -20,6 +20,7 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.isConst
+import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
@@ -32,6 +33,7 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
+import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
@@ -197,7 +199,7 @@ open class WrappedMethod(
         WrappedType(method.type.result, resolverBuilder).let {
             if (method.isConst) const(it) else it
         },
-        MethodType.METHOD
+        if (method.isStatic) MethodType.STATIC else MethodType.METHOD
     )
 
     open fun copy(
@@ -220,7 +222,7 @@ open class WrappedMethod(
     }
 
     protected open fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
-        if (methodType == SIZE_OF) return emptyList()
+        if (methodType == SIZE_OF || methodType == STATIC) return emptyList()
         return listOf(createThisArg(resolverContext) ?: return null)
     }
 
@@ -265,8 +267,8 @@ open class WrappedMethod(
 
 class WrappedArgument(val name: String, val type: WrappedType, val usr: String = "") :
     WrappedElement() {
-    constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        arg.spelling.toKString() ?: error("Can't find name of $arg"),
+    constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder, index: Int = 0) : this(
+        arg.spelling.toKString()?.takeIf { it.isNotBlank() } ?: "_arg_$index",
         WrappedType(arg.type, resolverBuilder),
         arg.usr.toKString() ?: ""
     )

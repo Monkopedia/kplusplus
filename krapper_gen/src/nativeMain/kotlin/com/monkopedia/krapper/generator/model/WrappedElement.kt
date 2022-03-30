@@ -24,12 +24,13 @@ import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.availability
 import com.monkopedia.krapper.generator.forEachRecursive
+import com.monkopedia.krapper.generator.getArgument
 import com.monkopedia.krapper.generator.isCopyConstructor
 import com.monkopedia.krapper.generator.isDefaultConstructor
-import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.numArguments
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
@@ -52,7 +53,7 @@ abstract class WrappedElement(
         mutableChildren.clear()
     }
 
-    fun addAllChildren(list: List<WrappedElement>) {
+    open fun addAllChildren(list: List<WrappedElement>) {
         list.forEach {
             require(!children.contains(it)) {
                 "$this already contains $it"
@@ -62,7 +63,7 @@ abstract class WrappedElement(
         list.forEach { it.parent = this }
     }
 
-    fun addChild(child: WrappedElement) {
+    open fun addChild(child: WrappedElement) {
         require(!children.contains(child)) {
             "$this already contain a $child"
         }
@@ -88,6 +89,9 @@ abstract class WrappedElement(
                 val parent = map(parent, null, null, resolverBuilder) ?: return@forEachRecursive
                 val child =
                     map(child, parent, parentUsr, resolverBuilder) ?: return@forEachRecursive
+                if (child is WrappedTemplate) {
+                    child.templateArgCounter = 0
+                }
                 if (child == element) return@forEachRecursive
                 if (child.parent == parent) return@forEachRecursive
                 if (parent is WrappedMethod && child is WrappedArgument) {
@@ -110,7 +114,6 @@ abstract class WrappedElement(
                     )
                 }
                 parent.addChild(child)
-                child.parent = parent
             }
             return element
         }
@@ -155,7 +158,8 @@ abstract class WrappedElement(
 //                CXCursorKind.CXCursor_EnumDecl -> TODO()
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
                 CXCursorKind.CXCursor_FieldDecl -> WrappedField(value, resolverBuilder)
-                CXCursorKind.CXCursor_ParmDecl -> WrappedArgument(value, resolverBuilder)
+                CXCursorKind.CXCursor_ParmDecl -> return null
+                // WrappedArgument(value, resolverBuilder)
                 CXCursorKind.CXCursor_TypedefDecl ->
                     try {
                         WrappedTypedef(value, resolverBuilder)
@@ -166,7 +170,6 @@ abstract class WrappedElement(
                     }
                 CXCursorKind.CXCursor_FunctionDecl,
                 CXCursorKind.CXCursor_CXXMethod -> {
-                    if (value.isStatic) return null
                     if (value.referenced.spelling.toKString() in listOf(
                             "operator new",
                             "operator new[]",
@@ -176,7 +179,17 @@ abstract class WrappedElement(
                     ) {
                         return null
                     }
-                    WrappedMethod(value, resolverBuilder)
+                    WrappedMethod(value, resolverBuilder).also {
+                        for (i in 0 until value.numArguments) {
+                            it.addChild(
+                                WrappedArgument(
+                                    value.getArgument(i.toUInt()),
+                                    resolverBuilder,
+                                    i
+                                )
+                            )
+                        }
+                    }
                 }
                 CXCursorKind.CXCursor_Namespace -> WrappedNamespace(
                     value.spelling.toKString() ?: error("Namespace without name")
@@ -184,10 +197,30 @@ abstract class WrappedElement(
                 CXCursorKind.CXCursor_Constructor -> WrappedConstructor(
                     value.spelling.toKString() ?: "constructor", WrappedType.VOID,
                     value.isCopyConstructor, value.isDefaultConstructor
-                )
+                ).also {
+                    for (i in 0 until value.numArguments) {
+                        it.addChild(
+                            WrappedArgument(
+                                value.getArgument(i.toUInt()),
+                                resolverBuilder,
+                                i
+                            )
+                        )
+                    }
+                }
                 CXCursorKind.CXCursor_Destructor -> WrappedDestructor(
                     value.spelling.toKString() ?: "destructor", WrappedType.VOID
-                )
+                ).also {
+                    for (i in 0 until value.numArguments) {
+                        it.addChild(
+                            WrappedArgument(
+                                value.getArgument(i.toUInt()),
+                                resolverBuilder,
+                                i
+                            )
+                        )
+                    }
+                }
 //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
                 CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
                     value,
