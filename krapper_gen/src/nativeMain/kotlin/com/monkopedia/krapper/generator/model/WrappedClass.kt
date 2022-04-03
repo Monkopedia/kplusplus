@@ -173,7 +173,7 @@ class WrappedClass(
     }
 
     override fun toString(): String {
-        return "cls($name)"
+        return qualified
     }
 
     private var isNotEmptyCache: Boolean? = null
@@ -189,13 +189,15 @@ class WrappedClass(
     }
 
     fun isNotEmpty(): Boolean {
-        return isNotEmptyCache ?: children.any {
-            (it !is WrappedBase) &&
-                ((it as? WrappedMethod)?.methodType != SIZE_OF) &&
-                ((it as? WrappedConstructor)?.children?.isNotEmpty() != false)
-        }.also {
+        return isNotEmptyCache ?: calculateNotEmpty().also {
             isNotEmptyCache = it
         }
+    }
+
+    private fun calculateNotEmpty() = baseClass != null || children.any {
+        (it !is WrappedBase) &&
+            ((it as? WrappedMethod)?.methodType != SIZE_OF) &&
+            ((it as? WrappedConstructor)?.children?.isNotEmpty() != false)
     }
 }
 

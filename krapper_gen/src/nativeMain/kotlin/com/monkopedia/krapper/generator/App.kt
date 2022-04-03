@@ -38,6 +38,7 @@ import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.getcwd
+import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
@@ -145,9 +146,11 @@ class KrapperGen : CliktCommand() {
 //            }
             val resolver = parseHeader(index, header, debug = debug)
             val initialClasses = resolver.findClasses(WrappedElement::defaultFilter)
-            println(
-                "Resolving: [\n    ${initialClasses.joinToString(",\n    ") { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }}\n]"
-            )
+            val resolvingStr = initialClasses
+                .map { (it as? WrappedClass)?.type?.toString() ?: it.toString() }
+                .sorted()
+                .joinToString(",\n    ")
+            println("Resolving: [\n    $resolvingStr\n]")
             val classes = initialClasses.resolveAll(resolver, referencePolicy)
             println("Running mapping")
             classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
@@ -229,9 +232,11 @@ class KrapperGen : CliktCommand() {
 //                val clsStr = Json.encodeToString(resolver.tu)
 //                File(it).writeText(clsStr)
 //            }
-            println(
-                "Generating for [\n    ${classes.joinToString(",\n    ") { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }}\n]"
-            )
+            val resolvedClasses = classes
+                .map { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }
+                .sorted()
+                .joinToString(",\n    ")
+            println("Generating for [\n    $resolvedClasses\n]")
             val outputBase = File(output ?: getcwd())
             outputBase.mkdirs()
             val namer = NameHandler()

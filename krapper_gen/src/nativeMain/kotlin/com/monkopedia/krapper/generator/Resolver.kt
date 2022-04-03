@@ -108,14 +108,14 @@ fun List<WrappedElement>.resolveAll(
 ): List<ResolvedElement> {
     val classes = filterIsInstance<WrappedClass>()
     val resolveContext = ResolveContext.Empty
-        .copy(resolver = resolver, debugFilter = { element, type ->
-            (element as? WrappedClass)?.qualified == "v8::JSON"
+        .copy(resolver = resolver, debugFilter = { element, type, message ->
+            (element as? WrappedClass)?.toString()?.contains("Primitive") ?: false ||
+                (element == null && message.contains("Primitive"))
         })
         .withClasses(classes)
         .withPolicy(policy)
-    println("Seeding with ${resolveContext.tracker.classes.keys}")
     classes.forEach {
-        if (!resolveContext.tracker.canResolve(it.type, resolveContext)) {
+        if (resolveContext.resolve(it.type) == null) {
             println("Warning: can't resolve filtered class ${it.type}")
         }
     }
@@ -134,7 +134,7 @@ data class ResolveContext(
     val namer: NameHandler,
     val currentNamer: Namer,
     val mappingCache: MutableMap<WrappedType, MapResult> = mutableMapOf(),
-    var debugFilter: ((WrappedElement?, WrappedType?) -> Boolean)? = null
+    var debugFilter: ((WrappedElement?, WrappedType?, String) -> Boolean)? = null
 ) {
 
     fun map(type: WrappedType): WrappedType? {
@@ -214,7 +214,7 @@ data class ResolveContext(
         type: WrappedType?,
         message: String
     ): T? {
-        if (debugFilter?.invoke(element, type) == true) {
+        if (debugFilter?.invoke(element, type, message) == true) {
             println("$element failed resolving $type: $message")
         }
         return null

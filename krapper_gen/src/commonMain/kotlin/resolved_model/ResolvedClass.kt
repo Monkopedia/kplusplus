@@ -49,11 +49,15 @@ data class ResolvedClass(
     }
 
     fun isNotEmpty(): Boolean {
-        return isNotEmptyCache ?: children.any {
+        return isNotEmptyCache ?: calculateNotEmpty().also {
+            isNotEmptyCache = it
+        }
+    }
+
+    private fun calculateNotEmpty(): Boolean {
+        return baseClass != null || children.any {
             ((it as? ResolvedMethod)?.methodType != SIZE_OF) &&
                 ((it as? ResolvedConstructor)?.children?.isNotEmpty() != false)
-        }.also {
-            isNotEmptyCache = it
         }
     }
 }
