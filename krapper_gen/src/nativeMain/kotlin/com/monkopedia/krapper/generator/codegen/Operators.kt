@@ -16,14 +16,13 @@
 package com.monkopedia.krapper.generator.codegen
 
 import com.monkopedia.krapper.ResolvedOperator
-import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedMethod
 
 sealed class Operator {
 
     abstract val resolvedOperator: ResolvedOperator
 
-    abstract fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String
+    abstract fun name(namer: Namer, method: WrappedMethod): String
     protected abstract fun matches(method: WrappedMethod): Boolean
 
     companion object {
@@ -75,7 +74,7 @@ data class BasicBinaryOperator private constructor(
     val supportsDirectCall: Boolean = true
 ) : Operator() {
 
-    override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
+    override fun name(namer: Namer, method: WrappedMethod): String =
         with(namer) {
             return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
         }
@@ -128,7 +127,7 @@ data class BasicAssignmentOperator private constructor(
     override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
-    override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
+    override fun name(namer: Namer, method: WrappedMethod): String =
         with(namer) {
             return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
         }
@@ -153,7 +152,7 @@ data class BasicUnaryOperator private constructor(
     override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
-    override fun name(namer: Namer, cls: WrappedClass, method: WrappedMethod): String =
+    override fun name(namer: Namer, method: WrappedMethod): String =
         with(namer) {
             return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
         }

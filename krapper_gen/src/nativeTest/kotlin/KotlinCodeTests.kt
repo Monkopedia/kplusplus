@@ -21,7 +21,6 @@ import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
 import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -37,7 +36,7 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class KotlinCodeTests {
-    val writer = KotlinWriter(NameHandler(), "test.pkg")
+    val writer = KotlinWriter("test.pkg")
     val testDir = File("/tmp/testDir")
 
     @BeforeTest

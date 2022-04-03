@@ -17,8 +17,10 @@ package com.monkopedia.krapper.generator.codegen
 
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedNamespace
 
 interface Namer {
     val cName: String
@@ -45,11 +47,7 @@ class NameHandler {
     }
 
     private val allNames = mutableSetOf<String>()
-    private val namerStorage = mutableMapOf<WrappedClass, NamerImpl>()
-
-    inline fun withNamer(cls: WrappedClass, execNamed: Namer.() -> Unit) {
-        cls.namer().apply(execNamed)
-    }
+    private val namerStorage = mutableMapOf<WrappedElement, NamerImpl>()
 
     private fun uniqueNameFor(name: String): String {
         if (!allNames.add(name)) {
@@ -58,19 +56,27 @@ class NameHandler {
         return name
     }
 
-    fun WrappedClass.namer(): Namer {
-        return namerStorage.getOrPut(this) { NamerImpl(this) }
+    fun namerFor(wrappedClass: WrappedClass): Namer {
+        return namerStorage.getOrPut(wrappedClass) {
+            NamerImpl(
+                cName = wrappedClass.type.toString().cleanupName()
+            )
+        }
     }
 
-    private inner class NamerImpl(private val cls: WrappedClass) : Namer {
+    fun namerFor(wrappedClass: WrappedNamespace): Namer {
+        return namerStorage.getOrPut(wrappedClass) {
+            NamerImpl(
+                cName = wrappedClass.fullyQualified.cleanupName()
+            )
+        }
+    }
+
+    private inner class NamerImpl(
+        override val cName: String
+    ) : Namer {
         private val nameLookup = mutableMapOf<Any, String>()
-        override val cName = cls.type.toString()
-            .replace("::", "_")
-            .replace("<", "_")
-            .replace(",", "__")
-            .replace(">", "")
-            .replace("*", "_P")
-            .replace(" ", "_")
+
         override val WrappedMethod.uniqueCName: String
             get() = name(this) {
                 uniqueNameFor(
@@ -88,9 +94,11 @@ class NameHandler {
                         MethodType.STATIC_OP,
                         MethodType.METHOD -> {
                             Operator.from(this)?.let {
-                                it.name(this@NamerImpl, cls, this)
-                            } ?: cName + "_" + name.splitCamelcase()
-                                .joinToString("_") { it.toLowerCase() }.replace("=", "_eq")
+                                it.name(this@NamerImpl, this)
+                            } ?: (
+                                cName + "_" + name.splitCamelcase()
+                                    .joinToString("_") { it.toLowerCase() }.cleanupName()
+                                )
                         }
                     }
                 )
@@ -111,4 +119,17 @@ class NameHandler {
 
         override fun uniqify(source: Any, name: String): String = name(source) { name }
     }
+}
+
+private fun String.cleanupName(): String {
+    return replace("::", "_")
+        .replace("<", "_")
+        .replace(",", "__")
+        .replace("!", "_EXP")
+        .replace(">", "")
+        .replace("*", "_P")
+        .replace(" ", "_")
+        .replace("==", "_cmp")
+        .replace("=", "_eq")
+        .replace("\"", "_qt")
 }

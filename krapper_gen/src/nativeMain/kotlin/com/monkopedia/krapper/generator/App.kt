@@ -38,11 +38,17 @@ import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.getcwd
-import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
@@ -138,9 +144,9 @@ class KrapperGen : CliktCommand() {
 // //                }
 //            }
             val resolver = parseHeader(index, header, debug = debug)
-            val initialClasses = resolver.findClasses(WrappedClass::defaultFilter)
+            val initialClasses = resolver.findClasses(WrappedElement::defaultFilter)
             println(
-                "Resolving: [\n    ${initialClasses.joinToString(",\n    ") { it.type.toString() }}\n]"
+                "Resolving: [\n    ${initialClasses.joinToString(",\n    ") { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }}\n]"
             )
             val classes = initialClasses.resolveAll(resolver, referencePolicy)
             println("Running mapping")
@@ -150,7 +156,7 @@ class KrapperGen : CliktCommand() {
                 it.returnStyle = COPY_CONSTRUCTOR
                 it.returnType.typeString =
                     it.returnType.typeString.removePrefix("const ").trimEnd('*')
-                //it.args[0].type =
+                // it.args[0].type =
                 println("Setting return type on $it")
             }
             classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
@@ -169,12 +175,62 @@ class KrapperGen : CliktCommand() {
                 it.parent?.removeChild(it)
                 println("Removing $it")
             }
+            classes.recursiveSequence().filterIsInstance<ResolvedClass>().filter {
+                it.type.typeString.matches(Regex("std::unique_ptr<.*>"))
+            }.forEach { parent ->
+                val wrappedType = WrappedType(
+                    parent.type.typeString.replace(
+                        "std::unique_ptr<",
+                        ""
+                    ).removeSuffix(">")
+                )
+                parent.addChild(
+                    ResolvedMethod(
+                        "get",
+                        parent.type.copy(
+                            typeString = wrappedType.toString(),
+                            kotlinType = toResolvedKotlinType(
+                                wrappedType.kotlinType
+                            ),
+                            cType = toResolvedCType(wrappedType.cType)
+                        ),
+                        METHOD,
+                        "_custom_unique_ptr_get_${
+                        parent.type.typeString.replace("<", "_").replace(">", "_")
+                            .replace("::", "_")
+                        }",
+                        null,
+                        listOf(
+                            ResolvedArgument(
+                                "thiz",
+                                parent.type.copy().apply {
+                                    typeString += "*"
+                                    cType = ResolvedCType("void*", false)
+                                },
+                                parent.type.copy().apply {
+                                    typeString += "*"
+                                    cType = ResolvedCType("void*", false)
+                                },
+                                "",
+                                REINT_CAST,
+                                needsDereference = true,
+                                hasDefault = false
+                            )
+                        ),
+                        ReturnStyle.VOIDP,
+                        false,
+                        parent.type.typeString
+                    ).also {
+                        println("Adding $it to $parent")
+                    }
+                )
+            }
 //            debug?.let {
 //                val clsStr = Json.encodeToString(resolver.tu)
 //                File(it).writeText(clsStr)
 //            }
             println(
-                "Generating for [\n    ${classes.joinToString(",\n    ") { it.type.toString() }}\n]"
+                "Generating for [\n    ${classes.joinToString(",\n    ") { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }}\n]"
             )
             val outputBase = File(output ?: getcwd())
             outputBase.mkdirs()
@@ -182,7 +238,6 @@ class KrapperGen : CliktCommand() {
             File(outputBase, "$moduleName.h").writeText(
                 CppCodeBuilder().also {
                     HeaderWriter(
-                        namer,
                         it,
                         policy = errorPolicy.policy
                     ).generate(moduleName, header, classes)
@@ -191,7 +246,7 @@ class KrapperGen : CliktCommand() {
             val cppFile = File(outputBase, "$moduleName.cc")
             cppFile.writeText(
                 CppCodeBuilder().also {
-                    CppWriter(namer, cppFile, it, policy = errorPolicy.policy).generate(
+                    CppWriter(cppFile, it, policy = errorPolicy.policy).generate(
                         moduleName,
                         header,
                         classes
@@ -214,7 +269,6 @@ class KrapperGen : CliktCommand() {
                 library
             )
             KotlinWriter(
-                namer,
                 "$pkg.internal",
                 policy = errorPolicy.policy
             ).generate(
@@ -318,7 +372,7 @@ inline fun <T> CValue<CXCursor>.mapChildren(
     }
 }
 
-private val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
+val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
     get() {
         return mutableListOf<CValue<CXCursor>>().also { list ->
             forEachRecursive { child, _ ->
@@ -327,7 +381,7 @@ private val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
         }
     }
 
-private val CValue<CXCursor>.children: Collection<CValue<CXCursor>>
+val CValue<CXCursor>.children: Collection<CValue<CXCursor>>
     get() {
         return mutableListOf<CValue<CXCursor>>().also { list ->
             forEach(list::add)

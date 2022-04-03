@@ -19,7 +19,6 @@ import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.File
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
@@ -1439,5 +1438,5 @@ class CppCodeTests {
     private fun codeBuilder() = CppCodeBuilder()
 
     private fun cppWriter(code: CppCodeBuilder) =
-        CppWriter(NameHandler(), file, code)
+        CppWriter(file, code)
 }

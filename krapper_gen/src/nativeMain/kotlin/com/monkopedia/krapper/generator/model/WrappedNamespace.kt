@@ -19,6 +19,18 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
 
 class WrappedNamespace(val namespace: String) : WrappedElement() {
+    val fullyQualified: String
+        get() = withParents.mapNotNull { it.named }.joinToString("::")
+    private val WrappedElement.withParents: List<WrappedElement>
+        get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents))
+            ?: listOf(this@withParents)
+    private val WrappedElement.named: String?
+        get() = when (this) {
+            is WrappedClass -> this@named.name
+            is WrappedNamespace -> this@named.namespace
+            else -> null
+        }
+
     override fun clone(): WrappedElement {
         return WrappedNamespace(namespace).also {
             it.addAllChildren(children)

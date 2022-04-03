@@ -16,6 +16,7 @@
 package com.monkopedia.krapper.generator.builders
 
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 
@@ -23,11 +24,18 @@ abstract class CodeGenerator<T : CodeBuilder<*>>(
     val codeBuilder: T,
     codeGenerationPolicy: CodeGenerationPolicy
 ) : CodeGeneratorBase<T>(codeGenerationPolicy) {
-    open fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedClass>) {
+    open fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedElement>) {
         try {
             codeBuilder.onGenerate(moduleName, headers) {
-                for (cls in classes) {
+                for (cls in classes.filterIsInstance<ResolvedClass>()) {
                     generate(cls)
+                }
+                for (method in classes.filterIsInstance<ResolvedMethod>()) {
+                    try {
+                        onGenerate(method)
+                    } catch (t: Throwable) {
+                        codeGenerationPolicy.onGenerateMethodFailed(null, method, t)
+                    }
                 }
             }
         } catch (t: Throwable) {
@@ -49,6 +57,7 @@ abstract class CodeGeneratorBase<T : CodeBuilder<*>>(
     abstract fun T.onGenerate(cls: ResolvedClass, handleChildren: T.() -> Unit)
 
     abstract fun T.onGenerate(cls: ResolvedClass, method: ResolvedMethod)
+    abstract fun T.onGenerate(method: ResolvedMethod)
     abstract fun T.onGenerate(cls: ResolvedClass, field: ResolvedField)
 
     fun T.generate(cls: ResolvedClass) {

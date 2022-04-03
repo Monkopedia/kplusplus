@@ -16,6 +16,7 @@
 package com.monkopedia.krapper.generator.codegen
 
 import com.monkopedia.krapper.OperatorType.ASSIGN
+import com.monkopedia.krapper.OperatorType.REFERENCE
 import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
@@ -53,12 +54,14 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CA
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN_REFERENCE
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
@@ -67,7 +70,6 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFEREN
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
 class CppWriter(
-    private val nameHandler: NameHandler,
     private val cppFile: File,
     codeBuilder: CppCodeBuilder,
     policy: CodeGenerationPolicy = ThrowPolicy
@@ -75,8 +77,8 @@ class CppWriter(
 
     private var lookup: ClassLookup = ClassLookup(emptyList())
 
-    override fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedClass>) {
-        lookup = ClassLookup(classes)
+    override fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedElement>) {
+        lookup = ClassLookup(classes.filterIsInstance<ResolvedClass>())
         super.generate(moduleName, headers, classes)
     }
 
@@ -120,9 +122,8 @@ class CppWriter(
 
     override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
         function {
-            val type = cls.type
             generateMethodSignature(method)
-            val args = addArgs(lookup, type, method)
+            val args = addArgs(method)
             body {
                 generateMethodBody(cls, method, args)
             }
@@ -132,7 +133,6 @@ class CppWriter(
 
     override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
         function {
-            val type = cls.type
             val args = generateFieldGet(field)
             body {
                 generateFieldGetBody(cls, field, args)
@@ -140,13 +140,30 @@ class CppWriter(
         }
         appendLine()
         function {
-            val type = cls.type
             val args = generateFieldSet(field)
             body {
                 generateFieldSetBody(cls, field, args)
             }
         }
         appendLine()
+    }
+
+    override fun CppCodeBuilder.onGenerate(method: ResolvedMethod) {
+        function {
+            generateMethodSignature(method)
+            val args = addArgs(method)
+            body {
+                val argCasts = args.map { a ->
+                    generateArgumentCast(a)
+                }.toMutableList()
+                val returnCast = if (method.returnStyle == ARG_CAST) argCasts.removeLast() else null
+                val call = Raw(method.qualified) coloncolon Call(
+                    method.name,
+                    *(argCasts.map { it.reference }.toTypedArray())
+                )
+                generateReturn(call, method.returnStyle, method.returnType, returnCast)
+            }
+        }
     }
 
     private fun CppCodeBuilder.generateMethodBody(
@@ -247,6 +264,7 @@ class CppWriter(
             STRING -> createStringReturn(call)
             STRING_POINTER -> createPointedStringReturn(call)
             COPY_CONSTRUCTOR -> +Return(New(Call(returnType.toConstructor(), call)))
+            RETURN_REFERENCE -> +Return(call.addressOf)
             RETURN -> +Return(call)
         }
     }

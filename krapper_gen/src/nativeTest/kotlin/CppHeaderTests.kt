@@ -17,7 +17,6 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
@@ -984,7 +983,7 @@ class CppHeaderTests {
     private fun codeBuilder() = CppCodeBuilder()
 
     private fun headerWriter(code: CppCodeBuilder) =
-        HeaderWriter(NameHandler(), code)
+        HeaderWriter(code)
 }
 
 fun assertCode(expected: String, actual: String) {

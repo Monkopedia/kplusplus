@@ -16,11 +16,15 @@
 package com.monkopedia.krapper.generator.model
 
 import clang.CXCursor
+import clang.CXCursorKind
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.children
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.isConst
 import com.monkopedia.krapper.generator.isStatic
+import com.monkopedia.krapper.generator.kind
+import com.monkopedia.krapper.generator.lexicalParent
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
@@ -43,11 +47,13 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN_REFERENCE
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.result
+import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -56,20 +62,26 @@ import kotlinx.cinterop.CValue
 
 val WrappedElement.parentClass: WrappedClass?
     get() = (parent as? WrappedClass) ?: parent?.parentClass
+val WrappedElement.baseParent: WrappedElement
+    get() = parent?.baseParent ?: parent ?: this
 
 fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgument? {
-    val type = resolverContext.resolve(
-        pointerTo(
-            parentClass?.type ?: return null
+    val pointerParent = pointerTo(
+        parentClass?.type ?: return resolverContext.notifyFailed(
+            this,
+            parentClass?.type,
+            "Can't find parent type"
         )
     )
-        ?: return null
+    val type = resolverContext.resolve(pointerParent)
+        ?: return resolverContext.notifyFailed(this, pointerParent, "Parent type not resolving")
     return ResolvedArgument(
         "thiz",
         type,
         type,
         castMode = REINT_CAST,
         needsDereference = true,
+        hasDefault = false,
     )
 }
 
@@ -115,25 +127,35 @@ class WrappedConstructor(
                 type,
                 "",
                 NATIVE,
+                false,
                 false
             )
         )
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedConstructor? =
+    override fun resolve(
+        resolverContext: ResolveContext
+    ): ResolvedConstructor? =
         with(resolverContext.currentNamer) {
+            val pointedType = pointerTo(
+                parentClass?.type ?: return resolverContext.notifyFailed(
+                    this@WrappedConstructor,
+                    null,
+                    "Constructor missing parent ${parentClass?.type}"
+                )
+            )
             return ResolvedConstructor(
                 name,
-                resolverContext.resolve(
-                    pointerTo(
-                        parentClass?.type ?: return null
-                    )
-                ) ?: return null,
+                resolverContext.resolve(pointedType) ?: return resolverContext.notifyFailed(
+                    this@WrappedConstructor,
+                    pointedType,
+                    "Parent class resolve"
+                ),
                 isCopyConstructor,
                 isDefaultConstructor,
                 uniqueCName,
                 thizArg(resolverContext) +
-                    args.map { it.resolveArgument(resolverContext) ?: return null }
+                    (resolveArguments(resolverContext) ?: return null),
             ).also {
                 it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
             }
@@ -167,7 +189,11 @@ class WrappedDestructor(
         with(resolverContext.currentNamer) {
             return ResolvedDestructor(
                 name,
-                resolverContext.resolve(returnType) ?: return null,
+                resolverContext.resolve(returnType) ?: return resolverContext.notifyFailed(
+                    this@WrappedDestructor,
+                    returnType,
+                    "Destructor return type"
+                ),
                 uniqueCName,
                 listOf(createThisArg(resolverContext) ?: return null)
             )
@@ -181,7 +207,8 @@ fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContex
             if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
         returnType.isString -> STRING
         returnType.isPointer && returnType.pointed.isString -> STRING_POINTER
-        returnType.isNative || returnType == LONG_DOUBLE -> RETURN
+        returnType.isNative || returnType == LONG_DOUBLE ->
+            if (returnType.isReference) RETURN_REFERENCE else RETURN
         returnType.isReference -> VOIDP_REFERENCE
         else -> VOIDP
     }
@@ -199,7 +226,10 @@ open class WrappedMethod(
         WrappedType(method.type.result, resolverBuilder).let {
             if (method.isConst) const(it) else it
         },
-        if (method.isStatic) MethodType.STATIC else MethodType.METHOD
+        if (method.isStatic ||
+            (method.semanticParent.kind !in clsParents && method.lexicalParent.kind !in clsParents)
+        ) MethodType.STATIC
+        else MethodType.METHOD
     )
 
     open fun copy(
@@ -228,11 +258,21 @@ open class WrappedMethod(
 
     override fun resolve(resolverContext: ResolveContext): ResolvedMethod? =
         with(resolverContext.currentNamer) {
-            val (rawMapping, rawResolved) = resolverContext.mapAndResolve(returnType) ?: return null
+            val (rawMapping, rawResolved) = resolverContext.mapAndResolve(returnType)
+                ?: return resolverContext.notifyFailed(
+                    this@WrappedMethod,
+                    returnType,
+                    "Couldn't resolve return"
+                )
             val type =
                 if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping)
                 else rawMapping
-            val resolvedReturnType = resolverContext.resolve(type) ?: return null
+            val resolvedReturnType = resolverContext.resolve(type)
+                ?: return resolverContext.notifyFailed(
+                    this@WrappedMethod,
+                    type,
+                    "Couldn't resolve pointed return"
+                )
             resolvedReturnType.kotlinType = rawResolved.kotlinType
             val returnStyle = determineReturnStyle(rawMapping, resolverContext)
             val argCastNeedsPointer = if (returnStyle == ARG_CAST) {
@@ -243,7 +283,12 @@ open class WrappedMethod(
             } else false
             if (argCastNeedsPointer) {
                 resolvedReturnType.cType =
-                    resolverContext.resolve(pointerTo(rawMapping))?.cType ?: return null
+                    resolverContext.resolve(pointerTo(rawMapping))?.cType
+                        ?: return resolverContext.notifyFailed(
+                            this@WrappedMethod,
+                            pointerTo(rawMapping),
+                            "Couldn't resolve argCast"
+                        )
             }
             return ResolvedMethod(
                 name,
@@ -252,29 +297,63 @@ open class WrappedMethod(
                 uniqueCName,
                 Operator.from(this@WrappedMethod)?.resolvedOperator,
                 (thizArg(resolverContext) ?: return null) +
-                    args.map { it.resolveArgument(resolverContext) ?: return null },
+                    (resolveArguments(resolverContext) ?: return null),
                 returnStyle,
-                argCastNeedsPointer
+                argCastNeedsPointer,
+                qualified
             ).also {
                 it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
             }
         }
 
+    protected fun resolveArguments(resolverContext: ResolveContext): List<ResolvedArgument>? {
+        val retArgs = mutableListOf<ResolvedArgument>()
+
+        args.forEachIndexed { index, wrappedArgument ->
+            val resolved = wrappedArgument.resolveArgument(resolverContext)
+            if (resolved != null) {
+                retArgs.add(resolved)
+            } else {
+                if (args.subList(index, args.size).all { it.hasDefault }) {
+                    return retArgs
+                }
+                return resolverContext.notifyFailed(
+                    this,
+                    null,
+                    "Method failed from argument $wrappedArgument"
+                )
+            }
+        }
+        return retArgs
+    }
+
     override fun toString(): String {
         return "fun $name(${args.joinToString(", ")}): $returnType"
     }
+
+    companion object {
+        private val clsParents = listOf(
+            CXCursorKind.CXCursor_ClassTemplate,
+            CXCursorKind.CXCursor_ClassDecl
+        )
+    }
 }
 
-class WrappedArgument(val name: String, val type: WrappedType, val usr: String = "") :
-    WrappedElement() {
+class WrappedArgument(
+    val name: String,
+    val type: WrappedType,
+    val usr: String = "",
+    val hasDefault: Boolean = false
+) : WrappedElement() {
     constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder, index: Int = 0) : this(
         arg.spelling.toKString()?.takeIf { it.isNotBlank() } ?: "_arg_$index",
         WrappedType(arg.type, resolverBuilder),
-        arg.usr.toKString() ?: ""
+        arg.usr.toKString() ?: "",
+        hasDefault(arg)
     )
 
     override fun clone(): WrappedArgument {
-        return WrappedArgument(name, type, usr).also {
+        return WrappedArgument(name, type, usr, hasDefault).also {
             it.parent = parent
             it.addAllChildren(children)
         }
@@ -291,21 +370,40 @@ class WrappedArgument(val name: String, val type: WrappedType, val usr: String =
     override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 
     fun resolveArgument(resolverContext: ResolveContext): ResolvedArgument? {
+        val unreferencedType = if (type.isReference) type.unreferenced else type
         val (type, resolved) =
-            resolverContext.mapAndResolve(if (type.isReference) type.unreferenced else type)
-                ?: return null
+            resolverContext.mapAndResolve(unreferencedType)
+                ?: return resolverContext.notifyFailed(this, unreferencedType, "Missing type $type")
         val needsDereference = !type.isPointer && !type.isNative
         val resolvedArgType =
-            if (needsDereference) resolverContext.resolve(pointerTo(type)) ?: return null
-            else resolved
+            if (needsDereference) {
+                val pointerType = pointerTo(type)
+                resolverContext.resolve(pointerType) ?: return resolverContext.notifyFailed(
+                    this,
+                    pointerType,
+                    "Argument type"
+                )
+            } else resolved
         return ResolvedArgument(
             name,
             resolved,
             resolvedArgType,
             usr,
             determineArgumentCastMode(type, this.type.isReference, resolverContext),
-            needsDereference
+            needsDereference,
+            hasDefault
         )
+    }
+
+    companion object {
+        fun hasDefault(value: CValue<CXCursor>): Boolean {
+            val lastKind = (value.children.lastOrNull()?.kind ?: return false)
+            return lastKind !in listOf(
+                CXCursorKind.CXCursor_TypeRef,
+                CXCursorKind.CXCursor_TemplateRef,
+                CXCursorKind.CXCursor_NamespaceRef
+            )
+        }
     }
 }
 

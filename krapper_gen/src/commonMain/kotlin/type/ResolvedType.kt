@@ -25,12 +25,10 @@ enum class CastMethod {
 }
 
 sealed class ResolvedType(
-    var typeString: String
+    open var typeString: String
 ) : ResolvedElement() {
 
-    override fun toString(): String {
-        return typeString
-    }
+    override fun toString(): String = typeString
 
     companion object {
 
@@ -52,17 +50,35 @@ sealed class ResolvedType(
 }
 
 class ResolvedCppType(
-    typeString: String,
+    override var typeString: String,
     var kotlinType: ResolvedKotlinType,
     var cType: ResolvedCType,
     var castMethod: CastMethod,
     var isVoid: Boolean = false,
-) : ResolvedType(typeString)
+) : ResolvedType(typeString) {
+    fun copy(
+        typeString: String = this.typeString,
+        kotlinType: ResolvedKotlinType = this.kotlinType,
+        cType: ResolvedCType = this.cType,
+        castMethod: CastMethod = this.castMethod,
+        isVoid: Boolean = this.isVoid,
+    ): ResolvedCppType {
+        return ResolvedCppType(
+            typeString,
+            kotlinType.copy(),
+            cType.copy(),
+            castMethod,
+            isVoid
+        )
+    }
+}
 
-class ResolvedCType(
-    typeString: String,
+data class ResolvedCType(
+    override var typeString: String,
     var isVoid: Boolean = false
-) : ResolvedType(typeString)
+) : ResolvedType(typeString) {
+    override fun toString(): String = typeString
+}
 
 data class ResolvedKotlinType(
     private var qualifyList: List<String>,

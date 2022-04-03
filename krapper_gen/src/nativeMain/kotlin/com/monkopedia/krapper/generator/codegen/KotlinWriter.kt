@@ -67,6 +67,7 @@ import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
@@ -78,25 +79,38 @@ import com.monkopedia.krapper.generator.resolved_model.type.nullable
 import com.monkopedia.krapper.generator.resolved_model.type.typedWith
 
 class KotlinWriter(
-    private val nameHandler: NameHandler,
     private val pkg: String,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGeneratorBase<KotlinCodeBuilder>(policy) {
     var currentClasses = mapOf<String, ResolvedClass>()
 
-    fun generate(outputDir: File, classes: List<ResolvedClass>) {
+    fun generate(outputDir: File, classes: List<ResolvedElement>) {
         if (!outputDir.exists()) {
             outputDir.mkdirs()
         }
         for (file in outputDir.listFiles()) {
             file.delete()
         }
-        currentClasses = classes.associateBy { it.type.toString() }
-        for (cls in classes) {
+        currentClasses =
+            classes.filterIsInstance<ResolvedClass>().associateBy { it.type.toString() }
+        for (cls in currentClasses.values) {
             val clsFile =
                 File(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_") + ".kt")
             val builder = KotlinCodeBuilder()
             builder.generate(cls)
+            clsFile.writeText(builder.toString())
+        }
+        val methodsByPkg = classes.filterIsInstance<ResolvedMethod>().groupBy { it.qualified }
+        for ((qualified, methods) in methodsByPkg) {
+            val clsFile = File(outputDir, "${qualified.replace("::", "_")}_Functions.kt")
+            val builder = KotlinCodeBuilder()
+            val pkg = qualified.split("::").joinToString(".") { it.decapitalize() }
+            builder.pkg(pkg)
+            builder.importBlock(pkg, builder)
+            builder.comment("BEGIN KRAPPER GEN for $pkg Functions")
+            for (method in methods) {
+                builder.onGenerate(method)
+            }
             clsFile.writeText(builder.toString())
         }
     }
@@ -255,6 +269,34 @@ class KotlinWriter(
         onGenerate(cls, method, null)
     }
 
+    override fun KotlinCodeBuilder.onGenerate(method: ResolvedMethod) {
+        val uniqueCName =
+            extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
+        require(method.methodType == MethodType.STATIC) {
+            "Non-static method being generated at top level $method"
+        }
+        inline {
+            extensionFunction {
+                receiver = fqType(MEM_SCOPE)
+                name = method.name
+                val returnType = method.returnType
+                val returnStyle = method.returnStyle
+                retType = type(returnType)
+                var args = if (method.args.isNotEmpty()) method.args.map {
+                    define(it.name, it.type)
+                } else emptyList()
+                body {
+                    generateMethodBody(
+                        args.map { reference(it) },
+                        returnStyle,
+                        method.returnType,
+                        uniqueCName,
+                    )
+                }
+            }
+        }
+    }
+
     fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod, size: LocalVar?) {
         val uniqueCName =
             extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
@@ -322,14 +364,7 @@ class KotlinWriter(
                 // Do nothing
             }
             MethodType.STATIC -> {
-                inline {
-                    generateBasicMethod(
-                        fixNaming(method),
-                        uniqueCName,
-                        startArgs = emptyList(),
-                        skipFirstArg = false
-                    )
-                }
+                onGenerate(method)
             }
             MethodType.METHOD,
             MethodType.STATIC_OP -> {

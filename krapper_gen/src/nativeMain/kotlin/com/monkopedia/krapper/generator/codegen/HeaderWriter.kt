@@ -29,19 +29,23 @@ import com.monkopedia.krapper.generator.builders.ifdef
 import com.monkopedia.krapper.generator.builders.ifndef
 import com.monkopedia.krapper.generator.builders.includeSys
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 
 class HeaderWriter(
-    private val nameHandler: NameHandler,
     codeBuilder: CppCodeBuilder,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGenerator<CppCodeBuilder>(codeBuilder, policy) {
 
     private var lookup: ClassLookup = ClassLookup(emptyList())
 
-    override fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedClass>) {
-        lookup = ClassLookup(classes)
+    override fun generate(
+        moduleName: String,
+        headers: List<String>,
+        classes: List<ResolvedElement>
+    ) {
+        lookup = ClassLookup(classes.filterIsInstance<ResolvedClass>())
         super.generate(moduleName, headers, classes)
     }
 
@@ -89,23 +93,23 @@ class HeaderWriter(
         }
     }
 
-    override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
+    override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) =
+        onGenerate(method)
+
+    override fun CppCodeBuilder.onGenerate(method: ResolvedMethod) {
         functionDeclaration {
-            val type = cls.type
             generateMethodSignature(method)
-            addArgs(lookup, type, method)
+            addArgs(method)
         }
         appendLine()
     }
 
     override fun CppCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
         functionDeclaration {
-            val type = cls.type
             generateFieldGet(field)
         }
         appendLine()
         functionDeclaration {
-            val type = cls.type
             generateFieldSet(field)
         }
         appendLine()

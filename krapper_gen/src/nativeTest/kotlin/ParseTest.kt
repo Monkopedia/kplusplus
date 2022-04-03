@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.findQualifiers
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -44,7 +45,7 @@ class ParseTest {
     fun testResolve() {
         try {
             val resolver = ParsedResolver(TestData.TU)
-            val cls = resolver.findClasses(WrappedClass::defaultFilter)
+            val cls = resolver.findClasses(WrappedElement::defaultFilter)
             val resolved = cls.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
             println("Classes: $cls")
         } catch (t: Throwable) {
@@ -96,7 +97,7 @@ class ParseTest {
                     error("Not supported")
                 }
 
-                override fun findClasses(filter: ClassFilter): List<WrappedClass> {
+                override fun findClasses(filter: ElementFilter): List<WrappedClass> {
                     return emptyList()
                 }
             },

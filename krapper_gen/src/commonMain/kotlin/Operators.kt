@@ -25,7 +25,8 @@ data class BasicMethod(val name: String) : KotlinOperatorType()
 enum class OperatorType {
     BINARY,
     ASSIGN,
-    UNARY
+    UNARY,
+    REFERENCE
 }
 
 enum class ResolvedOperator(
@@ -84,7 +85,7 @@ enum class ResolvedOperator(
     UNARY_PLUS("+", "UnaryPlus", KotlinOperator("unaryPlus"), OperatorType.UNARY),
     NOT("!", "Not", KotlinOperator("not"), OperatorType.UNARY),
     INV("~", "Inv", BasicMethod("inv"), OperatorType.UNARY),
-    REFERENCE("*", "Reference", BasicMethod("reference"), OperatorType.UNARY),
+    REFERENCE("*", "Reference", BasicMethod("reference"), OperatorType.REFERENCE),
     POINTER_REFERENCE(
         "->",
         "PointerReference",

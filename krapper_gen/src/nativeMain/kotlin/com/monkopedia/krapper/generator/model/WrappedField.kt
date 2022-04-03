@@ -55,16 +55,27 @@ data class WrappedField(
 
     override fun resolve(resolverContext: ResolveContext): ResolvedField? =
         with(resolverContext.currentNamer) {
-            val (mappedType, resolvedType) = resolverContext.mapAndResolve(type) ?: return null
+            val (mappedType, resolvedType) = resolverContext.mapAndResolve(type)
+                ?: return resolverContext.notifyFailed(this@WrappedField, type, "Field type")
             val type =
-                if (mappedType.isReference) resolverContext.map(mappedType.unreferenced)
-                    ?: return null
-                else mappedType
+                if (mappedType.isReference) {
+                    val unreferenced = mappedType.unreferenced
+                    resolverContext.map(unreferenced)
+                        ?: return resolverContext.notifyFailed(
+                            this@WrappedField,
+                            unreferenced,
+                            "Field unreferenced type"
+                        )
+                } else mappedType
             val needsDereference =
                 !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE
-            val argType =
-                resolverContext.resolve(if (needsDereference) WrappedType.pointerTo(type) else type)
-                    ?: return null
+            val wrappedArgType = if (needsDereference) WrappedType.pointerTo(type) else type
+            val argType = resolverContext.resolve(wrappedArgType)
+                ?: return resolverContext.notifyFailed(
+                    this@WrappedField,
+                    wrappedArgType,
+                    "Arg type"
+                )
             return ResolvedField(
                 name,
                 type.isConst,
@@ -91,7 +102,8 @@ data class WrappedField(
                                 mappedType.isReference,
                                 resolverContext
                             ),
-                            needsDereference
+                            needsDereference,
+                            false
                         )
                     )
                 )

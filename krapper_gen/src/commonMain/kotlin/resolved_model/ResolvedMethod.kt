@@ -37,6 +37,7 @@ enum class ReturnStyle {
     STRING_POINTER,
     COPY_CONSTRUCTOR,
     RETURN,
+    RETURN_REFERENCE,
 }
 
 class ResolvedConstructor(
@@ -54,7 +55,8 @@ class ResolvedConstructor(
     null,
     args,
     ReturnStyle.VOIDP,
-    false
+    false,
+    returnType.typeString
 )
 
 class ResolvedDestructor(
@@ -70,7 +72,8 @@ class ResolvedDestructor(
     null,
     args,
     ReturnStyle.VOID,
-    false
+    false,
+    returnType.typeString
 )
 
 open class ResolvedMethod(
@@ -81,7 +84,8 @@ open class ResolvedMethod(
     var operator: ResolvedOperator?,
     var args: List<ResolvedArgument>,
     var returnStyle: ReturnStyle,
-    var argCastNeedsPointer: Boolean
+    var argCastNeedsPointer: Boolean,
+    var qualified: String
 ) : ResolvedElement() {
 
     fun copy(
@@ -92,7 +96,8 @@ open class ResolvedMethod(
         operator: ResolvedOperator? = this.operator,
         args: List<ResolvedArgument> = this.args,
         returnStyle: ReturnStyle = this.returnStyle,
-        argCastNeedsPointer: Boolean = this.argCastNeedsPointer
+        argCastNeedsPointer: Boolean = this.argCastNeedsPointer,
+        qualified: String = this.qualified,
     ): ResolvedMethod {
         return ResolvedMethod(
             name,
@@ -102,8 +107,11 @@ open class ResolvedMethod(
             operator,
             args,
             returnStyle,
-            argCastNeedsPointer
-        )
+            argCastNeedsPointer,
+            qualified
+        ).also {
+            it.parent = parent
+        }
     }
 
     override fun toString(): String {
@@ -126,6 +134,7 @@ data class ResolvedArgument(
     var usr: String = "",
     var castMode: ArgumentCastMode,
     var needsDereference: Boolean,
+    var hasDefault: Boolean
 ) {
 
     override fun toString(): String {

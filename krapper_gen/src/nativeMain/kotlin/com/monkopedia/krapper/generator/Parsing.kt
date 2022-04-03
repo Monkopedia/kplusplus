@@ -30,15 +30,19 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.baseParent
 import com.monkopedia.krapper.generator.model.cloneRecursive
 import com.monkopedia.krapper.generator.model.filterRecursive
 import com.monkopedia.krapper.generator.model.forEachRecursive
+import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import kotlin.math.min
 import kotlinx.cinterop.ByteVar
@@ -60,10 +64,18 @@ import platform.posix.read
 import platform.posix.system
 import platform.posix.write
 
-typealias ClassFilter = WrappedClass.() -> Boolean
+typealias ElementFilter = WrappedElement.() -> Boolean
 
-fun WrappedClass.defaultFilter(): Boolean {
-    return !type.toString().startsWith("std::") && !type.toString().startsWith("__")
+fun WrappedElement.defaultFilter(): Boolean {
+    if (this is WrappedClass) {
+        return !type.toString().startsWith("std::") && !type.toString().startsWith("__")
+    }
+    if (this is WrappedMethod && this.methodType == STATIC) {
+        return this.parentClass == null && !this.baseParent.toString()
+            .startsWith("std") && !this.name.startsWith("_") &&
+                (this.parent as? WrappedNamespace)?.namespace?.startsWith("_") != true
+    }
+    return false
 }
 
 /**
@@ -170,11 +182,11 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         }
     }
 
-    override fun findClasses(filter: ClassFilter): List<WrappedClass> {
+    override fun findClasses(filter: ElementFilter): List<WrappedElement> {
         println("Finding classes")
-        return mutableListOf<WrappedClass>().also { ret ->
+        return mutableListOf<WrappedElement>().also { ret ->
             tu.forEachRecursive {
-                if ((it as? WrappedClass)?.filter() == true) {
+                if (it.filter() == true) {
                     ret.add(it)
                 }
             }

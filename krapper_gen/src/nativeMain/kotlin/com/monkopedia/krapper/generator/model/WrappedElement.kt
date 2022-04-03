@@ -18,6 +18,8 @@ package com.monkopedia.krapper.generator.model
 import clang.CXAvailabilityKind
 import clang.CXCursor
 import clang.CXCursorKind
+import clang.CXCursorKind.CXCursor_ClassDecl
+import clang.CXCursorKind.CXCursor_ClassTemplate
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
@@ -33,6 +35,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.numArguments
 import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -81,27 +84,18 @@ abstract class WrappedElement(
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
             val element = map(value, null, null, resolverBuilder) ?: return null
-            value.forEachRecursive { child, parent ->
-                val parentUsr = parent.usr.toKString()
-                val strTag = child.usr.toKString().orEmpty()
-                    .ifEmpty { "$parentUsr:${child.spelling.toKString()}" }
+            value.forEachRecursive { childCursor, parentCursor ->
+                val parentUsr = parentCursor.usr.toKString()
 
-                val parent = map(parent, null, null, resolverBuilder) ?: return@forEachRecursive
+                val parent =
+                    map(parentCursor, null, null, resolverBuilder) ?: return@forEachRecursive
                 val child =
-                    map(child, parent, parentUsr, resolverBuilder) ?: return@forEachRecursive
+                    map(childCursor, parent, parentUsr, resolverBuilder) ?: return@forEachRecursive
                 if (child is WrappedTemplate) {
                     child.templateArgCounter = 0
                 }
                 if (child == element) return@forEachRecursive
                 if (child.parent == parent) return@forEachRecursive
-                if (parent is WrappedMethod && child is WrappedArgument) {
-                    // Hack for now to handle complicated parts of the AST from clang.
-                    // There are multiple method declarations with the same usr, but
-                    // containing params with different usr, not sure what to do with that...
-                    if (parent.args.any { it.name == child.name }) {
-                        return@forEachRecursive
-                    }
-                }
                 if (parent.children.contains(child)) {
                     if (child is WrappedTemplateParam ||
                         parent is WrappedTemplateParam ||
@@ -112,6 +106,16 @@ abstract class WrappedElement(
                     throw IllegalArgumentException(
                         "Parent ($parent) already contains child ($child)"
                     )
+                }
+                if (child is WrappedMethod && parent is WrappedNamespace) {
+                    // Don't add a method to a namespace when its already been added to a class.
+                    if (child.parent is WrappedClass) {
+                        return@forEachRecursive
+                    }
+                    val parentKind = childCursor.semanticParent.kind
+                    if (parentKind == CXCursor_ClassDecl || parentKind == CXCursor_ClassTemplate) {
+                        return@forEachRecursive
+                    }
                 }
                 parent.addChild(child)
             }

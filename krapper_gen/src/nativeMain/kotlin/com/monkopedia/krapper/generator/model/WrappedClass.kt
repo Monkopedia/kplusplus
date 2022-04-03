@@ -67,18 +67,6 @@ class WrappedClass(
     val type: WrappedType
         get() = specifiedType ?: WrappedType(qualified)
 
-    private val qualified: String
-        get() = withParents.mapNotNull { it.named }.joinToString("::")
-    private val WrappedElement.withParents: List<WrappedElement>
-        get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents))
-            ?: listOf(this@withParents)
-    private val WrappedElement.named: String?
-        get() = when (this) {
-            is WrappedClass -> this@named.name
-            is WrappedNamespace -> this@named.namespace
-            else -> null
-        }
-
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
         wrapName(value, value.spelling.toKString() ?: error("Missing name")), value.isAbstract
     )
@@ -111,17 +99,29 @@ class WrappedClass(
             isAbstract,
             specifiedType?.let {
                 // If no type, thats fine, but if type exists, it needs to resolve.
-                resolverContext.resolve(specifiedType) ?: return null
+                resolverContext.resolve(specifiedType) ?: return resolverContext.notifyFailed(
+                    this,
+                    specifiedType,
+                    "Specified class type resolve"
+                )
             },
             hasConstructor,
             hasHiddenNew,
             hasHiddenDelete,
             baseClass?.let {
-                resolverContext.resolve(it) ?: return null
+                resolverContext.resolve(it) ?: return resolverContext.notifyFailed(
+                    this,
+                    it,
+                    "Base class resolve"
+                )
             },
             hasDefaultConstructor,
             hasCopyConstructor,
-            resolverContext.resolve(type) ?: return null
+            resolverContext.resolve(type) ?: return resolverContext.notifyFailed(
+                this,
+                type,
+                "Default class type resolve"
+            )
         ).also {
             it.addAllChildren(
                 children.mapNotNull { child ->
@@ -205,3 +205,15 @@ private fun wrapName(value: CValue<CXCursor>, name: String): String {
     if (index < 0) return name
     return type.substring(index)
 }
+
+val WrappedElement.qualified: String
+    get() = withParents.mapNotNull { it.named }.joinToString("::")
+private val WrappedElement.withParents: List<WrappedElement>
+    get() = this@withParents.parent?.withParents?.plus(listOf(this@withParents))
+        ?: listOf(this@withParents)
+private val WrappedElement.named: String?
+    get() = when (this) {
+        is WrappedClass -> this@named.name
+        is WrappedNamespace -> this@named.namespace
+        else -> null
+    }

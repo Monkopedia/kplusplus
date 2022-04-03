@@ -67,7 +67,10 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
     override fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
         return ResolvedTemplate(
             name,
-            baseClass?.let { resolverContext.resolve(it) ?: return null },
+            baseClass?.let {
+                resolverContext.resolve(it)
+                    ?: return resolverContext.notifyFailed(this, it, "Base class")
+            },
             hasConstructor,
             hasHiddenNew,
             hasHiddenDelete,
@@ -150,7 +153,10 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         return ResolvedTemplateParam(
             name,
             usr,
-            defaultType?.let { resolverContext.resolve(it) ?: return null }
+            defaultType?.let {
+                resolverContext.resolve(it)
+                    ?: return resolverContext.notifyFailed(this, it, "Default type")
+            }
         )
     }
 
@@ -195,7 +201,14 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
     }
 
     override fun resolve(resolverContext: ResolveContext): ResolvedElement? {
-        return ResolvedTypedef(name, resolverContext.resolve(targetType) ?: return null)
+        return ResolvedTypedef(
+            name,
+            resolverContext.resolve(targetType) ?: return resolverContext.notifyFailed(
+                this,
+                targetType,
+                "Failed to resolve typedef"
+            )
+        )
     }
 
     companion object {

@@ -32,7 +32,6 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
@@ -91,8 +90,6 @@ data class SignatureArgument(
 }
 
 inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
-    classLookup: ClassLookup,
-    type: ResolvedType,
     method: ResolvedMethod
 ): List<SignatureArgument> {
     val args = if (method.returnStyle == ARG_CAST) method.args + ResolvedArgument(
@@ -101,7 +98,8 @@ inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
         method.returnType,
         "",
         REINT_CAST,
-        method.argCastNeedsPointer
+        method.argCastNeedsPointer,
+        false
     ) else method.args
     return args.map {
         defineWrapperArgument(it)
@@ -127,7 +125,8 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
         field.getter.returnType,
         "",
         REINT_CAST,
-        field.getter.needsDereference
+        field.getter.needsDereference,
+        false
     ) else field.getter.args
     return args.map {
         defineWrapperArgument(it)

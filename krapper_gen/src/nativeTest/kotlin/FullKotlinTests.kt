@@ -20,7 +20,6 @@ import com.monkopedia.krapper.generator.builders.CodeStringBuilder
 import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
 import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
@@ -1332,5 +1331,5 @@ class FullKotlinTests {
     private fun codeBuilder() = KotlinCodeBuilder()
 
     private fun kotlinWriter(code: KotlinCodeBuilder) =
-        KotlinWriter(NameHandler(), "")
+        KotlinWriter("")
 }

@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator.builders
 
 import com.monkopedia.krapper.generator.Utils.printerrln
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 
@@ -24,11 +25,11 @@ interface CodeGenerationPolicy {
     fun onGenerateModuleFailed(
         moduleName: String,
         headers: List<String>,
-        classes: List<ResolvedClass>,
+        classes: List<ResolvedElement>,
         t: Throwable
     )
 
-    fun onGenerateMethodFailed(cls: ResolvedClass, method: ResolvedMethod, t: Throwable)
+    fun onGenerateMethodFailed(cls: ResolvedClass?, method: ResolvedMethod, t: Throwable)
     fun onGenerateFieldFailed(cls: ResolvedClass, field: ResolvedField, t: Throwable)
     fun onGenerateClassFailed(cls: ResolvedClass, t: Throwable)
 }
@@ -37,12 +38,12 @@ object ThrowPolicy : CodeGenerationPolicy {
     override fun onGenerateModuleFailed(
         moduleName: String,
         headers: List<String>,
-        classes: List<ResolvedClass>,
+        classes: List<ResolvedElement>,
         t: Throwable
     ) = throw t
 
     override fun onGenerateMethodFailed(
-        moduleName: ResolvedClass,
+        moduleName: ResolvedClass?,
         method: ResolvedMethod,
         t: Throwable
     ) = throw t
@@ -58,14 +59,14 @@ object LogPolicy : CodeGenerationPolicy {
     override fun onGenerateModuleFailed(
         moduleName: String,
         headers: List<String>,
-        classes: List<ResolvedClass>,
+        classes: List<ResolvedElement>,
         t: Throwable
     ) {
         printerrln("Error while generating module $moduleName ($headers $classes)")
         printerrln(t.stackTraceToString())
     }
 
-    override fun onGenerateMethodFailed(cls: ResolvedClass, method: ResolvedMethod, t: Throwable) {
+    override fun onGenerateMethodFailed(cls: ResolvedClass?, method: ResolvedMethod, t: Throwable) {
         printerrln("Error while generating method $cls#$method")
         printerrln(t.stackTraceToString())
     }
