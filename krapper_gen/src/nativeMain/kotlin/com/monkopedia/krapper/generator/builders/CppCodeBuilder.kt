@@ -24,8 +24,13 @@ fun CppCodeBuilder(): CppCodeBuilder {
 }
 
 class CppFactory : LangFactory {
-    override fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar {
-        return CppLocalVar(name, type, initializer)
+    override fun define(
+        name: String,
+        type: ResolvedType,
+        initializer: Symbol?,
+        constructorArgs: List<Symbol>?
+    ): LocalVar {
+        return CppLocalVar(name, type, initializer, constructorArgs)
     }
 
     override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol {
@@ -59,7 +64,8 @@ class CppFunctionSig(
 class CppLocalVar(
     override val name: String,
     val type: ResolvedType,
-    private val initializer: Symbol?
+    private val initializer: Symbol?,
+    private val constructorArgs: List<Symbol>?
 ) : LocalVar, SymbolContainer {
     private val typeSymbol = CppType(type)
     override val symbols: List<Symbol>
@@ -69,6 +75,16 @@ class CppLocalVar(
         typeSymbol.build(builder)
         builder.append(' ')
         builder.append(name)
+        if (constructorArgs != null) {
+            builder.append('(')
+            constructorArgs.forEachIndexed { index, symbol ->
+                if (index != 0) {
+                    builder.append(", ")
+                }
+                symbol.build(builder)
+            }
+            builder.append(')')
+        }
         initializer?.let {
             builder.append(" = ")
             it.build(builder)

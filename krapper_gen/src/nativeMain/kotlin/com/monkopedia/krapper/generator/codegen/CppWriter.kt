@@ -16,7 +16,6 @@
 package com.monkopedia.krapper.generator.codegen
 
 import com.monkopedia.krapper.OperatorType.ASSIGN
-import com.monkopedia.krapper.OperatorType.REFERENCE
 import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
@@ -47,6 +46,8 @@ import com.monkopedia.krapper.generator.builders.includeSys
 import com.monkopedia.krapper.generator.builders.op
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
@@ -54,6 +55,7 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CA
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
@@ -69,6 +71,7 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
+const val STACK_CONSTRUCTOR_CALLBACK = "StackConstructorCallback"
 class CppWriter(
     private val cppFile: File,
     codeBuilder: CppCodeBuilder,
@@ -77,7 +80,11 @@ class CppWriter(
 
     private var lookup: ClassLookup = ClassLookup(emptyList())
 
-    override fun generate(moduleName: String, headers: List<String>, classes: List<ResolvedElement>) {
+    override fun generate(
+        moduleName: String,
+        headers: List<String>,
+        classes: List<ResolvedElement>
+    ) {
         lookup = ClassLookup(classes.filterIsInstance<ResolvedClass>())
         super.generate(moduleName, headers, classes)
     }
@@ -111,6 +118,9 @@ class CppWriter(
         includeSys("iterator")
         appendLine()
         +ExternCOpen
+        appendLine()
+
+        +Raw("typedef void (*$STACK_CONSTRUCTOR_CALLBACK)(void*, void*)")
         appendLine()
 
         handleChildren()
@@ -177,16 +187,31 @@ class CppWriter(
         val returnCast = if (method.returnStyle == ARG_CAST) argCasts.removeLast() else null
         when (method.methodType) {
             MethodType.CONSTRUCTOR -> {
-                val locationCast = argCasts.removeFirst()
-                +Return(
-                    New(
-                        Call(
-                            cls.type.toString(),
-                            *(argCasts.map { it.reference }.toTypedArray())
-                        ),
-                        locationCast.reference
-                    )
-                )
+                method as ResolvedConstructor
+                when (method.allocationStyle) {
+                    DIRECT -> {
+                        val locationCast = argCasts.removeFirst()
+                        +Return(
+                            New(
+                                Call(
+                                    cls.type.toString(),
+                                    *(argCasts.map { it.reference }.toTypedArray())
+                                ),
+                                locationCast.reference
+                            )
+                        )
+                    }
+                    STACK -> {
+                        val locationCast = argCasts.removeFirst()
+                        val callbackCast = argCasts.removeLast()
+                        val item = +define(
+                            "item",
+                            cls.type,
+                            constructorArgs = argCasts.map { it.reference }
+                        )
+                        +Call(callbackCast.reference, item.addressOf, locationCast.reference)
+                    }
+                }
             }
             MethodType.SIZE_OF -> {
                 +Return(
@@ -280,12 +305,12 @@ class CppWriter(
         val returnStr = +define(
             "ret_value",
             ResolvedType.PSTRING,
-            initializer = call
+            initializer = call,
         )
         val returnArray = +define(
             "ret_value_cast",
             ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}->length() + 1]"))
+            initializer = New(Raw("char[${returnStr.name}->length() + 1]")),
         )
         +(
             returnStr.reference arrow Call(
@@ -300,11 +325,15 @@ class CppWriter(
 
     private fun CppCodeBuilder.createStringReturn(call: Symbol) {
         val returnStr =
-            +define("ret_value", ResolvedType.STRING, initializer = call)
+            +define(
+                "ret_value",
+                ResolvedType.STRING,
+                initializer = call,
+            )
         val returnArray = +define(
             "ret_value_cast",
             ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}.length() + 1]"))
+            initializer = New(Raw("char[${returnStr.name}.length() + 1]")),
         )
         +(
             returnStr.reference dot Call(
@@ -324,7 +353,7 @@ class CppWriter(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                initializer = Call("std::string", arg.localVar.reference)
+                initializer = Call("std::string", arg.localVar.reference),
             )
         )
     }
@@ -348,7 +377,7 @@ class CppWriter(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                RawCast(arg.targetType.toString(), arg.localVar.reference)
+                RawCast(arg.targetType.toString(), arg.localVar.reference),
             )
         )
     }

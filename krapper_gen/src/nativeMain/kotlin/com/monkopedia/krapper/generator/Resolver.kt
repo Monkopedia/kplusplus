@@ -29,6 +29,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.qualified
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
@@ -109,8 +110,8 @@ fun List<WrappedElement>.resolveAll(
     val classes = filterIsInstance<WrappedClass>()
     val resolveContext = ResolveContext.Empty
         .copy(resolver = resolver, debugFilter = { element, type, message ->
-            (element as? WrappedClass)?.toString()?.contains("Primitive") ?: false ||
-                (element == null && message.contains("Primitive"))
+            element?.parentClass?.toString()?.contains("HandleScope") ?: false ||
+                (element == null && message.contains("HandleScope"))
         })
         .withClasses(classes)
         .withPolicy(policy)

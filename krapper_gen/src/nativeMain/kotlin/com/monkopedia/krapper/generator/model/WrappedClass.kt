@@ -25,6 +25,7 @@ import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
@@ -155,7 +156,7 @@ class WrappedClass(
         }
         if (hasHiddenNew) {
             children.filterIsInstance<WrappedConstructor>().forEach {
-                removeChild(it)
+                it.allocationStyle = STACK
             }
         }
         if (hasHiddenDelete) {

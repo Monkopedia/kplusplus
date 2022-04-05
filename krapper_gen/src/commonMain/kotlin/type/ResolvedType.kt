@@ -43,7 +43,7 @@ sealed class ResolvedType(
         val LONG_DOUBLE_KOTLIN = ResolvedKotlinType("Double", false)
         val LONG_DOUBLE =
             ResolvedCppType(LONG_DOUBLE_STR, LONG_DOUBLE_KOTLIN, LONG_DOUBLE_C, CastMethod.NATIVE)
-        val UNIT = ResolvedKotlinType("Unit", false)
+        val UNIT = ResolvedKotlinType("kotlin.Unit", false)
         val CVOID = ResolvedCType("void", true)
         val VOID = ResolvedCppType("void", UNIT, CVOID, CastMethod.NATIVE, true)
     }
@@ -141,5 +141,9 @@ fun ResolvedKotlinType.typedWith(parseTypes: List<ResolvedKotlinType>): Resolved
 }
 
 fun fullyQualifiedType(name: String, isWrapper: Boolean = false): ResolvedKotlinType {
-    return ResolvedKotlinType(fullyQualified = name.trimEnd('?'), isWrapper = isWrapper, isNullable = isWrapper || name.endsWith('?'))
+    return ResolvedKotlinType(
+        fullyQualified = name.trimEnd('?'),
+        isWrapper = isWrapper,
+        isNullable = isWrapper || name.endsWith('?')
+    )
 }

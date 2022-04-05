@@ -31,7 +31,7 @@ interface WrappedKotlinType {
 
 private val typeMap = mapOf(
     "size_t" to "platform.posix.size_t",
-    "void" to "Unit",
+    "void" to "kotlin.Unit",
     "bool" to "kotlin.Boolean",
     "char" to "kotlin.Byte",
     "signed char" to "kotlin.Byte",
@@ -91,6 +91,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
             WrappedKotlinType(type.baseType).pkg + "." +
                 (listOf(type.baseType) + type.templateArgs).joinToString("__") {
                     it.toString().split("::").last()
+                        .capitalize()
                         .replace(" ", "_")
                         .replace("<", "_")
                         .replace(",", "_")
@@ -102,18 +103,16 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     if (type.isString) return fullyQualifiedType("kotlin.String?")
     if (type.toString() == "const char*") return fullyQualifiedType("kotlin.String?")
-    if (type.isReference) {
-        return WrappedKotlinType(type.unreferenced)
-    }
     if (type.isConst) {
         return WrappedKotlinType(type.unconst)
     }
-    if (type.isPointer) {
-        if (type.pointed == WrappedType.VOID) {
+    if (type.isPointer || type.isReference) {
+        val baseType = if (type.isReference) type.unreferenced else type.pointed
+        if (baseType == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
         }
-        if (type.pointed.isPointer && type.pointed.pointed.isNative) {
-            if (type.pointed.pointed == WrappedType.VOID) {
+        if (baseType.isPointer && baseType.pointed.isNative) {
+            if (baseType.pointed == WrappedType.VOID) {
                 return nullable(
                     fullyQualifiedType(C_VALUES_REF).typedWith(
                         listOf(fullyQualifiedType("kotlinx.cinterop.COpaquePointerVar"))
@@ -121,8 +120,8 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 )
             }
 
-            val pointerType = pointerTypeMap[type.pointed.pointed.toString()]
-                ?: return WrappedKotlinType(type.pointed.pointed)
+            val pointerType = pointerTypeMap[baseType.pointed.toString()]
+                ?: return WrappedKotlinType(baseType.pointed)
             return nullable(
                 fullyQualifiedType(C_VALUES_REF).typedWith(
                     listOf(
@@ -133,16 +132,16 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 )
             )
         }
-        if (type.pointed.isNative) {
-            val pointerType = pointerTypeMap[type.pointed.toString()]
-                ?: return WrappedKotlinType(type.pointed)
+        if (baseType.isNative) {
+            val pointerType = pointerTypeMap[baseType.toString()]
+                ?: return WrappedKotlinType(baseType)
             return nullable(
                 fullyQualifiedType(C_VALUES_REF).typedWith(
                     listOf(fullyQualifiedType(pointerType))
                 )
             )
         }
-        return nullable(WrappedKotlinType(type.pointed))
+        return nullable(WrappedKotlinType(baseType))
     }
     if (type.isNative || type == WrappedType.LONG_DOUBLE) {
         return fullyQualifiedType(typeMap[type.toString()] ?: type.toString())
@@ -285,18 +284,23 @@ private fun String.findEnd(start: Int): Int {
 }
 
 fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinType {
+    val capitalizedNameList = name.split(".").toMutableList().apply {
+        val last = removeLast()
+        add(last.capitalize())
+    }
+    val capitalizedName = capitalizedNameList.joinToString(".")
     return object : WrappedKotlinType {
         override val isWrapper: Boolean
             get() = isWrapper
         override val fullyQualified: List<String>
-            get() = listOf(name)
+            get() = listOf(capitalizedName)
         override val name: String
-            get() = name.split(".").last()
+            get() = capitalizedNameList.last()
         override val pkg: String
-            get() = name.split(".").toMutableList().also { it.removeLast() }.joinToString(".")
+            get() = capitalizedNameList.toMutableList().also { it.removeLast() }.joinToString(".")
 
         override fun toString(): String {
-            return name
+            return capitalizedName
         }
     }
 }

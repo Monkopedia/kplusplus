@@ -33,7 +33,15 @@ fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuil
 }
 
 class KotlinFactory : LangFactory {
-    override fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar {
+    override fun define(
+        name: String,
+        type: ResolvedType,
+        initializer: Symbol?,
+        constructorArgs: List<Symbol>?
+    ): LocalVar {
+        require(constructorArgs == null) {
+            "Constructor args not supported for kotlin"
+        }
         return KotlinLocalVar(
             name,
             (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
@@ -59,6 +67,9 @@ class KotlinFactory : LangFactory {
         const val C_VALUES_REF = "kotlinx.cinterop.CValuesRef"
         const val MEM_SCOPE = "kotlinx.cinterop.MemScope"
         const val PAIR = "kotlin.Pair"
+        const val STABLE_REF = "kotlinx.cinterop.asStableRef"
+        const val STATIC_C_FUNCTION = "kotlinx.cinterop.staticCFunction"
+        const val STABLE_REF_CREATE = "kotlinx.cinterop.StableRef.Companion.create"
     }
 }
 
@@ -181,11 +192,11 @@ inline fun KotlinCodeBuilder.defer(
 
 fun KotlinCodeBuilder.define(
     desiredName: String,
-    type: ResolvedKotlinType,
+    type: ResolvedKotlinType? = null,
     initializer: Symbol? = null
 ): LocalVar {
     val name = scope.allocateName(desiredName)
-    return factory.define(name, type, initializer)
+    return KotlinLocalVar(name, type, initializer)
 }
 
 inline fun KotlinCodeBuilder.cls(
@@ -303,11 +314,11 @@ class KotlinFunctionSig(
 
 class KotlinLocalVar(
     override val name: String,
-    val type: ResolvedKotlinType,
+    val type: ResolvedKotlinType?,
     private val initializer: Symbol?
 ) : LocalVar, SymbolContainer {
     var isVal: Boolean? = false
-    private val typeSymbol = KotlinType(type)
+    private val typeSymbol = type?.let { KotlinType(it) }
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
 
@@ -316,8 +327,10 @@ class KotlinLocalVar(
             builder.append(if (isVal) "val " else "var ")
         }
         builder.append(name)
-        builder.append(": ")
-        typeSymbol.build(builder)
+        typeSymbol?.let {
+            builder.append(": ")
+            it.build(builder)
+        }
         initializer?.let {
             builder.append(" = ")
             it.build(builder)
@@ -554,3 +567,104 @@ var LocalVar.isVal: Boolean
         val thiz = (this as? KotlinLocalVar) ?: error("Not a kotlin var, mixing source builders?")
         thiz.isVal = value
     }
+
+sealed class LambdaBuilder<T : LangFactory>(
+    var type: Symbol? = null,
+    val lambdaBuilder: CodeBuilder<T>
+) {
+    protected val args = mutableListOf<LocalVar>()
+    abstract val body: CodeBuilder<T>?
+
+    inline fun body(block: BodyBuilder<T>) {
+        body!!.apply(block)
+    }
+
+    fun define(name: String, type: ResolvedType): LocalVar {
+        return lambdaBuilder.define(
+            name,
+            type
+        ).also(args::add).also {
+            (it as? KotlinLocalVar)?.isVal = null
+        }
+    }
+}
+
+private object EndLambda : Symbol {
+    override fun build(builder: CodeStringBuilder) {
+        builder.append('}')
+    }
+}
+
+open class LambdaSymbol<T : LangFactory>(lambdaBuilder: CodeBuilder<T>) :
+    LambdaBuilder<T>(lambdaBuilder = lambdaBuilder), Symbol, SymbolContainer {
+    private val block = BlockSymbol(lambdaBuilder, this, EndLambda)
+    lateinit var signature: Symbol
+    val symbol: Symbol
+        get() = block
+    override val body: CodeBuilder<T>
+        get() = block
+
+    override val symbols: List<Symbol>
+        get() = listOf(signature)
+
+    open fun init() {
+        signature = LambdaFunctionSig(
+            type,
+            args
+        )
+    }
+
+    override fun build(builder: CodeStringBuilder) {
+        signature.build(builder)
+        builder.append("\n")
+    }
+
+    override fun toString(): String {
+        return signature.toString()
+    }
+}
+
+private class LambdaFunctionSig(
+    private val type: Symbol?,
+    private val args: List<LocalVar>
+) : Symbol, SymbolContainer {
+
+    override val symbols: List<Symbol>
+        get() = listOfNotNull(type) + args
+
+    override fun build(builder: CodeStringBuilder) {
+        type?.build(builder)
+        builder.append(" { ")
+        for ((index, arg) in args.withIndex()) {
+            if (index != 0) {
+                builder.append(", ")
+            }
+            arg.build(builder)
+        }
+        builder.append(" ->")
+    }
+
+    override fun toString(): String {
+        return buildString {
+            append(type)
+            append(" { ")
+            for ((index, arg) in args.withIndex()) {
+                if (index != 0) {
+                    append(", ")
+                }
+                append(arg)
+            }
+            append(" -> ... }")
+        }
+    }
+}
+
+inline fun <T : LangFactory> CodeBuilder<T>.lambda(
+    lambdaBuilder: LambdaBuilder<T>.() -> Unit
+): Symbol {
+    val builder = functionScope {
+        LambdaSymbol(this).also(lambdaBuilder)
+    }
+    builder.init()
+    return builder.symbol
+}

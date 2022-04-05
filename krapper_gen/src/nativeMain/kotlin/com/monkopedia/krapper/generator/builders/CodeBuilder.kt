@@ -37,7 +37,12 @@ interface LocalVar : Symbol {
 }
 
 interface LangFactory {
-    fun define(name: String, type: ResolvedType, initializer: Symbol?): LocalVar
+    fun define(
+        name: String,
+        type: ResolvedType,
+        initializer: Symbol?,
+        constructorArgs: List<Symbol>?
+    ): LocalVar
     fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol
     fun createType(type: ResolvedType): Symbol
 }

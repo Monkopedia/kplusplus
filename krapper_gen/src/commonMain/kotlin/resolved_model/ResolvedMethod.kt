@@ -40,13 +40,19 @@ enum class ReturnStyle {
     RETURN_REFERENCE,
 }
 
+enum class AllocationStyle {
+    DIRECT,
+    STACK
+}
+
 class ResolvedConstructor(
     name: String,
     returnType: ResolvedCppType,
     var isCopyConstructor: Boolean,
     var isDefaultConstructor: Boolean,
     uniqueCName: String?,
-    args: List<ResolvedArgument>
+    args: List<ResolvedArgument>,
+    var allocationStyle: AllocationStyle
 ) : ResolvedMethod(
     name,
     returnType,

@@ -37,7 +37,9 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
                 // Root pkg, native types, skip
                 if (!fqName.contains(".")) continue
                 // Same pkg as file, skip import
-                if (fqName.startsWith(prefixedPkg) && !fqName.substring(prefixLength).contains(".")) {
+                if (fqName.startsWith(prefixedPkg) && !fqName.substring(prefixLength)
+                    .contains(".")
+                ) {
                     continue
                 }
                 Import(fqName).build(builder)
@@ -46,8 +48,10 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
         }
         val mappings = fqNames.mapNotNull { item -> item.second?.let { item.first to it } }
             .toMap()
-        fqSymbols.forEach {
-            it.setNameRemap(mappings)
+        if (mappings.isNotEmpty()) {
+            fqSymbols.forEach {
+                it.setNameRemap(mappings)
+            }
         }
     }
 
@@ -57,16 +61,22 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
         for (fqName in fqNames) {
             val desiredName = fqName.split(".").last()
             val actualName = selectName(usedNames, fqName, desiredName)
-            mappings.add(if (actualName != desiredName) {
-                fqName to actualName
-            } else {
-                fqName to null
-            })
+            mappings.add(
+                if (actualName != desiredName) {
+                    fqName to actualName
+                } else {
+                    fqName to null
+                }
+            )
         }
         return mappings
     }
 
-    private fun selectName(usedNames: MutableSet<String>, fqName: String, desiredName: String): String {
+    private fun selectName(
+        usedNames: MutableSet<String>,
+        fqName: String,
+        desiredName: String
+    ): String {
         if (usedNames.add(desiredName)) {
             return desiredName
         }
@@ -115,6 +125,11 @@ private fun findFqSymbols(
         }
     }
     return list
+}
+
+inline fun extensionMethod(fullyQualified: String): Symbol {
+    val list = fullyQualified.split(".")
+    return extensionMethod(list.subList(0, list.size - 1).joinToString("."), list.last())
 }
 
 inline fun extensionMethod(pkg: String, method: String): Symbol {

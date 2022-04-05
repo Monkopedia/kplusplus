@@ -56,10 +56,11 @@ val <T : LangFactory> CodeBuilder<T>.scope: Scope<T>
 fun <T : LangFactory> CodeBuilder<T>.define(
     desiredName: String,
     type: ResolvedType,
-    initializer: Symbol? = null
+    initializer: Symbol? = null,
+    constructorArgs: List<Symbol>? = null
 ): LocalVar {
     val name = scope.allocateName(desiredName)
-    return factory.define(name, type, initializer)
+    return factory.define(name, type, initializer, constructorArgs)
 }
 
 @OptIn(ExperimentalContracts::class)

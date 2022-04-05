@@ -21,6 +21,7 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.children
 import com.monkopedia.krapper.generator.codegen.Operator
+import com.monkopedia.krapper.generator.codegen.STACK_CONSTRUCTOR_CALLBACK
 import com.monkopedia.krapper.generator.isConst
 import com.monkopedia.krapper.generator.isStatic
 import com.monkopedia.krapper.generator.kind
@@ -31,6 +32,9 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.referenced
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
@@ -52,6 +56,7 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
@@ -91,7 +96,8 @@ class WrappedConstructor(
     name: String,
     returnType: WrappedType,
     var isCopyConstructor: Boolean,
-    val isDefaultConstructor: Boolean
+    val isDefaultConstructor: Boolean,
+    var allocationStyle: AllocationStyle = AllocationStyle.DIRECT
 ) : WrappedMethod(name, returnType, MethodType.CONSTRUCTOR) {
     override fun copy(
         name: String,
@@ -127,8 +133,38 @@ class WrappedConstructor(
                 type,
                 "",
                 NATIVE,
+                needsDereference = false,
+                hasDefault = false
+            )
+        )
+    }
+
+    private fun postArgs(resolverContext: ResolveContext): List<ResolvedArgument>? {
+        if (allocationStyle != STACK) return emptyList()
+        val clsType = parentClass?.type?.let(resolverContext::resolve)
+            ?: return resolverContext.notifyFailed(
+                this,
+                parentClass?.type,
+                "constructor missing class"
+            )
+        val type = resolverContext.resolve(pointerTo(VOID))!!.copy(
+            typeString = STACK_CONSTRUCTOR_CALLBACK,
+            kotlinType = ResolvedKotlinType(
+                listOf("(${clsType.kotlinType.name}) -> Unit"),
                 false,
+                emptyList(),
                 false
+            )
+        )
+        return listOf(
+            ResolvedArgument(
+                "callback",
+                type,
+                type,
+                "",
+                REINT_CAST,
+                needsDereference = false,
+                hasDefault = false
             )
         )
     }
@@ -137,12 +173,13 @@ class WrappedConstructor(
         resolverContext: ResolveContext
     ): ResolvedConstructor? =
         with(resolverContext.currentNamer) {
-            val pointedType = pointerTo(
-                parentClass?.type ?: return resolverContext.notifyFailed(
-                    this@WrappedConstructor,
-                    null,
-                    "Constructor missing parent ${parentClass?.type}"
-                )
+            val pointedType = (
+                if (allocationStyle == DIRECT) parentClass?.type?.let(::pointerTo)
+                else VOID
+                ) ?: return resolverContext.notifyFailed(
+                this@WrappedConstructor,
+                null,
+                "Constructor missing parent ${parentClass?.type}"
             )
             return ResolvedConstructor(
                 name,
@@ -155,7 +192,9 @@ class WrappedConstructor(
                 isDefaultConstructor,
                 uniqueCName,
                 thizArg(resolverContext) +
-                    (resolveArguments(resolverContext) ?: return null),
+                    (resolveArguments(resolverContext) ?: return null) +
+                    (postArgs(resolverContext) ?: return null),
+                allocationStyle
             ).also {
                 it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
             }
@@ -264,6 +303,7 @@ open class WrappedMethod(
                     returnType,
                     "Couldn't resolve return"
                 )
+            val returnStyle = determineReturnStyle(rawMapping, resolverContext)
             val type =
                 if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping)
                 else rawMapping
@@ -274,7 +314,6 @@ open class WrappedMethod(
                     "Couldn't resolve pointed return"
                 )
             resolvedReturnType.kotlinType = rawResolved.kotlinType
-            val returnStyle = determineReturnStyle(rawMapping, resolverContext)
             val argCastNeedsPointer = if (returnStyle == ARG_CAST) {
                 val type =
                     if (rawMapping.isReference) rawMapping.unreferenced
@@ -374,7 +413,7 @@ class WrappedArgument(
         val (type, resolved) =
             resolverContext.mapAndResolve(unreferencedType)
                 ?: return resolverContext.notifyFailed(this, unreferencedType, "Missing type $type")
-        val needsDereference = !type.isPointer && !type.isNative
+        val needsDereference = !type.isPointer && !type.isNative && type != LONG_DOUBLE
         val resolvedArgType =
             if (needsDereference) {
                 val pointerType = pointerTo(type)

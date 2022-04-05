@@ -37,7 +37,10 @@ sealed class FunctionBuilder<T : LangFactory>(
     }
 
     fun define(name: String, type: ResolvedType): LocalVar {
-        return functionBuilder.define(name, type).also(args::add).also {
+        return functionBuilder.define(
+            name,
+            type
+        ).also(args::add).also {
             (it as? KotlinLocalVar)?.isVal = null
         }
     }

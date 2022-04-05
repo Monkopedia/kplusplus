@@ -29,6 +29,9 @@ import com.monkopedia.krapper.generator.builders.KotlinFactory
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.MEM_SCOPE
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.STABLE_REF
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.STABLE_REF_CREATE
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.STATIC_C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinLocalVar
 import com.monkopedia.krapper.generator.builders.LocalVar
 import com.monkopedia.krapper.generator.builders.Raw
@@ -53,6 +56,7 @@ import com.monkopedia.krapper.generator.builders.importBlock
 import com.monkopedia.krapper.generator.builders.infix
 import com.monkopedia.krapper.generator.builders.inline
 import com.monkopedia.krapper.generator.builders.isVal
+import com.monkopedia.krapper.generator.builders.lambda
 import com.monkopedia.krapper.generator.builders.operator
 import com.monkopedia.krapper.generator.builders.pairedTo
 import com.monkopedia.krapper.generator.builders.pkg
@@ -62,6 +66,8 @@ import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.setter
 import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.MethodType
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
@@ -74,6 +80,7 @@ import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
 import com.monkopedia.krapper.generator.resolved_model.type.nullable
 import com.monkopedia.krapper.generator.resolved_model.type.typedWith
@@ -82,7 +89,11 @@ class KotlinWriter(
     private val pkg: String,
     policy: CodeGenerationPolicy = ThrowPolicy
 ) : CodeGeneratorBase<KotlinCodeBuilder>(policy) {
-    var currentClasses = mapOf<String, ResolvedClass>()
+    private var currentClasses = mapOf<String, ResolvedClass>()
+    private var needsCCaller = false
+    private val staticRouterPkg = "krapper.static"
+    private val staticRouterName = "router"
+    private val staticRouter = "$staticRouterPkg.$staticRouterName"
 
     fun generate(outputDir: File, classes: List<ResolvedElement>) {
         if (!outputDir.exists()) {
@@ -91,6 +102,7 @@ class KotlinWriter(
         for (file in outputDir.listFiles()) {
             file.delete()
         }
+        needsCCaller = false
         currentClasses =
             classes.filterIsInstance<ResolvedClass>().associateBy { it.type.toString() }
         for (cls in currentClasses.values) {
@@ -111,6 +123,44 @@ class KotlinWriter(
             for (method in methods) {
                 builder.onGenerate(method)
             }
+            builder.comment("END KRAPPER GEN for $pkg Functions")
+            clsFile.writeText(builder.toString())
+        }
+        if (needsCCaller) {
+            // kotlinx.cinterop.asStableRef
+            // kotlinx.cinterop.staticCFunction
+            // val method = staticCFunction { arg1: COpaquePointer, arg2: COpaquePointer ->
+            //    val callback = arg1.asStableRef<(COpaquePointer) -> Unit>().get()
+            //    callback(arg2)
+            // }
+            val clsFile = File(outputDir, "_Krapper_Static_Router.kt")
+            val builder = KotlinCodeBuilder().apply {
+                pkg(staticRouterPkg)
+                importBlock(staticRouterPkg, this)
+                comment("BEGIN KRAPPER GEN for static C function Router")
+
+                +define(
+                    staticRouterName,
+                    initializer = lambda {
+                        type = type(fullyQualifiedType(STATIC_C_FUNCTION))
+                        val arg1 = define("arg1", fullyQualifiedType(C_OPAQUE_POINTER))
+                        val arg2 = define("arg2", nullable(fullyQualifiedType(C_OPAQUE_POINTER)))
+                        body {
+                            val callback = +define(
+                                "callback",
+                                initializer = arg1.reference dot Call(
+                                    extensionMethod(STABLE_REF),
+                                    templateArgs = listOf(Raw("(COpaquePointer?) -> Unit"))
+                                ) dot Call(Raw("get"))
+                            )
+                            +Call(callback.reference, arg2.reference)
+                        }
+                    }
+                )
+
+                comment("END KRAPPER GEN for static C function Router")
+            }
+
             clsFile.writeText(builder.toString())
         }
     }
@@ -189,7 +239,10 @@ class KotlinWriter(
         }
         companion {
             val sizeOf = methods.find { (it as? ResolvedMethod)?.methodType == SIZE_OF }!!
-            val size = define("size", sizeOf.returnType)
+            val size = define(
+                "size",
+                sizeOf.returnType,
+            )
             property(size) {
                 getter = inline(
                     getter {
@@ -278,7 +331,7 @@ class KotlinWriter(
         inline {
             extensionFunction {
                 receiver = fqType(MEM_SCOPE)
-                name = method.name
+                name = method.name.kotlinMethodName()
                 val returnType = method.returnType
                 val returnStyle = method.returnStyle
                 retType = type(returnType)
@@ -302,63 +355,7 @@ class KotlinWriter(
             extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
         when (method.methodType) {
             MethodType.CONSTRUCTOR -> {
-                val destructor =
-                    cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
-                extensionFunction {
-                    receiver = fqType(MEM_SCOPE)
-                    name = cls.type.kotlinType.name
-                    retType = type(cls.type)
-                    val args = method.args.subList(1, method.args.size).map {
-                        define(it.name, it.type)
-                    }
-                    body {
-                        val memory = +define(
-                            "memory",
-                            fullyQualifiedType(C_OPAQUE_POINTER),
-                            initializer = (
-                                Call(
-                                    extensionMethod("kotlinx.cinterop", "interpretCPointer"),
-                                    Call(
-                                        "alloc",
-                                        size!!.reference,
-                                        size.reference
-                                    ) dot Raw("rawPtr")
-                                ) elvis Call("error", "Allocation failed".symbol)
-                                )
-                        )
-                        memory.isVal = true
-                        val obj = +define(
-                            "obj",
-                            fullyQualifiedType(C_OPAQUE_POINTER),
-                            initializer = (
-                                Call(
-                                    uniqueCName,
-                                    *(listOf(memory.reference) + args.map { reference(it) })
-                                        .toTypedArray()
-                                ) elvis Call("error", "Creation failed".symbol)
-                                )
-                        )
-                        obj.isVal = true
-                        if (destructor != null) {
-                            defer {
-                                +Call(
-                                    extensionMethod(
-                                        pkg,
-                                        destructor.uniqueCName
-                                            ?: error("Unnamed destructor in $cls")
-                                    ),
-                                    obj.reference
-                                )
-                            }
-                        }
-                        +Return(
-                            Call(
-                                constructorMethod(cls.type.kotlinType),
-                                obj.reference pairedTo thiz.reference
-                            )
-                        )
-                    }
-                }
+                generateConstructor(cls, method as ResolvedConstructor, size, uniqueCName)
             }
             MethodType.DESTRUCTOR -> {
                 // Do nothing
@@ -376,6 +373,142 @@ class KotlinWriter(
                         generateBasicMethod(fixNaming(method), uniqueCName)
                     }
                 }
+            }
+        }
+    }
+
+    private fun KotlinCodeBuilder.generateConstructor(
+        cls: ResolvedClass,
+        method: ResolvedConstructor,
+        size: LocalVar?,
+        uniqueCName: Symbol
+    ) {
+        when (method.allocationStyle) {
+            DIRECT -> generateDirectConstructor(cls, method, size, uniqueCName)
+            STACK -> generateStackConstructor(cls, method, uniqueCName)
+        }
+    }
+
+    private fun KotlinCodeBuilder.generateStackConstructor(
+        cls: ResolvedClass,
+        method: ResolvedConstructor,
+        uniqueCName: Symbol
+    ) {
+        needsCCaller = true
+        extensionFunction {
+            receiver = fqType(MEM_SCOPE)
+            name = cls.type.kotlinType.name
+            retType = type(ResolvedType.UNIT.copy())
+            val args = method.args.subList(1, method.args.size).map {
+                define(it.name, it.type)
+            }.toMutableList()
+            val callbackArg = args.removeLast()
+            body {
+                val lambda = +define(
+                    "callback",
+                    initializer = lambda {
+                        val opaquePointer =
+                            define("ptr", nullable(fullyQualifiedType(C_OPAQUE_POINTER)))
+                        body {
+                            val ptr = +define(
+                                "ptr",
+                                fullyQualifiedType(C_OPAQUE_POINTER),
+                                opaquePointer.reference elvis Call(
+                                    "error",
+                                    "Creation failed".symbol
+                                )
+                            )
+                            +Call(
+                                callbackArg.reference,
+                                Call(
+                                    constructorMethod(cls.type.kotlinType),
+                                    ptr.reference pairedTo thiz.reference
+                                )
+                            )
+                        }
+                    }
+                )
+                val stableRef = +define(
+                    "withObjStable",
+                    initializer = Call(
+                        extensionMethod(STABLE_REF_CREATE),
+                        lambda.reference
+                    )
+                )
+                +Call(
+                    uniqueCName,
+                    *(
+                        listOf(stableRef.reference dot Call("asCPointer")) +
+                            args.map { reference(it) } +
+                            extensionMethod(staticRouter)
+                        ).toTypedArray()
+                )
+                +(stableRef.reference dot Call("dispose"))
+            }
+        }
+    }
+
+    private fun KotlinCodeBuilder.generateDirectConstructor(
+        cls: ResolvedClass,
+        method: ResolvedConstructor,
+        size: LocalVar?,
+        uniqueCName: Symbol
+    ) {
+        val destructor =
+            cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
+        extensionFunction {
+            receiver = fqType(MEM_SCOPE)
+            name = cls.type.kotlinType.name
+            retType = type(cls.type)
+            val args = method.args.subList(1, method.args.size).map {
+                define(it.name, it.type)
+            }
+            body {
+                val memory = +define(
+                    "memory",
+                    fullyQualifiedType(C_OPAQUE_POINTER),
+                    initializer = (
+                        Call(
+                            extensionMethod("kotlinx.cinterop", "interpretCPointer"),
+                            Call(
+                                "alloc",
+                                size!!.reference,
+                                size.reference
+                            ) dot Raw("rawPtr")
+                        ) elvis Call("error", "Allocation failed".symbol)
+                        )
+                )
+                memory.isVal = true
+                val obj = +define(
+                    "obj",
+                    fullyQualifiedType(C_OPAQUE_POINTER),
+                    initializer = (
+                        Call(
+                            uniqueCName,
+                            *(listOf(memory.reference) + args.map { reference(it) })
+                                .toTypedArray()
+                        ) elvis Call("error", "Creation failed".symbol)
+                        )
+                )
+                obj.isVal = true
+                if (destructor != null) {
+                    defer {
+                        +Call(
+                            extensionMethod(
+                                pkg,
+                                destructor.uniqueCName
+                                    ?: error("Unnamed destructor in $cls")
+                            ),
+                            obj.reference
+                        )
+                    }
+                }
+                +Return(
+                    Call(
+                        constructorMethod(cls.type.kotlinType),
+                        obj.reference pairedTo thiz.reference
+                    )
+                )
             }
         }
     }
@@ -406,6 +539,19 @@ class KotlinWriter(
         }
     }
 
+    private fun String.kotlinMethodName() = replace("<", "_lt")
+        .replace(">", "_gt")
+        .replace("\"\"", "_qts")
+        .replace("\"", "_qt")
+        .replace("==", "_cmd")
+        .replace("=", "_eq")
+        .replace("+", "_plus")
+        .replace("-", "_minus")
+        .replace("/", "_div")
+        .replace("*", "_star")
+        .replace("%", "_mod")
+        .replace("!", "_not")
+
     private fun KotlinCodeBuilder.generateBasicMethod(
         method: ResolvedMethod,
         uniqueCName: Symbol,
@@ -414,7 +560,7 @@ class KotlinWriter(
         skipFirstArg: Boolean = true
     ) {
         function {
-            name = methodName
+            name = methodName.kotlinMethodName()
             val returnType = method.returnType
             val returnStyle = method.returnStyle
             retType = type(returnType)
@@ -451,7 +597,7 @@ class KotlinWriter(
                         kotlinType.fullyQualified + ".Companion",
                         kotlinType.name.trimEnd('?') + "_Holder"
                     )
-                )
+                ),
             ).also {
                 it.isVal = true
             }
@@ -528,8 +674,8 @@ class KotlinWriter(
         return reference(type, v)
     }
 
-    private fun reference(type: ResolvedKotlinType, v: LocalVar): Symbol {
-        return if (type.isWrapper) {
+    private fun reference(type: ResolvedKotlinType?, v: LocalVar): Symbol {
+        return if (type != null && type.isWrapper) {
             if (type.toString().endsWith("?")) {
                 v.reference qdot ptr
             } else {

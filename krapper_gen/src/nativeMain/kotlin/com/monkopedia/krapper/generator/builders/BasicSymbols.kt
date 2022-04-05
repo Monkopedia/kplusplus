@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,6 +27,7 @@ inline val LocalVar.reference: Symbol
 class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(arg)
+
     override fun build(builder: CodeStringBuilder) {
         if (arg is Reference) {
             builder.append("*")
@@ -43,12 +44,19 @@ class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
 class Address(private val arg: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(arg)
+
     override fun build(builder: CodeStringBuilder) {
-        builder.append("&(")
-        arg.build(builder)
-        builder.append(")")
+        if (arg is Reference) {
+            builder.append("&")
+            arg.build(builder)
+        } else {
+            builder.append("&(")
+            arg.build(builder)
+            builder.append(")")
+        }
     }
 }
+
 inline val LocalVar.addressOf: Symbol
     get() = Address(reference)
 
@@ -64,6 +72,7 @@ inline val Symbol.dereference: Symbol
 class Return(private val s: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("return ")
         s.build(builder)
@@ -73,6 +82,7 @@ class Return(private val s: Symbol) : Symbol, SymbolContainer {
 class Delete(private val s: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("delete ")
         s.build(builder)
@@ -82,6 +92,7 @@ class Delete(private val s: Symbol) : Symbol, SymbolContainer {
 class New(private val s: Symbol, private val location: Symbol? = null) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append("new ")
         if (location != null) {
@@ -93,14 +104,29 @@ class New(private val s: Symbol, private val location: Symbol? = null) : Symbol,
     }
 }
 
-class Call(private val name: Symbol, private vararg val args: Symbol) : Symbol, SymbolContainer {
+class Call(
+    private val name: Symbol,
+    private val templateArgs: List<Symbol>,
+    private vararg val args: Symbol
+) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
-        get() = listOf(name) + args
+        get() = listOf(name) + args + templateArgs
 
-    constructor(name: String, vararg args: Symbol) : this(Raw(name), *args)
+    constructor(name: String, vararg args: Symbol) : this(Raw(name), emptyList(), *args)
+    constructor(name: Symbol, vararg args: Symbol) : this(name, emptyList(), *args)
 
     override fun build(builder: CodeStringBuilder) {
         name.build(builder)
+        if (templateArgs.isNotEmpty()) {
+            builder.append('<')
+            templateArgs.forEachIndexed { index, arg ->
+                if (index != 0) {
+                    builder.append(", ")
+                }
+                arg.build(builder)
+            }
+            builder.append('>')
+        }
         builder.append('(')
         args.forEachIndexed { index, arg ->
             if (index != 0) {
@@ -115,6 +141,7 @@ class Call(private val name: Symbol, private vararg val args: Symbol) : Symbol, 
 class ColonColon(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         first.build(builder)
         builder.append("::")
@@ -125,6 +152,7 @@ class ColonColon(private val first: Symbol, private val second: Symbol) : Symbol
 class Dot(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         first.build(builder)
         builder.append('.')
@@ -135,6 +163,7 @@ class Dot(private val first: Symbol, private val second: Symbol) : Symbol, Symbo
 class Arrow(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         first.build(builder)
         builder.append("->")
@@ -149,6 +178,7 @@ class Assign(
 ) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         builder.append('(')
         first.build(builder)
@@ -162,6 +192,7 @@ class Op(private val operand: String, private val first: Symbol, private val sec
     Symbol, SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
+
     override fun build(builder: CodeStringBuilder) {
         first.build(builder)
         builder.append(" $operand ")
