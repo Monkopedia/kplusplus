@@ -173,7 +173,7 @@ class KrapperGen : CliktCommand() {
                 println("Clearing const return type on $it")
             }
             classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
-                it.uniqueCName == "_v8_Persistent_v8_Value_new" || it.uniqueCName == "v8_Persistent_v8_Value_op_assign"
+                it.uniqueCName == "_v8_Persistent_v8_Value_new" || it.uniqueCName == "v8_Persistent_v8_Value_op_assign" || it.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
             }.forEach {
                 it.parent?.removeChild(it)
                 println("Removing $it")

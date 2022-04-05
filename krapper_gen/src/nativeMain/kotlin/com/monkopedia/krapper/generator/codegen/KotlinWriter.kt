@@ -58,7 +58,6 @@ import com.monkopedia.krapper.generator.builders.inline
 import com.monkopedia.krapper.generator.builders.isVal
 import com.monkopedia.krapper.generator.builders.lambda
 import com.monkopedia.krapper.generator.builders.operator
-import com.monkopedia.krapper.generator.builders.pairedTo
 import com.monkopedia.krapper.generator.builders.pkg
 import com.monkopedia.krapper.generator.builders.property
 import com.monkopedia.krapper.generator.builders.qdot
@@ -143,17 +142,17 @@ class KotlinWriter(
                     staticRouterName,
                     initializer = lambda {
                         type = type(fullyQualifiedType(STATIC_C_FUNCTION))
-                        val arg1 = define("arg1", fullyQualifiedType(C_OPAQUE_POINTER))
-                        val arg2 = define("arg2", nullable(fullyQualifiedType(C_OPAQUE_POINTER)))
+                        val arg1 = define("arg1", nullable(fullyQualifiedType(C_OPAQUE_POINTER)))
+                        val arg2 = define("arg2", fullyQualifiedType(C_OPAQUE_POINTER))
                         body {
                             val callback = +define(
                                 "callback",
-                                initializer = arg1.reference dot Call(
+                                initializer = arg2.reference dot Call(
                                     extensionMethod(STABLE_REF),
                                     templateArgs = listOf(Raw("(COpaquePointer?) -> Unit"))
                                 ) dot Call(Raw("get"))
                             )
-                            +Call(callback.reference, arg2.reference)
+                            +Call(callback.reference, arg1.reference)
                         }
                     }
                 )
@@ -176,23 +175,9 @@ class KotlinWriter(
         importBlock(pkg, this)
         comment("BEGIN KRAPPER GEN for ${cls.type}")
         appendLine()
-        cls(named(type)) { source ->
-            val ptr = define(ptr.content, fullyQualifiedType(C_OPAQUE_POINTER))
-            val memScope = define(memScope.content, fullyQualifiedType(MEM_SCOPE))
-            property(ptr) {
-                getter = inline(
-                    getter {
-                        +Return(source.reference dot Raw("first"))
-                    }
-                )
-            }
-            property(memScope) {
-                getter = inline(
-                    getter {
-                        +Return(source.reference dot Raw("second"))
-                    }
-                )
-            }
+        val ptr = define(ptr.content, fullyQualifiedType(C_OPAQUE_POINTER))
+        val memScope = define(memScope.content, fullyQualifiedType(MEM_SCOPE))
+        cls(named(type), listOf(property(ptr), property(memScope))) {
             handleSuperClassesRecursive(cls)
             handleChildren()
         }
@@ -243,7 +228,7 @@ class KotlinWriter(
                 "size",
                 sizeOf.returnType,
             )
-            property(size) {
+            +property(size) {
                 getter = inline(
                     getter {
                         +Return(Call(extensionMethod(pkg, sizeOf.uniqueCName!!)))
@@ -303,9 +288,10 @@ class KotlinWriter(
                         }
                     }
                     +Return(
-                        Call(
-                            constructorMethod(cls.type.kotlinType),
-                            obj.reference pairedTo thiz.reference
+                        generateConstructorCall(
+                            cls.type.kotlinType,
+                            obj.reference,
+                            thiz.reference
                         )
                     )
                 }
@@ -420,9 +406,10 @@ class KotlinWriter(
                             )
                             +Call(
                                 callbackArg.reference,
-                                Call(
-                                    constructorMethod(cls.type.kotlinType),
-                                    ptr.reference pairedTo thiz.reference
+                                generateConstructorCall(
+                                    cls.type.kotlinType,
+                                    ptr.reference,
+                                    thiz.reference,
                                 )
                             )
                         }
@@ -504,10 +491,7 @@ class KotlinWriter(
                     }
                 }
                 +Return(
-                    Call(
-                        constructorMethod(cls.type.kotlinType),
-                        obj.reference pairedTo thiz.reference
-                    )
+                    generateConstructorCall(cls.type.kotlinType, obj.reference, thiz.reference)
                 )
             }
         }
@@ -685,7 +669,7 @@ class KotlinWriter(
     }
 
     override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
-        property(define(field.name, field.kotlinType)) {
+        +property(define(field.name, field.kotlinType)) {
             getter = inline(
                 getter {
                     generateMethodBody(
@@ -717,12 +701,11 @@ class KotlinWriter(
         when {
             returnType.isWrapper -> {
                 +Return(
-                    Call(
-                        constructorMethod(returnType),
-                        (
-                            if (returnType.isNullable) call elvis Return(Raw("null"))
-                            else asserting(call)
-                            ) pairedTo memScope
+                    generateConstructorCall(
+                        returnType,
+                        if (returnType.isNullable) call elvis Return(Raw("null"))
+                        else asserting(call),
+                        memScope
                     )
                 )
             }
@@ -735,11 +718,18 @@ class KotlinWriter(
         }
     }
 
-    private fun constructorMethod(type: ResolvedKotlinType) =
-        extensionMethod(
-            type.pkg,
-            type.name.trimEnd('?')
-        )
+    private fun generateConstructorCall(
+        type: ResolvedKotlinType,
+        ptr: Symbol,
+        memScope: Symbol
+    ): Symbol {
+        return Call(constructorMethod(type), ptr, memScope)
+    }
+
+    private fun constructorMethod(type: ResolvedKotlinType) = extensionMethod(
+        type.pkg,
+        type.name.trimEnd('?')
+    )
 
     private fun KotlinCodeBuilder.generateStringReturn(call: Call) {
         val strDecl = +define(

@@ -71,6 +71,6 @@ class CompileFlags(
     val includeDirs: String?
         get() {
             if (headerFiles.isEmpty()) return null
-            return headerFiles.map { it.parent }.toSet().joinToString(" ") { "-I${it.path}" }
+            return headerFiles.map { it.parent }.toSet().joinToString(" ") { "-I${it.path}" } + " -DV8_COMPRESS_POINTERS"
         }
 }

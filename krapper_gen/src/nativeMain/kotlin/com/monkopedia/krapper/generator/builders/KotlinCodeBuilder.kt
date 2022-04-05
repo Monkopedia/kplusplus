@@ -201,41 +201,27 @@ fun KotlinCodeBuilder.define(
 
 inline fun KotlinCodeBuilder.cls(
     name: Symbol,
-    constructorVisibility: Symbol = Public,
-    builder: KotlinCodeBuilder.(LocalVar) -> Unit
+    constructorArgs: List<Symbol>,
+    builder: KotlinCodeBuilder.() -> Unit
 ) {
     functionScope {
-        val args = listOf(
-            define(
-                "source",
-                fullyQualifiedType(PAIR).typedWith(
-                    listOf(
-                        fullyQualifiedType(C_OPAQUE_POINTER),
-                        fullyQualifiedType(MEM_SCOPE)
-                    )
-                )
-            ).also { (it as? KotlinLocalVar)?.isVal = true }
-        )
-        block(ClassStartSymbol(name, constructorVisibility, args), EndClass) {
-            builder(args[0])
+        block(ClassStartSymbol(name, constructorArgs), EndClass) {
+            builder()
         }
     }
 }
 
 class ClassStartSymbol(
     val clsName: Symbol,
-    val constructorVisibility: Symbol,
     val constructorArgs: List<Symbol>
 ) : Symbol, SymbolContainer {
     override val symbols: List<Symbol>
-        get() = listOf(clsName, constructorVisibility) + constructorArgs
+        get() = listOf(clsName) + constructorArgs
 
     override fun build(builder: CodeStringBuilder) {
-        builder.append("value class ")
+        builder.append("class ")
         clsName.build(builder)
-        builder.append(' ')
-        constructorVisibility.build(builder)
-        builder.append(" constructor(")
+        builder.append("(")
         constructorArgs.forEachIndexed { index, symbol ->
             if (index != 0) {
                 builder.append(", ")
@@ -249,9 +235,7 @@ class ClassStartSymbol(
         return buildString {
             append("class@${this@ClassStartSymbol.hashCode()} ")
             append(clsName)
-            append(' ')
-            append(constructorVisibility)
-            append(" constructor(")
+            append("(")
             constructorArgs.forEachIndexed { index, symbol ->
                 if (index != 0) {
                     append(", ")
