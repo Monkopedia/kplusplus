@@ -373,7 +373,8 @@ open class WrappedMethod(
     companion object {
         private val clsParents = listOf(
             CXCursorKind.CXCursor_ClassTemplate,
-            CXCursorKind.CXCursor_ClassDecl
+            CXCursorKind.CXCursor_ClassDecl,
+            CXCursorKind.CXCursor_StructDecl
         )
     }
 }

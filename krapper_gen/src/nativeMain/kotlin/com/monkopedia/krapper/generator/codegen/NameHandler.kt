@@ -130,6 +130,7 @@ private fun String.cleanupName(): String {
         .replace("*", "_P")
         .replace(" ", "_")
         .replace("==", "_cmp")
+        .replace("[]", "_ind")
         .replace("=", "_eq")
         .replace("\"", "_qt")
 }

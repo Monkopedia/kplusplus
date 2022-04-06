@@ -73,7 +73,7 @@ fun WrappedElement.defaultFilter(): Boolean {
     if (this is WrappedMethod && this.methodType == STATIC) {
         return this.parentClass == null && !this.baseParent.toString()
             .startsWith("std") && !this.name.startsWith("_") &&
-                (this.parent as? WrappedNamespace)?.namespace?.startsWith("_") != true
+            (this.parent as? WrappedNamespace)?.namespace?.startsWith("_") != true
     }
     return false
 }
@@ -91,11 +91,11 @@ fun WrappedElement.defaultFilter(): Boolean {
 End of search list.
  */
 
-fun generateIncludes() = memScoped {
+fun generateIncludes(compiler: String) = memScoped {
     val emptyFile = File("/tmp/clang_includes.c")
     emptyFile.writeText("")
     val process = Process {
-        system("clang++ -E -x c++ -v ${emptyFile.path}")
+        system("$compiler -E -x c++ -v ${emptyFile.path}")
     }
     process.start()
     defer {
@@ -121,9 +121,11 @@ fun generateIncludes() = memScoped {
     if (start < 0 || end < 0) {
         throw IllegalStateException("Can't find includes for:\n$fullString")
     }
-    return@memScoped lines.subList(start + 1, end).toList().map { it.trim() }.also {
-        println("Found include locations $it")
-    } + "."
+    return@memScoped (
+        lines.subList(start + 1, end).toList().map { it.trim() }.also {
+            println("Found include locations $it")
+        } + "."
+        ).toTypedArray()
 }
 
 fun find(s: String): String? {
@@ -139,7 +141,6 @@ fun find(s: String): String? {
 }
 
 // Obtained from 'g++ -E -x c++ - -v < /dev/null'
-val INCLUDE_PATHS = generateIncludes()
 
 class ParsedResolver(val tu: WrappedTU) : Resolver {
     private val classMap = mutableMapOf<String, Pair<ResolvedClass, WrappedClass>?>()
@@ -206,7 +207,8 @@ private class ResolverBuilderImpl : ResolverBuilder {
         return seenNames.getOrPut(strType) {
             val declaration = type.typeDeclaration
             when (declaration.kind) {
-                CXCursorKind.CXCursor_ClassDecl -> {
+                CXCursorKind.CXCursor_ClassDecl,
+                CXCursorKind.CXCursor_StructDecl -> {
                     seenNames[strType] = type
                     if (type.numTemplateArguments <= 0) {
                         classes.add(WrappedClass(declaration, this))
@@ -229,12 +231,13 @@ private class ResolverBuilderImpl : ResolverBuilder {
 fun MemScope.parseHeader(
     index: CXIndex,
     file: List<String>,
-    args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
+    includePaths: Array<String>,
+    args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
         .toTypedArray(),
     debug: Boolean = false
 ): Resolver {
     val builder = ResolverBuilderImpl()
-    val tu = file.map { parseHeader(index, it, builder, args, debug) }
+    val tu = file.map { parseHeader(index, it, builder, includePaths, args, debug) }
         .reduceRight { tu1, tu2 ->
             tu1.also {
                 it.addAllChildren(
@@ -252,7 +255,8 @@ private fun MemScope.parseHeader(
     index: CXIndex,
     file: String,
     resolverBuilder: ResolverBuilder,
-    args: Array<String> = arrayOf("-xc++", "--std=c++14") + INCLUDE_PATHS.map { "-I$it" }
+    includePaths: Array<String>,
+    args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
         .toTypedArray(),
     debug: Boolean = false
 ): WrappedTU {
@@ -302,11 +306,13 @@ fun WrappedTemplate.typedAs(
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
     val mapping = mutableMapOf<String, WrappedType?>()
     for (i in 0 until min(templates.size, templateSpec.templateArgs.size)) {
-        mapping[templates[i].name] = templateSpec.templateArgs[i]
-        mapping[templates[i].usr] = templateSpec.templateArgs[i]
+        val mappedType = baseContext.map(templateSpec.templateArgs[i])
+            ?: throw IllegalArgumentException("Can't resolve ${templateSpec.templateArgs[i]} in $templateSpec")
+        mapping[templates[i].name] = mappedType
+        mapping[templates[i].usr] = mappedType
         for (extra in templates[i].otherParams) {
-            mapping[extra.name] = templateSpec.templateArgs[i]
-            mapping[extra.usr] = templateSpec.templateArgs[i]
+            mapping[extra.name] = mappedType
+            mapping[extra.usr] = mappedType
         }
     }
     val mapper: TypeMapping = { type, context ->

@@ -61,6 +61,7 @@ interface Resolver {
 class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     val resolvedClasses = mutableMapOf<String, ResolvedClass>()
     fun canResolve(type: WrappedType, context: ResolveContext): Boolean {
+        if (type.isArray) return false
         if (type == WrappedType.UNRESOLVABLE) return false
         if (otherResolved.contains(type.toString())) return true
         if (type is WrappedModifiedType) {
@@ -110,8 +111,8 @@ fun List<WrappedElement>.resolveAll(
     val classes = filterIsInstance<WrappedClass>()
     val resolveContext = ResolveContext.Empty
         .copy(resolver = resolver, debugFilter = { element, type, message ->
-            element?.parentClass?.toString()?.contains("HandleScope") ?: false ||
-                (element == null && message.contains("HandleScope"))
+            element?.parentClass?.toString()?.contains("CreateParams") ?: false ||
+                (element == null && message.contains("CreateParams"))
         })
         .withClasses(classes)
         .withPolicy(policy)
@@ -284,6 +285,7 @@ private fun typeMapper(
                 ) {
                     return@operateOn RemoveElement
                 }
+                if (it.isArray) return@operateOn RemoveElement
                 if (!context.tracker.canResolve(it, context)) {
                     try {
                         if (context.tracker.resolvedClasses[it.toString()] != null) {

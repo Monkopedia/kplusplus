@@ -288,6 +288,9 @@ fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinT
         val last = removeLast()
         add(last.capitalize())
     }
+    if (capitalizedNameList.size == 1 && isWrapper) {
+        capitalizedNameList.add(0, "root")
+    }
     val capitalizedName = capitalizedNameList.joinToString(".")
     return object : WrappedKotlinType {
         override val isWrapper: Boolean

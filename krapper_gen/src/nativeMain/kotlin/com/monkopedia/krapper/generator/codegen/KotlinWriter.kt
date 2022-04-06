@@ -77,6 +77,8 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
@@ -597,7 +599,8 @@ class KotlinWriter(
                 Call(
                     uniqueCName,
                     *args.toTypedArray()
-                )
+                ),
+                returnStyle
             )
         }
     }
@@ -696,7 +699,8 @@ class KotlinWriter(
 
     private fun CodeBuilder<KotlinFactory>.generateReturn(
         returnType: ResolvedKotlinType,
-        call: Call
+        call: Call,
+        returnStyle: ReturnStyle
     ) {
         when {
             returnType.isWrapper -> {
@@ -710,7 +714,7 @@ class KotlinWriter(
                 )
             }
             returnType.fullyQualified == "kotlin.String" -> {
-                generateStringReturn(call)
+                generateStringReturn(call, free = returnStyle == STRING || returnStyle == STRING_POINTER)
             }
             else -> {
                 +Return(call)
@@ -731,7 +735,7 @@ class KotlinWriter(
         type.name.trimEnd('?')
     )
 
-    private fun KotlinCodeBuilder.generateStringReturn(call: Call) {
+    private fun KotlinCodeBuilder.generateStringReturn(call: Call, free: Boolean = true) {
         val strDecl = +define(
             "str",
             nullable(
@@ -752,7 +756,9 @@ class KotlinWriter(
             )
         )
         retValue.isVal = true
-        +Call(extensionMethod("platform.linux", "free"), strDecl.reference)
+        if (free) {
+            +Call(extensionMethod("platform.linux", "free"), strDecl.reference)
+        }
         +Return(retValue.reference)
     }
 }

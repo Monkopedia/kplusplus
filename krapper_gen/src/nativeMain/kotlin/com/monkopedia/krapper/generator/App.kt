@@ -108,8 +108,9 @@ class KrapperGen : CliktCommand() {
         memScoped {
             val index = createIndex(0, 0) ?: error("Failed to create Index")
             defer { index.dispose() }
+            val includePaths = generateIncludes(compiler)
             val args: Array<String> = arrayOf("-xc++", "--std=c++14") +
-                INCLUDE_PATHS.map { "-I$it" }.toTypedArray()
+                includePaths.map { "-I$it" }.toTypedArray()
             println("Args: ${args.toList()}")
 //            for (file in header) {
 //                val tu =
@@ -144,7 +145,7 @@ class KrapperGen : CliktCommand() {
 // //                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
 // //                }
 //            }
-            val resolver = parseHeader(index, header, debug = debug)
+            val resolver = parseHeader(index, header, includePaths, debug = debug)
             val initialClasses = resolver.findClasses(WrappedElement::defaultFilter)
             val resolvingStr = initialClasses
                 .map { (it as? WrappedClass)?.type?.toString() ?: it.toString() }

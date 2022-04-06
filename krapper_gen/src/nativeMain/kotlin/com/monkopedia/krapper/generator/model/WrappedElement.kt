@@ -20,6 +20,7 @@ import clang.CXCursor
 import clang.CXCursorKind
 import clang.CXCursorKind.CXCursor_ClassDecl
 import clang.CXCursorKind.CXCursor_ClassTemplate
+import clang.CXCursorKind.CXCursor_StructDecl
 import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
@@ -103,9 +104,10 @@ abstract class WrappedElement(
                         child is WrappedNamespace ||
                         child == WrappedType.UNRESOLVABLE
                     ) return@forEachRecursive
-                    throw IllegalArgumentException(
-                        "Parent ($parent) already contains child ($child)"
-                    )
+//                    throw IllegalArgumentException(
+//                        "Parent ($parent) already contains child ($child)"
+//                    )
+                    return@forEachRecursive
                 }
                 if (child is WrappedMethod && parent is WrappedNamespace) {
                     // Don't add a method to a namespace when its already been added to a class.
@@ -113,7 +115,7 @@ abstract class WrappedElement(
                         return@forEachRecursive
                     }
                     val parentKind = childCursor.semanticParent.kind
-                    if (parentKind == CXCursor_ClassDecl || parentKind == CXCursor_ClassTemplate) {
+                    if (parentKind == CXCursor_ClassDecl || parentKind == CXCursor_ClassTemplate || parentKind == CXCursor_StructDecl) {
                         return@forEachRecursive
                     }
                 }
@@ -156,8 +158,8 @@ abstract class WrappedElement(
             }
             val element = when (value.kind) {
 //                CXCursorKind.CXCursor_UnexposedDecl -> TODO()
-//                CXCursorKind.CXCursor_StructDecl -> TODO()
 //                CXCursorKind.CXCursor_UnionDecl -> TODO()
+                CXCursorKind.CXCursor_StructDecl,
                 CXCursorKind.CXCursor_ClassDecl -> WrappedClass(value, resolverBuilder)
 //                CXCursorKind.CXCursor_EnumDecl -> TODO()
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()

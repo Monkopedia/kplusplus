@@ -18,6 +18,7 @@ package com.monkopedia.krapper.generator.model.type
 import clang.CXCursorKind.CXCursor_ClassDecl
 import clang.CXCursorKind.CXCursor_ClassTemplate
 import clang.CXCursorKind.CXCursor_NoDeclFound
+import clang.CXCursorKind.CXCursor_StructDecl
 import clang.CXCursorKind.CXCursor_TemplateTypeParameter
 import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
@@ -188,6 +189,9 @@ abstract class WrappedType : WrappedElement() {
                     invoke(referencedDecl.fullyQualified)
                 }
                 referencedDecl.kind == CXCursor_ClassDecl -> {
+                    invoke(referencedDecl.fullyQualified)
+                }
+                referencedDecl.kind == CXCursor_StructDecl -> {
                     invoke(referencedDecl.fullyQualified)
                 }
                 type.useContents { kind } == CXType_Unexposed &&
