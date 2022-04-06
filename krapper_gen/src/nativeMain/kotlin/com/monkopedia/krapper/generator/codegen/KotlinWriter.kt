@@ -714,7 +714,10 @@ class KotlinWriter(
                 )
             }
             returnType.fullyQualified == "kotlin.String" -> {
-                generateStringReturn(call, free = returnStyle == STRING || returnStyle == STRING_POINTER)
+                generateStringReturn(
+                    call,
+                    free = returnStyle == STRING || returnStyle == STRING_POINTER
+                )
             }
             else -> {
                 +Return(call)

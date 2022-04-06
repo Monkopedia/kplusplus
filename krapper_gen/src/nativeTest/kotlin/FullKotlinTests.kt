@@ -35,7 +35,7 @@ import kotlin.test.fail
 
 class FullKotlinTests {
 
-    private val STD_VECTOR_STRING_NEW = "fun MemScope.vector__string(): vector__string {\n" +
+    private val STD_VECTOR_STRING_NEW = "fun MemScope.Vector__String(): Vector__String {\n" +
         "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
         "?: error(\"Allocation failed\"))\n" +
         "    val obj: COpaquePointer = (std_vector_std_string_new(memory) ?: " +
@@ -43,7 +43,7 @@ class FullKotlinTests {
         "    defer {\n" +
         "        std_vector_std_string_dispose(obj)\n" +
         "    }\n" +
-        "    return vector__string((obj to this))\n" +
+        "    return Vector__String(obj, this)\n" +
         "}\n\n"
 
     private val STD_VECTOR_STRING_DISPOSE = ""
@@ -62,7 +62,7 @@ class FullKotlinTests {
             "    defer {\n" +
             "        TestLib_OtherClass_dispose(obj)\n" +
             "    }\n" +
-            "    return OtherClass((obj to this))\n" +
+            "    return OtherClass(obj, this)\n" +
             "}"
 
     private val TESTLIB_OTHERCLASS_DISPOSE = ""
@@ -81,18 +81,18 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_OTHERCLASS_APPEND_TEXT =
-        "inline fun appendText(text: vector__string): Unit {\n" +
+        "inline fun appendText(text: Vector__String): Unit {\n" +
             "    return TestLib_OtherClass_append_text(ptr, text.ptr)\n" +
             "}"
     private val TESTLIB_OTHERCLASS_COPIES =
         "inline fun copies(): MyPair__OtherClass_P? {\n" +
-            "    return MyPair__OtherClass_P(((TestLib_OtherClass_copies(ptr) ?: return null) " +
-            "to memScope))\n" +
+            "    return MyPair__OtherClass_P((TestLib_OtherClass_copies(ptr) ?: return null)" +
+            ", memScope)\n" +
             "}"
     private val TESTLIB_OTHERCLASS_INTS =
-        "inline fun ints(): MyPair__int? {\n" +
-            "    return MyPair__int(((TestLib_OtherClass_ints(ptr) ?: return null) " +
-            "to memScope))\n" +
+        "inline fun ints(): MyPair__Int? {\n" +
+            "    return MyPair__Int((TestLib_OtherClass_ints(ptr) ?: return null)" +
+            ", memScope)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_B =
@@ -105,7 +105,7 @@ class FullKotlinTests {
             "    }"
 
     private val TESTLIB_TESTCLASS_ST =
-        "var st: size_t\n" +
+        "var st: Size_t\n" +
             "    inline get() {\n" +
             "        return TestLib_TestClass_st_get(ptr)\n" +
             "    }\n" +
@@ -375,7 +375,7 @@ class FullKotlinTests {
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
         "    }\n" +
-        "    return TestClass((obj to this))\n" +
+        "    return TestClass(obj, this)\n" +
         "}"
 
     private val TESTLIB_TESTCLASS__NEW =
@@ -387,7 +387,7 @@ class FullKotlinTests {
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
             "    }\n" +
-            "    return TestClass((obj to this))\n" +
+            "    return TestClass(obj, this)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS___NEW = "fun MemScope.TestClass(a: Int): TestClass {\n" +
@@ -398,7 +398,7 @@ class FullKotlinTests {
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
         "    }\n" +
-        "    return TestClass((obj to this))\n" +
+        "    return TestClass(obj, this)\n" +
         "}"
 
     private val TESTLIB_TESTCLASS____NEW =
@@ -410,7 +410,7 @@ class FullKotlinTests {
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
             "    }\n" +
-            "    return TestClass((obj to this))\n" +
+            "    return TestClass(obj, this)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_DISPOSE = ""
@@ -569,8 +569,8 @@ class FullKotlinTests {
             "}"
 
     private val TESTLIB_TESTCLASS_BNOT =
-        "inline operator fun not(): TestClass {\n" +
-            "    return TestClass((TestLib_TestClass_op_not(ptr)!! to memScope))\n" +
+        "inline operator fun not(): TestClass? {\n" +
+            "    return TestClass((TestLib_TestClass_op_not(ptr) ?: return null), memScope)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_BAND =
@@ -589,7 +589,7 @@ class FullKotlinTests {
 
     private val TESTLIB_TESTCLASS_NOT =
         "inline fun inv(): TestClass? {\n" +
-            "    return TestClass(((TestLib_TestClass_op_inv(ptr) ?: return null) to memScope))\n" +
+            "    return TestClass((TestLib_TestClass_op_inv(ptr) ?: return null), memScope)\n" +
             "}"
 
     private val TESTLIB_TESTCLASS_AND =

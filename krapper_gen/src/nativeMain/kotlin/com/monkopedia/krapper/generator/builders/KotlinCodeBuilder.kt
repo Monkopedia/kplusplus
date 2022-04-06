@@ -15,16 +15,12 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
-import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.MEM_SCOPE
-import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.PAIR
 import com.monkopedia.krapper.generator.resolved_model.type.FqSymbol
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
 import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
-import com.monkopedia.krapper.generator.resolved_model.type.typedWith
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
 
@@ -221,13 +217,14 @@ class ClassStartSymbol(
     override fun build(builder: CodeStringBuilder) {
         builder.append("class ")
         clsName.build(builder)
-        builder.append("(")
-        constructorArgs.forEachIndexed { index, symbol ->
-            if (index != 0) {
-                builder.append(", ")
-            }
+        builder.append("(\n")
+        builder.startBlock()
+        constructorArgs.forEach { symbol ->
             symbol.build(builder)
+            builder.removeLast()
+            builder.append(",\n")
         }
+        builder.endBlock()
         builder.append(") {\n")
     }
 

@@ -42,6 +42,8 @@ class CppCodeTests {
         
         extern "C" {
         
+        typedef void (*StackConstructorCallback)(void*, void*);
+        
         
         }
     """.trimIndent()

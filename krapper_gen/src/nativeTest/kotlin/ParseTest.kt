@@ -60,7 +60,7 @@ class ParseTest {
         defer { index.dispose() }
         val tmpFile = "/tmp/${random()}_${random()}"
         File(tmpFile).writeText(TestData.TEMPLATE_HEADER)
-        val classes = parseHeader(index, listOf(tmpFile)).also { println("Parsed") }.findClasses {
+        val classes = parseHeader(index, listOf(tmpFile), generateIncludes("clang++")).also { println("Parsed") }.findClasses {
             println("Filter $this")
             defaultFilter()
         }

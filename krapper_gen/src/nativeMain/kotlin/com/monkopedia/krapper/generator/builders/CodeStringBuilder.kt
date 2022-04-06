@@ -49,6 +49,10 @@ class CodeStringBuilder {
         }
     }
 
+    fun removeLast() {
+        strBuilder.deleteAt(strBuilder.length - 1)
+    }
+
     private fun appendInternal(s: String) {
         if (s.isEmpty()) return
         checkNewLine()

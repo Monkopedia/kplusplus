@@ -74,7 +74,6 @@ class KotlinCodeTests {
             |package testLib
             |
             |import kotlin.Int
-            |import kotlin.Pair
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
@@ -82,17 +81,10 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
             |
-            |value class EmptyClass public constructor(val source: Pair<COpaquePointer, MemScope>) {
-            |    val ptr: COpaquePointer
-            |        inline get() {
-            |            return source.first
-            |        }
-            |
-            |    val memScope: MemScope
-            |        inline get() {
-            |            return source.second
-            |        }
-            |
+            |class EmptyClass(
+            |    val ptr: COpaquePointer,
+            |    val memScope: MemScope,
+            |) {
             |    companion object {
             |        val size: Int
             |            inline get() {
@@ -101,7 +93,7 @@ class KotlinCodeTests {
             |
             |        fun MemScope.EmptyClass_Holder(): EmptyClass {
             |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
-            |            return EmptyClass((memory to this))
+            |            return EmptyClass(memory, this)
             |        }
             |    }
             |}
@@ -162,7 +154,7 @@ class KotlinCodeTests {
             |fun MemScope.Constructable(): Constructable {
             |    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
-            |    return Constructable((obj to this))
+            |    return Constructable(obj, this)
             |}
             |""".trimMargin(),
             builder.toString()
@@ -225,7 +217,7 @@ class KotlinCodeTests {
             |    defer {
             |        TestLib_Constructable_dispose(obj)
             |    }
-            |    return Constructable((obj to this))
+            |    return Constructable(obj, this)
             |}
             |""".trimMargin(),
             builder.toString()
@@ -418,7 +410,7 @@ class KotlinCodeTests {
         }
         assertCode(
             """
-            |inline fun at(pos: size_t): String? {
+            |inline fun at(pos: Size_t): String? {
             |    val str: CPointer<ByteVar>? = std_vector_std_string_at(ptr, pos)
             |    val ret: String? = str?.toKString()
             |    free(str)
@@ -570,14 +562,13 @@ class KotlinCodeTests {
         testDir.listFiles().forEach {
             println("Found ${it.path}")
         }
-        val output = File(testDir, "std_vector_iterator__string.kt")
+        val output = File(testDir, "std_vector_Iterator__String.kt")
         assertTrue(output.exists())
         assertCode(
             """
             |package std.vector
             |
             |import kotlin.Int
-            |import kotlin.Pair
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
@@ -585,26 +576,19 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
             |
-            |value class iterator__string public constructor(val source: Pair<COpaquePointer, MemScope>) {
-            |    val ptr: COpaquePointer
-            |        inline get() {
-            |            return source.first
-            |        }
-            |
-            |    val memScope: MemScope
-            |        inline get() {
-            |            return source.second
-            |        }
-            |
+            |class Iterator__String(
+            |    val ptr: COpaquePointer,
+            |    val memScope: MemScope,
+            |) {
             |    companion object {
             |        val size: Int
             |            inline get() {
             |                return std_vector_std_string_iterator_size_of()
             |            }
             |
-            |        fun MemScope.iterator__string_Holder(): iterator__string {
+            |        fun MemScope.Iterator__String_Holder(): Iterator__String {
             |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
-            |            return iterator__string((memory to this))
+            |            return Iterator__String(memory, this)
             |        }
             |    }
             |}
