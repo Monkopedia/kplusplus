@@ -141,17 +141,23 @@ abstract class WrappedElement(
                 value.availability == CXAvailabilityKind.CXAvailability_NotAvailable
             ) {
                 if (value.kind == CXCursorKind.CXCursor_Constructor) {
-                    (parent as? WrappedClass)?.hasConstructor = true
-                    (parent as? WrappedTemplate)?.hasConstructor = true
+                    (parent as? WrappedClass)?.metadata?.hasConstructor = true
+                    (parent as? WrappedTemplate)?.metadata?.hasConstructor = true
                 }
                 if (value.kind == CXCursorKind.CXCursor_CXXMethod) {
                     val opName = value.referenced.spelling.toKString()
                     if (opName == "operator new") {
-                        (parent as? WrappedClass)?.hasHiddenNew = true
-                        (parent as? WrappedTemplate)?.hasHiddenNew = true
+                        (parent as? WrappedClass)?.metadata?.hasHiddenNew = true
+                        (parent as? WrappedTemplate)?.metadata?.hasHiddenNew = true
                     } else if (opName == "operator delete") {
-                        (parent as? WrappedClass)?.hasHiddenDelete = true
-                        (parent as? WrappedTemplate)?.hasHiddenDelete = true
+                        (parent as? WrappedClass)?.metadata?.hasHiddenDelete = true
+                        (parent as? WrappedTemplate)?.metadata?.hasHiddenDelete = true
+                    }
+                }
+                if (value.kind == CXCursorKind.CXCursor_FieldDecl) {
+                    if (WrappedType(value.type, resolverBuilder).isConst) {
+                        (parent as? WrappedClass)?.metadata?.hasPrivateConstField = true
+                        (parent as? WrappedTemplate)?.metadata?.hasPrivateConstField = true
                     }
                 }
                 return null

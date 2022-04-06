@@ -28,6 +28,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClassMetadata
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
@@ -49,21 +50,34 @@ class WrappedBase(val type: WrappedType?) : WrappedElement() {
     override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 }
 
+data class ClassMetadata(
+    var hasHiddenNew: Boolean = false,
+    var hasHiddenDelete: Boolean = false,
+    var hasConstructor: Boolean = false,
+    var hasPrivateConstField: Boolean = false,
+    var hasDefaultConstructor: Boolean = false,
+    var hasCopyConstructor: Boolean = false,
+) {
+    fun toResolved(): ResolvedClassMetadata {
+        return ResolvedClassMetadata(
+            hasHiddenNew = hasHiddenNew,
+            hasHiddenDelete = hasHiddenDelete,
+            hasConstructor = hasConstructor,
+            hasPrivateConstField = hasPrivateConstField,
+            hasDefaultConstructor = hasDefaultConstructor,
+            hasCopyConstructor = hasCopyConstructor
+        )
+    }
+}
+
 class WrappedClass(
     val name: String,
     var isAbstract: Boolean = false,
     val specifiedType: WrappedType? = null
 ) : WrappedElement() {
-    var hasConstructor: Boolean = false
-        get() = field || children.any { (it as? WrappedConstructor) != null }
-    var hasHiddenNew: Boolean = false
-    var hasHiddenDelete: Boolean = false
+    var metadata: ClassMetadata = ClassMetadata()
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
-    val hasDefaultConstructor: Boolean
-        get() = children.filterIsInstance<WrappedConstructor>().any { it.isDefaultConstructor }
-    val hasCopyConstructor: Boolean
-        get() = children.filterIsInstance<WrappedConstructor>().any { it.isCopyConstructor }
 
     val type: WrappedType
         get() = specifiedType ?: WrappedType(qualified)
@@ -80,15 +94,7 @@ class WrappedClass(
         return WrappedClass(name, isAbstract, specifiedType).also {
             it.parent = parent
             it.addAllChildren(children)
-            if (hasConstructor) {
-                it.hasConstructor = true
-            }
-            if (hasHiddenDelete) {
-                it.hasHiddenDelete = true
-            }
-            if (hasHiddenNew) {
-                it.hasHiddenNew = true
-            }
+            it.metadata = metadata.copy()
         }
     }
 
@@ -106,9 +112,8 @@ class WrappedClass(
                     "Specified class type resolve"
                 )
             },
-            hasConstructor,
-            hasHiddenNew,
-            hasHiddenDelete,
+            metadata.toResolved(),
+
             baseClass?.let {
                 resolverContext.resolve(it) ?: return resolverContext.notifyFailed(
                     this,
@@ -116,8 +121,6 @@ class WrappedClass(
                     "Base class resolve"
                 )
             },
-            hasDefaultConstructor,
-            hasCopyConstructor,
             resolverContext.resolve(type) ?: return resolverContext.notifyFailed(
                 this,
                 type,
@@ -134,7 +137,18 @@ class WrappedClass(
     }
 
     private fun modifyMethodsIfNeeded(baseClasses: List<WrappedClass>) {
-        if (!isAbstract && !hasConstructor && !baseClasses.any { it.hasConstructor }) {
+        if (!metadata.hasConstructor && children.any { it is WrappedConstructor }) {
+            metadata.hasConstructor = true
+        }
+        if (!metadata.hasDefaultConstructor) {
+            metadata.hasDefaultConstructor =
+                children.any { (it as? WrappedConstructor)?.isDefaultConstructor == true }
+        }
+        if (!metadata.hasCopyConstructor) {
+            metadata.hasCopyConstructor =
+                children.any { (it as? WrappedConstructor)?.isCopyConstructor == true }
+        }
+        if (!isAbstract && !metadata.hasConstructor && !baseClasses.any { it.metadata.hasConstructor }) {
             addChild(
                 WrappedConstructor(
                     "new",
@@ -154,12 +168,12 @@ class WrappedClass(
             removeChild(assignment)
             addChild(assignment.copy(returnType = WrappedType.VOID))
         }
-        if (hasHiddenNew) {
+        if (metadata.hasHiddenNew) {
             children.filterIsInstance<WrappedConstructor>().forEach {
                 it.allocationStyle = STACK
             }
         }
-        if (hasHiddenDelete) {
+        if (metadata.hasHiddenDelete) {
             children.filterIsInstance<WrappedDestructor>().forEach {
                 removeChild(it)
             }

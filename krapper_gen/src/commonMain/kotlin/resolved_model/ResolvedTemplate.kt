@@ -20,9 +20,7 @@ import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 data class ResolvedTemplate(
     val name: String,
     val baseClass: ResolvedType?,
-    var hasConstructor: Boolean = false,
-    var hasHiddenNew: Boolean = false,
-    var hasHiddenDelete: Boolean = false,
+    var metadata: ResolvedClassMetadata,
     val qualified: String,
     val templateArgs: List<ResolvedTemplateParam>,
 ) : ResolvedElement() {

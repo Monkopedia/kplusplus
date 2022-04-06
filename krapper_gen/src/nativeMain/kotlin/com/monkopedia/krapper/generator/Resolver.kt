@@ -201,13 +201,16 @@ data class ResolveContext(
             return true
         }
         val resolvedClass = tracker.classes[type.toString()] ?: return true
+        if (resolvedClass.metadata.hasPrivateConstField) {
+            return false
+        }
         resolvedClass.children.filterIsInstance<WrappedMethod>()
             .find { Operator.from(it) == BasicAssignmentOperator.ASSIGN }
             ?.let {
                 return true
             }
-        return resolvedClass.children.filterIsInstance<WrappedField>().all {
-            canAssign(it.type)
+        return resolvedClass.children.filterIsInstance<WrappedField>().all { f ->
+            canAssign(f.type)
         }
     }
 
@@ -280,11 +283,6 @@ private fun typeMapper(
         }
         ReferencePolicy.INCLUDE_MISSING -> return { t, context ->
             t.operateOn {
-                if (it.toString().contains("WasmStreamingImpl") || it.toString()
-                    .contains("CompiledWasmModule")
-                ) {
-                    return@operateOn RemoveElement
-                }
                 if (it.isArray) return@operateOn RemoveElement
                 if (!context.tracker.canResolve(it, context)) {
                     try {

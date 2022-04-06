@@ -347,9 +347,7 @@ fun WrappedTemplate.typedAs(
         mapping[templates[i].usr] = type
     }
     val outputClass = WrappedClass(name, false, templateSpec)
-    outputClass.hasConstructor = hasConstructor
-    outputClass.hasHiddenNew = hasHiddenNew
-    outputClass.hasHiddenDelete = hasHiddenDelete
+    outputClass.metadata = metadata.copy()
     outputClass.parent = parent
     outputClass.addAllChildren(children.map { it.cloneRecursive() })
     removeDuplicateMethods(outputClass)

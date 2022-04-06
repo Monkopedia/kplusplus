@@ -36,9 +36,7 @@ import kotlinx.cinterop.useContents
 data class WrappedTemplate(val name: String) : WrappedElement() {
     val baseClass: WrappedType?
         get() = children.filterIsInstance<WrappedBase>().firstOrNull()?.type
-    var hasConstructor: Boolean = false
-    var hasHiddenNew: Boolean = false
-    var hasHiddenDelete: Boolean = false
+    var metadata: ClassMetadata = ClassMetadata()
 
     val qualified: String
         get() = withParents.mapNotNull { it.named }.joinToString("::")
@@ -71,9 +69,7 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
                 resolverContext.resolve(it)
                     ?: return resolverContext.notifyFailed(this, it, "Base class")
             },
-            hasConstructor,
-            hasHiddenNew,
-            hasHiddenDelete,
+            metadata.toResolved(),
             qualified,
             templateArgs.mapNotNull { it.resolveTemplateParam(resolverContext) }
         )
@@ -114,9 +110,7 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         return WrappedTemplate(name).also {
             it.addAllChildren(children)
             it.parent = parent
-            it.hasHiddenNew = hasHiddenNew
-            it.hasHiddenDelete = hasHiddenDelete
-            it.hasConstructor = hasConstructor
+            it.metadata = metadata.copy()
         }
     }
 }

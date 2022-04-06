@@ -97,7 +97,7 @@ class WrappedConstructor(
     returnType: WrappedType,
     var isCopyConstructor: Boolean,
     val isDefaultConstructor: Boolean,
-    var allocationStyle: AllocationStyle = AllocationStyle.DIRECT
+    var allocationStyle: AllocationStyle = DIRECT
 ) : WrappedMethod(name, returnType, MethodType.CONSTRUCTOR) {
     override fun copy(
         name: String,

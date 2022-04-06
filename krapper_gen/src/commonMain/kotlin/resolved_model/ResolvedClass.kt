@@ -19,16 +19,22 @@ import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 
+
+data class ResolvedClassMetadata(
+    val hasHiddenNew: Boolean = false,
+    val hasHiddenDelete: Boolean = false,
+    val hasConstructor: Boolean = false,
+    val hasPrivateConstField: Boolean = false,
+    val hasDefaultConstructor: Boolean = false,
+    val hasCopyConstructor: Boolean = false,
+)
+
 data class ResolvedClass(
     val name: String,
     var isAbstract: Boolean = false,
     val specifiedType: ResolvedType? = null,
-    var hasConstructor: Boolean = false,
-    var hasHiddenNew: Boolean = false,
-    var hasHiddenDelete: Boolean = false,
+    var metadata: ResolvedClassMetadata,
     var baseClass: ResolvedType?,
-    var hasDefaultConstructor: Boolean,
-    var hasCopyConstructor: Boolean,
     var type: ResolvedCppType
 ) : ResolvedElement() {
 

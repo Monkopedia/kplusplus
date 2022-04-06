@@ -50,7 +50,7 @@ class KotlinCodeTests {
     fun testEmptyFile() {
         val cls = WrappedClass("EmptyClass").apply {
             addChild(WrappedType("std::string")) // avoid being empty/removed.
-            hasConstructor = true
+            metadata.hasConstructor = true
         }
         val tu = WrappedTU().also {
             it.addChild(
@@ -454,7 +454,7 @@ class KotlinCodeTests {
                         it.addChild(
                             WrappedClass("OtherClass").apply {
                                 addChild(WrappedType("std::string")) // avoid being empty/removed.
-                                hasConstructor = true
+                                metadata.hasConstructor = true
                             }
                         )
                     }
@@ -513,7 +513,7 @@ class KotlinCodeTests {
                         it.addChild(
                             WrappedClass("OtherClass").apply {
                                 addChild(WrappedType("std::string")) // avoid being empty/removed.
-                                hasConstructor = true
+                                metadata.hasConstructor = true
                             }
                         )
                     }
@@ -542,7 +542,7 @@ class KotlinCodeTests {
     fun testTemplateNaming() {
         val cls = WrappedClass("vector<std::string>::iterator").apply {
             addChild(WrappedType("std::string")) // Avoid being empty/removed
-            hasConstructor = true
+            metadata.hasConstructor = true
         }
         val tu = WrappedTU().also {
             it.addChild(
