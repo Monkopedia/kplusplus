@@ -15,8 +15,22 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
-class ResolvedNamespace(val namespace: String) : ResolvedElement() {
+import com.monkopedia.krapper.FilterableTypes
+import com.monkopedia.krapper.TypeTarget
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+@SerialName("namespace")
+data class ResolvedNamespace(val namespace: String) : ResolvedElement() {
     override fun toString(): String {
         return "nm($namespace)"
     }
+
+    override fun cloneWithoutChildren(): ResolvedNamespace {
+        return copy()
+    }
+
+    companion object :
+        TypeTarget<ResolvedNamespace>(FilterableTypes.NAMESPACE, ResolvedNamespace::class)
 }

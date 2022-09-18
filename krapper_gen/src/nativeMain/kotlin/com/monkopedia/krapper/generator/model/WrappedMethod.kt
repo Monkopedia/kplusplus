@@ -43,6 +43,7 @@ import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
+import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
@@ -68,6 +69,10 @@ import kotlinx.cinterop.CValue
 val WrappedElement.parentClass: WrappedClass?
     get() = (parent as? WrappedClass) ?: parent?.parentClass
 val WrappedElement.baseParent: WrappedElement
+    get() = parent?.baseParent ?: parent ?: this
+val ResolvedElement.parentClass: ResolvedClass?
+    get() = (parent as? ResolvedClass) ?: parent?.parentClass
+val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
 
 fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgument? {

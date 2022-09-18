@@ -15,7 +15,16 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+@SerialName("tu")
 class ResolvedTU : ResolvedElement() {
+    override fun cloneWithoutChildren(): ResolvedTU {
+        return ResolvedTU()
+    }
+
     operator fun plus(other: ResolvedTU): ResolvedTU {
         return ResolvedTU().also {
             it.addAllChildren(children)

@@ -15,11 +15,15 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
+import com.monkopedia.krapper.FilterableTypes.CLASS
+import com.monkopedia.krapper.TypeTarget
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-
+@Serializable
 data class ResolvedClassMetadata(
     val hasHiddenNew: Boolean = false,
     val hasHiddenDelete: Boolean = false,
@@ -29,13 +33,15 @@ data class ResolvedClassMetadata(
     val hasCopyConstructor: Boolean = false,
 )
 
+@Serializable
+@SerialName("class")
 data class ResolvedClass(
     val name: String,
-    var isAbstract: Boolean = false,
+    val isAbstract: Boolean = false,
     val specifiedType: ResolvedType? = null,
-    var metadata: ResolvedClassMetadata,
-    var baseClass: ResolvedType?,
-    var type: ResolvedCppType
+    val metadata: ResolvedClassMetadata,
+    val baseClass: ResolvedType?,
+    val type: ResolvedCppType
 ) : ResolvedElement() {
 
     override fun toString(): String {
@@ -43,6 +49,15 @@ data class ResolvedClass(
     }
 
     private var isNotEmptyCache: Boolean? = null
+
+    override fun cloneWithoutChildren(): ResolvedClass {
+        return copy(
+            specifiedType = specifiedType?.cloneWithoutChildren(),
+            type = type.copy(),
+            baseClass = baseClass?.cloneWithoutChildren(),
+            metadata = metadata.copy()
+        )
+    }
 
     override fun addAllChildren(list: List<ResolvedElement>) {
         isNotEmptyCache = null
@@ -66,4 +81,6 @@ data class ResolvedClass(
                 ((it as? ResolvedConstructor)?.children?.isNotEmpty() != false)
         }
     }
+
+    companion object : TypeTarget<ResolvedClass>(CLASS, ResolvedClass::class)
 }

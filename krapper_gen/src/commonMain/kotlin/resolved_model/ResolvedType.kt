@@ -15,7 +15,11 @@
  */
 package com.monkopedia.krapper.generator.resolved_model.type
 
+import com.monkopedia.krapper.FilterableTypes.TYPE
+import com.monkopedia.krapper.TypeTarget
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 enum class CastMethod {
     STRING_CAST,
@@ -24,13 +28,17 @@ enum class CastMethod {
     NATIVE,
 }
 
+@Serializable
+@SerialName("type")
 sealed class ResolvedType(
-    open var typeString: String
+    open val typeString: String
 ) : ResolvedElement() {
 
     override fun toString(): String = typeString
 
-    companion object {
+    abstract override fun cloneWithoutChildren(): ResolvedType
+
+    companion object : TypeTarget<ResolvedType>(TYPE, ResolvedType::class) {
 
         const val LONG_DOUBLE_STR = "long double"
 
@@ -49,19 +57,24 @@ sealed class ResolvedType(
     }
 }
 
+@Serializable
+@SerialName("cppType")
 class ResolvedCppType(
-    override var typeString: String,
-    var kotlinType: ResolvedKotlinType,
-    var cType: ResolvedCType,
-    var castMethod: CastMethod,
-    var isVoid: Boolean = false,
-) : ResolvedType(typeString) {
+    val type: String,
+    val kotlinType: ResolvedKotlinType,
+    val cType: ResolvedCType,
+    val castMethod: CastMethod,
+    val isVoid: Boolean = false
+) : ResolvedType(type) {
+    override val typeString: String
+        get() = type
+
     fun copy(
         typeString: String = this.typeString,
         kotlinType: ResolvedKotlinType = this.kotlinType,
         cType: ResolvedCType = this.cType,
         castMethod: CastMethod = this.castMethod,
-        isVoid: Boolean = this.isVoid,
+        isVoid: Boolean = this.isVoid
     ): ResolvedCppType {
         return ResolvedCppType(
             typeString,
@@ -71,39 +84,49 @@ class ResolvedCppType(
             isVoid
         )
     }
+
+    override fun cloneWithoutChildren(): ResolvedCppType {
+        return copy()
+    }
 }
 
+@Serializable
+@SerialName("cType")
 data class ResolvedCType(
-    override var typeString: String,
-    var isVoid: Boolean = false
-) : ResolvedType(typeString) {
+    val type: String,
+    val isVoid: Boolean = false
+) : ResolvedType(type) {
+
+    override val typeString: String
+        get() = type
+
     override fun toString(): String = typeString
+
+    override fun cloneWithoutChildren(): ResolvedCType {
+        return copy()
+    }
 }
 
+@Serializable
+@SerialName("kotlinType")
 data class ResolvedKotlinType(
-    private var qualifyList: List<String>,
-    var isWrapper: Boolean,
-    var templates: List<ResolvedKotlinType> = emptyList(),
-    var isNullable: Boolean = false
+    private val qualifyList: List<String>,
+    val isWrapper: Boolean,
+    val templates: List<ResolvedKotlinType> = emptyList(),
+    val isNullable: Boolean = false
 ) : ResolvedType(qualifyList.last()), FqSymbol {
     private val mappedName: String
         get() {
             return remap?.get(fullyQualified) ?: qualifyList.last()
         }
-    var name: String
+    val name: String
         get() = if (templates.isNotEmpty()) {
             "$mappedName<${templates.joinToString(", ") { it.name }}>" +
                 "${if (isNullable) "?" else ""}"
         } else "$mappedName${if (isNullable) "?" else ""}"
-        set(value) {
-            qualifyList = qualifyList.subList(0, qualifyList.size - 1) + value
-        }
-    var pkg: String
+    val pkg: String
         get() = qualifyList.subList(0, qualifyList.size - 1).joinToString(".") {
             it.replaceFirstChar { it.lowercase() }
-        }
-        set(value) {
-            qualifyList = value.split(".") + qualifyList.last()
         }
     val fullyQualified: String
         get() = qualifyList.mapIndexed { i, s ->
@@ -119,6 +142,10 @@ data class ResolvedKotlinType(
         isWrapper,
         isNullable = isNullable
     )
+
+    override fun cloneWithoutChildren(): ResolvedKotlinType {
+        return copy(templates = templates.map { it.cloneWithoutChildren() })
+    }
 
     private var remap: Map<String, String>? = null
 

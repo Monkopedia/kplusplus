@@ -15,9 +15,14 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
+import com.monkopedia.krapper.FilterableTypes
 import com.monkopedia.krapper.ResolvedOperator
+import com.monkopedia.krapper.TypeTarget
+import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
 import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 enum class MethodType {
     CONSTRUCTOR,
@@ -45,43 +50,126 @@ enum class AllocationStyle {
     STACK
 }
 
-class ResolvedConstructor(
-    name: String,
-    returnType: ResolvedCppType,
-    var isCopyConstructor: Boolean,
-    var isDefaultConstructor: Boolean,
-    uniqueCName: String?,
-    args: List<ResolvedArgument>,
-    var allocationStyle: AllocationStyle
-) : ResolvedMethod(
-    name,
-    returnType,
-    MethodType.CONSTRUCTOR,
-    uniqueCName,
-    null,
-    args,
-    ReturnStyle.VOIDP,
-    false,
-    returnType.typeString
-)
+@Serializable
+@SerialName("constructor")
+class ResolvedConstructor : ResolvedMethod {
+    var isCopyConstructor: Boolean = false
+    var isDefaultConstructor: Boolean = false
+    var allocationStyle: AllocationStyle = DIRECT
 
-class ResolvedDestructor(
-    name: String,
-    returnType: ResolvedCppType,
-    uniqueCName: String?,
-    args: List<ResolvedArgument>
-) : ResolvedMethod(
-    name,
-    returnType,
-    MethodType.DESTRUCTOR,
-    uniqueCName,
-    null,
-    args,
-    ReturnStyle.VOID,
-    false,
-    returnType.typeString
-)
+    constructor(
+        name: String,
+        returnType: ResolvedCppType,
+        isCopyConstructor: Boolean,
+        isDefaultConstructor: Boolean,
+        uniqueCName: String?,
+        args: List<ResolvedArgument>,
+        allocationStyle: AllocationStyle
+    ) : super(
+        name,
+        returnType,
+        MethodType.CONSTRUCTOR,
+        uniqueCName,
+        null,
+        args,
+        ReturnStyle.VOIDP,
+        false,
+        returnType.typeString
+    ) {
+        this.isCopyConstructor = isCopyConstructor
+        this.isDefaultConstructor = isDefaultConstructor
+        this.allocationStyle = allocationStyle
+    }
 
+    fun copy(
+        name: String = this.name,
+        returnType: ResolvedCppType = this.returnType,
+        uniqueCName: String? = this.uniqueCName,
+        args: List<ResolvedArgument> = this.args,
+        isDefaultConstructor: Boolean = this.isDefaultConstructor,
+        isCopyConstructor: Boolean = this.isCopyConstructor,
+        allocationStyle: AllocationStyle = this.allocationStyle
+    ): ResolvedMethod {
+        return ResolvedConstructor(
+            name,
+            returnType,
+            isCopyConstructor,
+            isDefaultConstructor,
+            uniqueCName,
+            args.map { it.copy() },
+            allocationStyle
+        )
+    }
+
+    override fun copy(
+        name: String,
+        returnType: ResolvedCppType,
+        methodType: MethodType,
+        uniqueCName: String?,
+        operator: ResolvedOperator?,
+        args: List<ResolvedArgument>,
+        returnStyle: ReturnStyle,
+        argCastNeedsPointer: Boolean,
+        qualified: String
+    ): ResolvedConstructor {
+        return ResolvedConstructor(
+            name,
+            returnType,
+            isCopyConstructor,
+            isDefaultConstructor,
+            uniqueCName,
+            args.map { it.copy() },
+            allocationStyle
+        ).also {
+            it.parent = parent
+        }
+    }
+}
+
+@Serializable
+@SerialName("destructor")
+class ResolvedDestructor : ResolvedMethod {
+    constructor(
+        name: String,
+        returnType: ResolvedCppType,
+        uniqueCName: String?,
+        args: List<ResolvedArgument>
+    ) : super(
+        name,
+        returnType,
+        MethodType.DESTRUCTOR,
+        uniqueCName,
+        null,
+        args,
+        ReturnStyle.VOID,
+        false,
+        returnType.typeString
+    )
+
+    override fun copy(
+        name: String,
+        returnType: ResolvedCppType,
+        methodType: MethodType,
+        uniqueCName: String?,
+        operator: ResolvedOperator?,
+        args: List<ResolvedArgument>,
+        returnStyle: ReturnStyle,
+        argCastNeedsPointer: Boolean,
+        qualified: String
+    ): ResolvedDestructor {
+        return ResolvedDestructor(
+            name,
+            returnType,
+            uniqueCName,
+            args.map { it.copy() }
+        ).also {
+            it.parent = parent
+        }
+    }
+}
+
+@Serializable
+@SerialName("method")
 open class ResolvedMethod(
     var name: String,
     var returnType: ResolvedCppType,
@@ -94,7 +182,7 @@ open class ResolvedMethod(
     var qualified: String
 ) : ResolvedElement() {
 
-    fun copy(
+    open fun copy(
         name: String = this.name,
         returnType: ResolvedCppType = this.returnType,
         methodType: MethodType = this.methodType,
@@ -103,7 +191,7 @@ open class ResolvedMethod(
         args: List<ResolvedArgument> = this.args,
         returnStyle: ReturnStyle = this.returnStyle,
         argCastNeedsPointer: Boolean = this.argCastNeedsPointer,
-        qualified: String = this.qualified,
+        qualified: String = this.qualified
     ): ResolvedMethod {
         return ResolvedMethod(
             name,
@@ -111,7 +199,7 @@ open class ResolvedMethod(
             methodType,
             uniqueCName,
             operator,
-            args,
+            args.map { it.copy() },
             returnStyle,
             argCastNeedsPointer,
             qualified
@@ -120,9 +208,15 @@ open class ResolvedMethod(
         }
     }
 
+    override fun cloneWithoutChildren(): ResolvedMethod {
+        return copy()
+    }
+
     override fun toString(): String {
         return "fun $name(${args.joinToString(", ")}): $returnType"
     }
+
+    companion object : TypeTarget<ResolvedMethod>(FilterableTypes.METHOD, ResolvedMethod::class)
 }
 
 enum class ArgumentCastMode {
@@ -133,6 +227,7 @@ enum class ArgumentCastMode {
     STD_MOVE
 }
 
+@Serializable
 data class ResolvedArgument(
     val name: String,
     var type: ResolvedCppType,

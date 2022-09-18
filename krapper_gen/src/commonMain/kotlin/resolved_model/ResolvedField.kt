@@ -15,9 +15,14 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
+import com.monkopedia.krapper.FilterableTypes
+import com.monkopedia.krapper.TypeTarget
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class ResolvedFieldGetter(
     var uniqueCName: String?,
     var returnStyle: ReturnStyle,
@@ -26,21 +31,29 @@ data class ResolvedFieldGetter(
     var needsDereference: Boolean
 )
 
+@Serializable
 data class ResolvedFieldSetter(
     var uniqueCName: String?,
     var argument: List<ResolvedArgument>
 )
 
+@Serializable
+@SerialName("field")
 data class ResolvedField(
     val name: String,
-    var isConst: Boolean,
-    var getter: ResolvedFieldGetter,
-    var setter: ResolvedFieldSetter,
-    var kotlinType: ResolvedKotlinType = (getter.returnType as? ResolvedCppType)?.kotlinType
+    val isConst: Boolean,
+    val getter: ResolvedFieldGetter,
+    val setter: ResolvedFieldSetter,
+    val kotlinType: ResolvedKotlinType = (getter.returnType as? ResolvedCppType)?.kotlinType
         ?: error("No type supplied")
 ) : ResolvedElement() {
+
+    override fun cloneWithoutChildren(): ResolvedField {
+        return copy(getter = getter.copy(), setter = setter.copy(), kotlinType = kotlinType.copy())
+    }
 
     override fun toString(): String {
         return "$name: $getter, $setter"
     }
+    companion object : TypeTarget<ResolvedField>(FilterableTypes.FIELD, ResolvedField::class)
 }

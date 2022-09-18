@@ -16,14 +16,26 @@
 package com.monkopedia.krapper.generator.resolved_model
 
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
+@Serializable
+@SerialName("template")
 data class ResolvedTemplate(
     val name: String,
     val baseClass: ResolvedType?,
-    var metadata: ResolvedClassMetadata,
+    val metadata: ResolvedClassMetadata,
     val qualified: String,
-    val templateArgs: List<ResolvedTemplateParam>,
+    val templateArgs: List<ResolvedTemplateParam>
 ) : ResolvedElement() {
+
+    override fun cloneWithoutChildren(): ResolvedTemplate {
+        return copy(
+            metadata = metadata.copy(),
+            baseClass = baseClass?.cloneWithoutChildren(),
+            templateArgs = templateArgs.map { it.copy() }
+        )
+    }
 
     val fields: List<ResolvedField>
         get() = children.filterIsInstance<ResolvedField>()
@@ -51,10 +63,11 @@ data class ResolvedTemplate(
     }
 }
 
+@Serializable
 data class ResolvedTemplateParam(
-    var name: String,
-    var usr: String,
-    var defaultType: ResolvedType?
+    val name: String,
+    val usr: String,
+    val defaultType: ResolvedType?
 ) {
 
     override fun toString(): String {
@@ -62,7 +75,15 @@ data class ResolvedTemplateParam(
     }
 }
 
-data class ResolvedTypedef(val name: String, val targetType: ResolvedType) : ResolvedElement() {
+@Serializable
+@SerialName("typedef")
+data class ResolvedTypedef(val name: String, val targetType: ResolvedType) :
+    ResolvedElement() {
+
+    override fun cloneWithoutChildren(): ResolvedTypedef {
+        return copy(targetType = targetType.cloneWithoutChildren())
+    }
+
     override fun toString(): String {
         return "typedef $name = $targetType"
     }

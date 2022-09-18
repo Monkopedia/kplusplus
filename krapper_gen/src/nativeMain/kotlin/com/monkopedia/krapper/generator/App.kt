@@ -21,52 +21,58 @@ import clang.CXCursorKind
 import clang.clang_visitChildren
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.enum
+import com.monkopedia.krapper.AddToChild
+import com.monkopedia.krapper.DefaultFilter
+import com.monkopedia.krapper.ErrorPolicy.FAIL
+import com.monkopedia.krapper.ErrorPolicy.LOG
+import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.KrapperConfig
+import com.monkopedia.krapper.KrapperService
+import com.monkopedia.krapper.ReplaceChild
+import com.monkopedia.krapper.addMapping
+import com.monkopedia.krapper.addTypedMapping
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
-import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.builders.LogPolicy
 import com.monkopedia.krapper.generator.builders.ThrowPolicy
-import com.monkopedia.krapper.generator.codegen.CppCompiler
-import com.monkopedia.krapper.generator.codegen.CppWriter
-import com.monkopedia.krapper.generator.codegen.DefWriter
 import com.monkopedia.krapper.generator.codegen.File
-import com.monkopedia.krapper.generator.codegen.HeaderWriter
-import com.monkopedia.krapper.generator.codegen.KotlinWriter
-import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.getcwd
-import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
 import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
 import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
+import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
+import com.monkopedia.ksrpc.channels.asConnection
+import com.monkopedia.ksrpc.channels.registerDefault
+import com.monkopedia.ksrpc.ksrpcEnvironment
+import com.monkopedia.ksrpc.posixFileReadChannel
+import com.monkopedia.ksrpc.posixFileWriteChannel
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
-import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.staticCFunction
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
+import platform.posix.STDIN_FILENO
+import platform.posix.STDOUT_FILENO
 
-enum class ErrorPolicy(val policy: CodeGenerationPolicy) {
-    FAIL(ThrowPolicy),
-    LOG(LogPolicy)
-}
+val ErrorPolicy.policy: CodeGenerationPolicy
+    get() = when (this) {
+        FAIL -> ThrowPolicy
+        LOG -> LogPolicy
+    }
 
-enum class ReferencePolicy {
-    IGNORE_MISSING,
-    OPAQUE_MISSING,
-    THROW_MISSING,
-    INCLUDE_MISSING
-}
+typealias ErrorPolicy = com.monkopedia.krapper.ErrorPolicy
+typealias ReferencePolicy = com.monkopedia.krapper.ReferencePolicy
 
 class KrapperGen : CliktCommand() {
     val header by option(
@@ -85,7 +91,7 @@ class KrapperGen : CliktCommand() {
         "--compiler",
         help = "Compiler to use for creating wrapper module"
     ).default("clang++")
-    val moduleName by argument(help = "Name of the wrapper module created")
+    val moduleName by argument(help = "Name of the wrapper module created").optional()
     val output by option("-o", "--outdir", help = "Directory to place generated files")
     val errorPolicy by option("--policy", help = "How to handle errors")
         .enum<ErrorPolicy>()
@@ -103,15 +109,29 @@ class KrapperGen : CliktCommand() {
     )
         .enum<ReferencePolicy>()
         .default(ReferencePolicy.IGNORE_MISSING)
+    val serviceMode by option(
+        "-s",
+        help = "Tells Krapper to host a ksrpc service on std in/out, and ignores all other options"
+    ).flag()
 
     override fun run() {
-        memScoped {
-            val index = createIndex(0, 0) ?: error("Failed to create Index")
-            defer { index.dispose() }
-            val includePaths = generateIncludes(compiler)
-            val args: Array<String> = arrayOf("-xc++", "--std=c++14") +
-                includePaths.map { "-I$it" }.toTypedArray()
-            println("Args: ${args.toList()}")
+        if (serviceMode) {
+            return runService()
+        }
+        runBlocking {
+            val service = KrapperServiceImpl()
+            service.setConfig(
+                KrapperConfig(
+                    pkg = pkg ?: "krapper.$moduleName",
+                    compiler = compiler,
+                    moduleName = moduleName ?: File(header.first()).name,
+                    errorPolicy = errorPolicy,
+                    referencePolicy = referencePolicy,
+                    debug = debug
+                )
+            )
+            val indexService = service.index(IndexRequest(header, library))
+            indexService.filterAndResolve(DefaultFilter)
 //            for (file in header) {
 //                val tu =
 //                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
@@ -145,142 +165,149 @@ class KrapperGen : CliktCommand() {
 // //                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
 // //                }
 //            }
-            val resolver = parseHeader(index, header, includePaths, debug = debug)
-            val initialClasses = resolver.findClasses(WrappedElement::defaultFilter)
-            val resolvingStr = initialClasses
-                .map { (it as? WrappedClass)?.type?.toString() ?: it.toString() }
-                .sorted()
-                .joinToString(",\n    ")
-            println("Resolving: [\n    $resolvingStr\n]")
-            val classes = initialClasses.resolveAll(resolver, referencePolicy)
-            println("Running mapping")
-            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
-                it.uniqueCName == "v8_ScriptOrigin_options"
-            }.forEach {
-                it.returnStyle = COPY_CONSTRUCTOR
-                it.returnType.typeString =
-                    it.returnType.typeString.removePrefix("const ").trimEnd('*')
-                // it.args[0].type =
-                println("Setting return type on $it")
-            }
-            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
-                it.returnType.toString().startsWith("const v8::Local<") ||
-                    it.returnType.toString().startsWith("const v8::Maybe<") ||
-                    it.returnType.toString().startsWith("const v8::MaybeLocal<") ||
-                    it.returnType.toString() == "const v8::ScriptOrigin*" ||
-                    it.returnType.toString() == "const v8::Location*"
-            }.forEach {
-                it.returnType.typeString = it.returnType.typeString.removePrefix("const ")
-                println("Clearing const return type on $it")
-            }
-            classes.recursiveSequence().filterIsInstance<ResolvedMethod>().filter {
-                it.uniqueCName == "_v8_Persistent_v8_Value_new" || it.uniqueCName == "v8_Persistent_v8_Value_op_assign" || it.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
-            }.forEach {
-                it.parent?.removeChild(it)
-                println("Removing $it")
-            }
-            classes.recursiveSequence().filterIsInstance<ResolvedClass>().filter {
-                it.type.typeString.matches(Regex("std::unique_ptr<.*>"))
-            }.forEach { parent ->
-                val wrappedType = WrappedType(
-                    parent.type.typeString.replace(
-                        "std::unique_ptr<",
-                        ""
-                    ).removeSuffix(">")
-                )
-                parent.addChild(
-                    ResolvedMethod(
-                        "get",
-                        parent.type.copy(
-                            typeString = wrappedType.toString(),
-                            kotlinType = toResolvedKotlinType(
-                                wrappedType.kotlinType
-                            ),
-                            cType = toResolvedCType(wrappedType.cType)
-                        ),
-                        METHOD,
-                        "_custom_unique_ptr_get_${
-                        parent.type.typeString.replace("<", "_").replace(">", "_")
-                            .replace("::", "_")
-                        }",
-                        null,
-                        listOf(
-                            ResolvedArgument(
-                                "thiz",
-                                parent.type.copy().apply {
-                                    typeString += "*"
-                                    cType = ResolvedCType("void*", false)
-                                },
-                                parent.type.copy().apply {
-                                    typeString += "*"
-                                    cType = ResolvedCType("void*", false)
-                                },
-                                "",
-                                REINT_CAST,
-                                needsDereference = true,
-                                hasDefault = false
+            indexService.addTypedMapping(
+                ResolvedMethod,
+                filter = {
+                    parent(qualified eq "v8::ScriptOrigin") and
+                        (methodName eq "options")
+                },
+                handler = { element ->
+                    println("Setting return type on $element")
+                    element.replaceWith(
+                        element.copy(
+                            returnStyle = COPY_CONSTRUCTOR,
+                            returnType = element.returnType.copy(
+                                typeString =
+                                element.returnType.typeString.removePrefix("const ")
+                                    .trimEnd('*')
                             )
-                        ),
-                        ReturnStyle.VOIDP,
-                        false,
-                        parent.type.typeString
-                    ).also {
-                        println("Adding $it to $parent")
+                        )
+                    )
+                }
+            )
+            indexService.addTypedMapping(
+                ResolvedMethod,
+                filter = {
+                    (methodReturnType startsWith "const v8::Local<") or
+                        (methodReturnType startsWith "const v8::Maybe<") or
+                        (methodReturnType startsWith "const v8::MaybeLocal<") or
+                        (methodReturnType startsWith "const v8::ScriptOrigin<") or
+                        (methodReturnType startsWith "const v8::Location<")
+                },
+                handler = { element ->
+                    println("Clearing const return type on $element")
+                    listOf(
+                        ReplaceChild(
+                            element.copy(
+                                returnType = element.returnType.copy(
+                                    typeString = element.returnType.typeString.removePrefix(
+                                        "const "
+                                    )
+                                )
+                            )
+                        )
+                    )
+                }
+            )
+            indexService.addTypedMapping(
+                ResolvedMethod,
+                filter = {
+                    parent(qualified eq "v8::Persistent<v8::Value>")
+                },
+                handler = { element ->
+                    if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
+                        element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
+                        element.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
+                    ) {
+                        println("Removing $element")
+                        element.remove()
                     }
-                )
-            }
+                }
+            )
+            indexService.addTypedMapping(ResolvedClass)
+            indexService.addMapping(
+                filter = {
+                    (thiz isType ResolvedClass) and
+                        (qualified startsWith "std::unique_ptr") and
+                        (className eq "unique_ptr")
+                },
+                handler = { request ->
+                    val parent = request.child
+                    parent as ResolvedClass
+                    val wrappedType = WrappedType(
+                        parent.type.typeString.replace(
+                            "std::unique_ptr<",
+                            ""
+                        ).removeSuffix(">")
+                    )
+                    listOf(
+                        AddToChild(
+                            ResolvedMethod(
+                                "get",
+                                parent.type.copy(
+                                    typeString = wrappedType.toString(),
+                                    kotlinType = toResolvedKotlinType(
+                                        wrappedType.kotlinType
+                                    ),
+                                    cType = toResolvedCType(wrappedType.cType)
+                                ),
+                                METHOD,
+                                "_custom_unique_ptr_get_${
+                                parent.type.typeString.replace("<", "_").replace(">", "_")
+                                    .replace("::", "_")
+                                }",
+                                null,
+                                listOf(
+                                    ResolvedArgument(
+                                        "thiz",
+                                        parent.type.copy().apply {
+                                            typeString += "*"
+                                            cType = ResolvedCType("void*", false)
+                                        },
+                                        parent.type.copy().apply {
+                                            typeString += "*"
+                                            cType = ResolvedCType("void*", false)
+                                        },
+                                        "",
+                                        REINT_CAST,
+                                        needsDereference = true,
+                                        hasDefault = false
+                                    )
+                                ),
+                                VOIDP,
+                                false,
+                                parent.type.typeString
+                            ).also {
+                                println("Adding $it to $parent")
+                            }
+                        )
+                    )
+                }
+            )
 //            debug?.let {
 //                val clsStr = Json.encodeToString(resolver.tu)
 //                File(it).writeText(clsStr)
 //            }
-            val resolvedClasses = classes
-                .map { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }
-                .sorted()
-                .joinToString(",\n    ")
-            println("Generating for [\n    $resolvedClasses\n]")
-            val outputBase = File(output ?: getcwd())
-            outputBase.mkdirs()
-            val namer = NameHandler()
-            File(outputBase, "$moduleName.h").writeText(
-                CppCodeBuilder().also {
-                    HeaderWriter(
-                        it,
-                        policy = errorPolicy.policy
-                    ).generate(moduleName, header, classes)
-                }.toString()
-            )
-            val cppFile = File(outputBase, "$moduleName.cc")
-            cppFile.writeText(
-                CppCodeBuilder().also {
-                    CppWriter(cppFile, it, policy = errorPolicy.policy).generate(
-                        moduleName,
-                        header,
-                        classes
-                    )
-                }.toString()
-            )
-            val pkg = pkg ?: "krapper.$moduleName"
-            File(outputBase, "$moduleName.def").writeText(
-                DefWriter(namer).generateDef(
-                    outputBase,
-                    "$pkg.internal",
-                    moduleName,
-                    header,
-                    library
+            indexService.writeTo(output ?: getcwd())
+        }
+    }
+
+    private fun runService() {
+        val input = posixFileReadChannel(STDIN_FILENO)
+        val output = posixFileWriteChannel(STDOUT_FILENO)
+        withoutIcanon {
+            runBlocking {
+                val connection = (input to output).asConnection(
+                    ksrpcEnvironment {
+                    }
                 )
-            )
-            CppCompiler(File(outputBase, "lib$moduleName.a"), compiler).compile(
-                cppFile,
-                header,
-                library
-            )
-            KotlinWriter(
-                "$pkg.internal",
-                policy = errorPolicy.policy
-            ).generate(
-                File(outputBase, "src"),
-                classes
-            )
+                connection.registerDefault<KrapperService>(KrapperServiceImpl())
+                val deferred = CompletableDeferred<Unit>()
+                connection.onClose {
+                    deferred.complete(Unit)
+                }
+                deferred.await()
+            }
         }
     }
 }

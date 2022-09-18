@@ -26,9 +26,42 @@ import clang.clang_formatDiagnostic
 import clang.clang_getCString
 import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
+import com.monkopedia.krapper.AndFilter
+import com.monkopedia.krapper.DefaultFilter
+import com.monkopedia.krapper.FilterDefinition
+import com.monkopedia.krapper.FilterableTypes
+import com.monkopedia.krapper.FilterableTypes.CLASS
+import com.monkopedia.krapper.FilterableTypes.FIELD
+import com.monkopedia.krapper.FilterableTypes.METHOD
+import com.monkopedia.krapper.FilterableTypes.TYPE
+import com.monkopedia.krapper.HierarchyFilter
+import com.monkopedia.krapper.HierarchyTarget.ALL_CHILDREN
+import com.monkopedia.krapper.HierarchyTarget.ANY_CHILD
+import com.monkopedia.krapper.HierarchyTarget.BASE
+import com.monkopedia.krapper.HierarchyTarget.PARENT
+import com.monkopedia.krapper.NotFilter
+import com.monkopedia.krapper.OrFilter
+import com.monkopedia.krapper.StringFilter
+import com.monkopedia.krapper.StringMatcher
+import com.monkopedia.krapper.StringMatcherType.CONTAINS
+import com.monkopedia.krapper.StringMatcherType.ENDS_WITH
+import com.monkopedia.krapper.StringMatcherType.EQUALS
+import com.monkopedia.krapper.StringMatcherType.REGEX
+import com.monkopedia.krapper.StringMatcherType.STARTS_WITH
+import com.monkopedia.krapper.StringSelector
+import com.monkopedia.krapper.StringSelector.CLASS_NAME
+import com.monkopedia.krapper.StringSelector.CLASS_QUALIFIED
+import com.monkopedia.krapper.StringSelector.METHOD_NAME
+import com.monkopedia.krapper.StringSelector.METHOD_RETURN_TYPE
+import com.monkopedia.krapper.StringSelector.METHOD_TYPE
+import com.monkopedia.krapper.StringSelector.NAMESPACE
+import com.monkopedia.krapper.StringSelector.STRINGIFY
+import com.monkopedia.krapper.TypeFilter
+import com.monkopedia.krapper.filter
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
+import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
@@ -44,10 +77,15 @@ import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
+import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolved_model.ResolvedField
+import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
-import kotlinx.cinterop.MemScope
+import kotlinx.cinterop.DeferScope
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
@@ -65,6 +103,190 @@ import platform.posix.system
 import platform.posix.write
 
 typealias ElementFilter = WrappedElement.() -> Boolean
+
+fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
+    return when (this) {
+        is AndFilter -> {
+            val each = this.elements.map { it.wrapperFilter() }
+            return { element ->
+                each.all { it(element) }
+            }
+        }
+        is OrFilter -> {
+            val each = this.elements.map { it.wrapperFilter() }
+            return { element ->
+                each.any { it(element) }
+            }
+        }
+        is NotFilter -> {
+            val base = this.base.wrapperFilter()
+            return { element ->
+                !base(element)
+            }
+        }
+        DefaultFilter -> {
+            return defaultFilter().wrapperFilter()
+        }
+        is HierarchyFilter -> {
+            val base = this.filter.wrapperFilter()
+            return when (this.target) {
+                PARENT -> { element ->
+                    element.parent?.let { base(it) } ?: false
+                }
+                BASE -> { element ->
+                    element.baseParent?.let { base(it) }
+                }
+                ANY_CHILD -> { element ->
+                    element.children.any(base)
+                }
+                ALL_CHILDREN -> { element ->
+                    element.children.all(base)
+                }
+            }
+        }
+        is StringFilter -> {
+            return { element ->
+                val str = this.selector.select(element)
+                this.matcher.matches(str)
+            }
+        }
+        is TypeFilter -> {
+            return { element ->
+                types.any {
+                    when (it) {
+                        CLASS -> element is WrappedClass
+                        METHOD -> element is WrappedMethod
+                        FIELD -> element is WrappedField
+                        TYPE -> element is WrappedType
+                        FilterableTypes.NAMESPACE -> element is WrappedNamespace
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun FilterDefinition.resolveFilter(): (ResolvedElement) -> Boolean {
+    return when (this) {
+        is AndFilter -> {
+            val each = this.elements.map { it.resolveFilter() }
+            return { element ->
+                each.all { it(element) }
+            }
+        }
+        is OrFilter -> {
+            val each = this.elements.map { it.resolveFilter() }
+            return { element ->
+                each.any { it(element) }
+            }
+        }
+        is NotFilter -> {
+            val base = this.base.resolveFilter()
+            return { element ->
+                !base(element)
+            }
+        }
+        DefaultFilter -> {
+            return defaultFilter().resolveFilter()
+        }
+        is HierarchyFilter -> {
+            val base = this.filter.resolveFilter()
+            return when (this.target) {
+                PARENT -> { element ->
+                    element.parent?.let { base(it) } ?: false
+                }
+                BASE -> { element ->
+                    element.baseParent?.let { base(it) }
+                }
+                ANY_CHILD -> { element ->
+                    element.children.any(base)
+                }
+                ALL_CHILDREN -> { element ->
+                    element.children.all(base)
+                }
+            }
+        }
+        is StringFilter -> {
+            return { element ->
+                val str = this.selector.select(element)
+                this.matcher.matches(str)
+            }
+        }
+        is TypeFilter -> {
+            return { element ->
+                types.any {
+                    when (it) {
+                        CLASS -> element is ResolvedClass
+                        METHOD -> element is ResolvedMethod
+                        FIELD -> element is ResolvedField
+                        TYPE -> element is ResolvedType
+                        FilterableTypes.NAMESPACE -> element is ResolvedNamespace
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun StringMatcher.matches(input: String?): Boolean {
+    val target = input ?: return false
+    return when (this.type) {
+        STARTS_WITH -> {
+            target.startsWith(this.str)
+        }
+        CONTAINS -> {
+            target.contains(this.str)
+        }
+        EQUALS -> {
+            target == this.str
+        }
+        ENDS_WITH -> {
+            target.endsWith(this.str)
+        }
+        REGEX -> {
+            Regex(this.str).matches(target)
+        }
+    }
+}
+
+private fun StringSelector.select(element: ResolvedElement): String? {
+    return when (this) {
+        STRINGIFY -> element.toString()
+        CLASS_NAME -> (element as? ResolvedClass)?.name
+        CLASS_QUALIFIED -> (element as? ResolvedClass)?.type?.type
+        METHOD_NAME -> (element as? ResolvedMethod)?.name
+        METHOD_TYPE -> (element as? ResolvedMethod)?.methodType?.toString()
+        METHOD_RETURN_TYPE -> (element as? ResolvedMethod)?.returnType?.type
+        NAMESPACE -> (element as? ResolvedNamespace)?.namespace
+    }
+}
+
+private fun StringSelector.select(element: WrappedElement): String? {
+    return when (this) {
+        STRINGIFY -> element.toString()
+        CLASS_NAME -> (element as? WrappedClass)?.name
+        CLASS_QUALIFIED -> (element as? WrappedClass)?.type?.toString()
+        METHOD_NAME -> (element as? WrappedMethod)?.name
+        METHOD_TYPE -> (element as? WrappedMethod)?.methodType?.toString()
+        METHOD_RETURN_TYPE -> (element as? WrappedMethod)?.returnType?.toString()
+        NAMESPACE -> (element as? WrappedNamespace)?.namespace
+    }
+}
+fun defaultFilter(): FilterDefinition {
+    return filter {
+        (
+            (thiz isType ResolvedClass) and
+                (!(qualified startsWith "std::")) and
+                (!(qualified.startsWith("__")))
+            ) or (
+            (thiz isType ResolvedMethod) and
+                (methodType eq STATIC.name) and
+                !(parent isType ResolvedClass) and
+                base(!(stringified startsWith "std")) and
+                parent(!((thiz isType ResolvedNamespace) and (namespace startsWith "_")))
+            )
+    }
+}
 
 fun WrappedElement.defaultFilter(): Boolean {
     if (this is WrappedClass) {
@@ -228,7 +450,7 @@ private class ResolverBuilderImpl : ResolverBuilder {
     }
 }
 
-fun MemScope.parseHeader(
+fun DeferScope.parseHeader(
     index: CXIndex,
     file: List<String>,
     includePaths: Array<String>,
@@ -251,7 +473,7 @@ fun MemScope.parseHeader(
     return ParsedResolver(tu)
 }
 
-private fun MemScope.parseHeader(
+private fun DeferScope.parseHeader(
     index: CXIndex,
     file: String,
     resolverBuilder: ResolverBuilder,
@@ -307,7 +529,9 @@ fun WrappedTemplate.typedAs(
     val mapping = mutableMapOf<String, WrappedType?>()
     for (i in 0 until min(templates.size, templateSpec.templateArgs.size)) {
         val mappedType = baseContext.map(templateSpec.templateArgs[i])
-            ?: throw IllegalArgumentException("Can't resolve ${templateSpec.templateArgs[i]} in $templateSpec")
+            ?: throw IllegalArgumentException(
+                "Can't resolve ${templateSpec.templateArgs[i]} in $templateSpec"
+            )
         mapping[templates[i].name] = mappedType
         mapping[templates[i].usr] = mappedType
         for (extra in templates[i].otherParams) {

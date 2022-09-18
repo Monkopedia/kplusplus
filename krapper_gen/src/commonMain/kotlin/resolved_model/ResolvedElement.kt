@@ -15,18 +15,32 @@
  */
 package com.monkopedia.krapper.generator.resolved_model
 
-open class ResolvedElement(
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+
+@Serializable
+abstract class ResolvedElement(
     private val mutableChildren: MutableList<ResolvedElement> = mutableListOf()
 ) {
     val children: List<ResolvedElement>
         get() = mutableChildren
+
+    @Transient
     var parent: ResolvedElement? = null
 
     fun clearChildren() {
         mutableChildren.clear()
     }
 
-    open fun addAllChildren(list: List<ResolvedElement>) {
+    fun clone(): ResolvedElement {
+        return cloneWithoutChildren().also { clone ->
+            clone.addAllChildren(children.map { it.clone() })
+        }
+    }
+
+    abstract fun cloneWithoutChildren(): ResolvedElement
+
+    internal open fun addAllChildren(list: List<ResolvedElement>) {
         list.forEach {
             require(!children.contains(it)) {
                 "$this already contains $it"
@@ -38,7 +52,7 @@ open class ResolvedElement(
         }
     }
 
-    open fun addChild(child: ResolvedElement) {
+    internal open fun addChild(child: ResolvedElement) {
         require(!children.contains(child)) {
             "$this already contain a $child"
         }
@@ -46,12 +60,19 @@ open class ResolvedElement(
         child.parent = this
     }
 
-    fun removeChild(child: ResolvedElement) {
+    internal fun removeChild(child: ResolvedElement) {
         mutableChildren.remove(child)
+    }
+
+    internal fun setParents() {
+        for (child in mutableChildren) {
+            child.parent = this
+            child.setParents()
+        }
     }
 }
 
-fun Collection<ResolvedElement>.recursiveSequence() = sequence<ResolvedElement> {
+fun Collection<ResolvedElement>.recursiveSequence() = sequence {
     for (element in this@recursiveSequence) {
         this.emitRecursive(element)
     }
