@@ -1,12 +1,12 @@
 /*
  * Copyright 2021 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,14 +14,17 @@
  * limitations under the License.
  */
 plugins {
-    kotlin("multiplatform") version "1.6.10"
-    kotlin("plugin.serialization") version "1.6.10"
+    kotlin("multiplatform")
+    kotlin("plugin.serialization") version "1.7.10"
 
+    id("com.monkopedia.ksrpc.plugin") version "0.6.0"
     id("c")
     id("cpp")
 }
 
 repositories {
+    mavenLocal()
+    mavenCentral()
     jcenter()
 }
 
@@ -55,14 +58,19 @@ kotlin {
             }
         }
     }
+    jvm()
     sourceSets["commonMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1-native-mt")
-        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.2.2")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1-native-mt")
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.2")
+        api(kotlin("stdlib"))
+        api("com.monkopedia:ksrpc:0.6.0")
     }
     sourceSets["nativeMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1-native-mt")
-        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.2.2")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1-native-mt")
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.2")
         implementation("com.github.ajalt.clikt:clikt:3.2.0")
+        api(kotlin("reflect"))
+        api("com.monkopedia:ksrpc:0.6.0")
     }
 }
 

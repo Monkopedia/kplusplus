@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 plugins {
-    kotlin("multiplatform") version "1.5.21"
-    kotlin("plugin.serialization") version "1.5.21"
+    kotlin("multiplatform")
+    kotlin("plugin.serialization") version "1.7.10"
 }
 
 repositories {

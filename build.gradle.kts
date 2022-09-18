@@ -6,6 +6,9 @@ buildscript {
         classpath("com.github.autostyle:com.github.autostyle.gradle.plugin:3.1")
     }
 }
+plugins {
+    kotlin("multiplatform") version "1.7.10" apply false
+}
 
 allprojects {
     afterEvaluate {
@@ -29,7 +32,7 @@ allprojects {
 
                 licenseHeader(
                     """
-                |Copyright 2021 Jason Monk
+                |Copyright 2022 Jason Monk
                 |
                 |Licensed under the Apache License, Version 2.0 (the "License");
                 |you may not use this file except in compliance with the License.
