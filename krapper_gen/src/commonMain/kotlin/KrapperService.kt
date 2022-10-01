@@ -8,13 +8,19 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class IndexRequest(
     val headers: List<String>,
-    val libraries: List<String>
+    val libraries: List<String>,
+    val headerDirectories: List<String> = headers.map { f ->
+        f.split("/").let { it.subList(0, it.size - 1).joinToString("/") }
+    }.distinct()
 )
 
 @KsService
 interface KrapperService : RpcService {
     @KsMethod("/ping")
     suspend fun ping(message: String): String
+
+    @KsMethod("/set_logger")
+    suspend fun setLogger(logger: RemoteLogger)
 
     @KsMethod("/set_config")
     suspend fun setConfig(config: KrapperConfig)

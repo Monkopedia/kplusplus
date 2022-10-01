@@ -60,6 +60,7 @@ sealed class ResolvedType(
 @Serializable
 @SerialName("cppType")
 class ResolvedCppType(
+    @SerialName("cppTypeString")
     val type: String,
     val kotlinType: ResolvedKotlinType,
     val cType: ResolvedCType,
@@ -91,8 +92,9 @@ class ResolvedCppType(
 }
 
 @Serializable
-@SerialName("cType")
+@SerialName("c_type")
 data class ResolvedCType(
+    @SerialName("cTypeString")
     val type: String,
     val isVoid: Boolean = false
 ) : ResolvedType(type) {
@@ -108,7 +110,7 @@ data class ResolvedCType(
 }
 
 @Serializable
-@SerialName("kotlinType")
+@SerialName("kotlin_type")
 data class ResolvedKotlinType(
     private val qualifyList: List<String>,
     val isWrapper: Boolean,
@@ -122,7 +124,7 @@ data class ResolvedKotlinType(
     val name: String
         get() = if (templates.isNotEmpty()) {
             "$mappedName<${templates.joinToString(", ") { it.name }}>" +
-                "${if (isNullable) "?" else ""}"
+                if (isNullable) "?" else ""
         } else "$mappedName${if (isNullable) "?" else ""}"
     val pkg: String
         get() = qualifyList.subList(0, qualifyList.size - 1).joinToString(".") {

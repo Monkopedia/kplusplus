@@ -82,7 +82,6 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
-import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.DeferScope
@@ -101,6 +100,7 @@ import platform.posix.getenv
 import platform.posix.read
 import platform.posix.system
 import platform.posix.write
+import kotlin.math.min
 
 typealias ElementFilter = WrappedElement.() -> Boolean
 
@@ -134,7 +134,7 @@ fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
                     element.parent?.let { base(it) } ?: false
                 }
                 BASE -> { element ->
-                    element.baseParent?.let { base(it) }
+                    base(element.baseParent)
                 }
                 ANY_CHILD -> { element ->
                     element.children.any(base)
@@ -196,7 +196,7 @@ fun FilterDefinition.resolveFilter(): (ResolvedElement) -> Boolean {
                     element.parent?.let { base(it) } ?: false
                 }
                 BASE -> { element ->
-                    element.baseParent?.let { base(it) }
+                    base(element.baseParent)
                 }
                 ANY_CHILD -> { element ->
                     element.children.any(base)
@@ -272,6 +272,7 @@ private fun StringSelector.select(element: WrappedElement): String? {
         NAMESPACE -> (element as? WrappedNamespace)?.namespace
     }
 }
+
 fun defaultFilter(): FilterDefinition {
     return filter {
         (
@@ -344,9 +345,7 @@ fun generateIncludes(compiler: String) = memScoped {
         throw IllegalStateException("Can't find includes for:\n$fullString")
     }
     return@memScoped (
-        lines.subList(start + 1, end).toList().map { it.trim() }.also {
-            println("Found include locations $it")
-        } + "."
+        lines.subList(start + 1, end).toList().map { it.trim() } + "."
         ).toTypedArray()
 }
 
@@ -378,7 +377,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         }
     }
 
-    override fun resolve(
+    override suspend fun resolve(
         type: WrappedType,
         context: ResolveContext
     ): Pair<ResolvedClass, WrappedClass>? {
@@ -405,8 +404,8 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         }
     }
 
-    override fun findClasses(filter: ElementFilter): List<WrappedElement> {
-        println("Finding classes")
+    override suspend fun findClasses(filter: ElementFilter): List<WrappedElement> {
+        Log.i("Finding classes")
         return mutableListOf<WrappedElement>().also { ret ->
             tu.forEachRecursive {
                 if (it.filter() == true) {
@@ -414,7 +413,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
                 }
             }
         }.also {
-            println("Found ${it.size} classes")
+            Log.i("Found ${it.size} classes")
         }
     }
 }
@@ -450,7 +449,7 @@ private class ResolverBuilderImpl : ResolverBuilder {
     }
 }
 
-fun DeferScope.parseHeader(
+suspend fun DeferScope.parseHeader(
     index: CXIndex,
     file: List<String>,
     includePaths: Array<String>,
@@ -469,7 +468,7 @@ fun DeferScope.parseHeader(
                 )
             }
         }
-    println("Reduced ${tu.children.size}")
+    Log.i("Reduced ${tu.children.size}")
     return ParsedResolver(tu)
 }
 
@@ -483,7 +482,9 @@ private fun DeferScope.parseHeader(
     debug: Boolean = false
 ): WrappedTU {
     val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
-    tu.printDiagnostics()
+    tu.printDiagnostics()?.let {
+        throw RuntimeException("Parse failure: $it")
+    }
     defer {
         tu.dispose()
     }
@@ -498,28 +499,34 @@ private fun DeferScope.parseHeader(
     return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
 }
 
-fun CXTranslationUnit.printDiagnostics() {
+fun CXTranslationUnit.printDiagnostics(): String? {
     val nbDiag = clang_getNumDiagnostics(this)
-    println("There are $nbDiag diagnostics:")
-
     var foundError = false
-    for (currentDiag in 0 until nbDiag.toInt()) {
-        val diagnotic = clang_getDiagnostic(this, currentDiag.toUInt())
-        val errorString =
-            clang_formatDiagnostic(diagnotic, clang_defaultDiagnosticDisplayOptions())
-        val str = clang_getCString(errorString)?.toKString()
-        clang_disposeString(errorString)
-        if (str?.contains("error:") == true) {
-            foundError = true
+    val errorString = buildString {
+        append("There are $nbDiag diagnostics:")
+        append('\n')
+
+        for (currentDiag in 0 until nbDiag.toInt()) {
+            val diagnotic = clang_getDiagnostic(this@printDiagnostics, currentDiag.toUInt())
+            val errorString =
+                clang_formatDiagnostic(diagnotic, clang_defaultDiagnosticDisplayOptions())
+            val str = clang_getCString(errorString)?.toKString()
+            clang_disposeString(errorString)
+            if (str?.contains("error:") == true) {
+                foundError = true
+            }
+            append("$str")
+            append('\n')
         }
-        println("$str")
     }
-    if (foundError) {
-        throw RuntimeException("Found errors parsing")
+    return if (foundError) {
+        errorString
+    } else {
+        null
     }
 }
 
-fun WrappedTemplate.typedAs(
+suspend fun WrappedTemplate.typedAs(
     templateSpec: WrappedTemplateType,
     baseContext: ResolveContext
 ): Pair<ResolvedClass, WrappedClass>? {

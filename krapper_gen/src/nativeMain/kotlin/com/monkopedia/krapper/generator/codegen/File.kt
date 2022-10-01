@@ -81,7 +81,7 @@ data class File(val pathSegments: List<String>) {
         return sequence {
             var dir = readdir(d)
             while (dir != null && dir.rawValue != NativePtr.NULL) {
-                val fileName = dir[0].d_name?.toKString()
+                val fileName = dir[0].d_name.toKString()
                 if (fileName != "." && fileName != "..") {
                     yield(fileName)
                 }

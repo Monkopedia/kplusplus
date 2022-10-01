@@ -72,7 +72,7 @@ abstract class WrappedType : WrappedElement() {
     abstract val isConst: Boolean
     abstract val unconst: WrappedType
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedElement? {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? {
         return resolverContext.resolve(this)
     }
 

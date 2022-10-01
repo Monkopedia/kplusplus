@@ -30,6 +30,7 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.fail
 
@@ -638,91 +639,91 @@ class FullKotlinTests {
     fun testVector_new() = runTest(
         cls = TestData.Vector.cls,
         target = (TestData.Vector.cls.first.children[1] as WrappedMethod),
-        expected = STD_VECTOR_STRING_NEW,
+        expected = STD_VECTOR_STRING_NEW
     )
 
     @Test
     fun testVector_dispose() = runTest(
         cls = TestData.Vector.cls,
         target = TestData.Vector.cls.first.children[2] as WrappedMethod,
-        expected = STD_VECTOR_STRING_DISPOSE,
+        expected = STD_VECTOR_STRING_DISPOSE
     )
 
     @Test
     fun testVector_pushBack() = runTest(
         cls = TestData.Vector.cls,
         target = TestData.Vector.cls.first.children[3] as WrappedMethod,
-        expected = STD_VECTOR_STRING_PUSH_BACK,
+        expected = STD_VECTOR_STRING_PUSH_BACK
     )
 
     @Test
     fun testOtherClass_new() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.constructor,
-        expected = TESTLIB_OTHERCLASS_NEW,
+        expected = TESTLIB_OTHERCLASS_NEW
     )
 
     @Test
     fun testOtherClass_dispose() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.destructor,
-        expected = TESTLIB_OTHERCLASS_DISPOSE,
+        expected = TESTLIB_OTHERCLASS_DISPOSE
     )
 
     @Test
     fun testOtherClass_getPrivateString() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.getPrivateString,
-        expected = TESTLIB_OTHERCLASS_GET_PRIVATE_STRING,
+        expected = TESTLIB_OTHERCLASS_GET_PRIVATE_STRING
     )
 
     @Test
     fun testOtherClass_setPrivateString() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.setPrivateString,
-        expected = TESTLIB_OTHERCLASS_SET_PRIVATE_STRING,
+        expected = TESTLIB_OTHERCLASS_SET_PRIVATE_STRING
     )
 
     @Test
     fun testOtherClass_appendText() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.appendText,
-        expected = TESTLIB_OTHERCLASS_APPEND_TEXT,
+        expected = TESTLIB_OTHERCLASS_APPEND_TEXT
     )
 
     @Test
     fun testOtherClass_copies() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.copies,
-        expected = TESTLIB_OTHERCLASS_COPIES,
+        expected = TESTLIB_OTHERCLASS_COPIES
     )
 
     @Test
     fun testOtherClass_ints() = runTest(
         cls = TestData.OtherClass.cls,
         target = TestData.OtherClass.ints,
-        expected = TESTLIB_OTHERCLASS_INTS,
+        expected = TESTLIB_OTHERCLASS_INTS
     )
 
     @Test
     fun testTestClass_b() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.b,
-        expected = TESTLIB_TESTCLASS_B,
+        expected = TESTLIB_TESTCLASS_B
     )
 
     @Test
     fun testTestClass_st() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.st,
-        expected = TESTLIB_TESTCLASS_ST,
+        expected = TESTLIB_TESTCLASS_ST
     )
 
     @Test
     fun testTestClass_uit() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.uit,
-        expected = TESTLIB_TESTCLASS_UIT,
+        expected = TESTLIB_TESTCLASS_UIT
     )
 
     @Test
@@ -742,91 +743,91 @@ class FullKotlinTests {
     fun testTestClass_str() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.str,
-        expected = TESTLIB_TESTCLASS_STR,
+        expected = TESTLIB_TESTCLASS_STR
     )
 
     @Test
     fun testTestClass_c() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.c,
-        expected = TESTLIB_TESTCLASS_C,
+        expected = TESTLIB_TESTCLASS_C
     )
 
     @Test
     fun testTestClass_uc() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.uc,
-        expected = TESTLIB_TESTCLASS_UC,
+        expected = TESTLIB_TESTCLASS_UC
     )
 
     @Test
     fun testTestClass_s() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.s,
-        expected = TESTLIB_TESTCLASS_S,
+        expected = TESTLIB_TESTCLASS_S
     )
 
     @Test
     fun testTestClass_us() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.us,
-        expected = TESTLIB_TESTCLASS_US,
+        expected = TESTLIB_TESTCLASS_US
     )
 
     @Test
     fun testTestClass_i() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.i,
-        expected = TESTLIB_TESTCLASS_I,
+        expected = TESTLIB_TESTCLASS_I
     )
 
     @Test
     fun testTestClass_ui() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ui,
-        expected = TESTLIB_TESTCLASS_UI,
+        expected = TESTLIB_TESTCLASS_UI
     )
 
     @Test
     fun testTestClass_l() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.l,
-        expected = TESTLIB_TESTCLASS_L,
+        expected = TESTLIB_TESTCLASS_L
     )
 
     @Test
     fun testTestClass_ul() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ul,
-        expected = TESTLIB_TESTCLASS_UL,
+        expected = TESTLIB_TESTCLASS_UL
     )
 
     @Test
     fun testTestClass_ll() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ll,
-        expected = TESTLIB_TESTCLASS_LL,
+        expected = TESTLIB_TESTCLASS_LL
     )
 
     @Test
     fun testTestClass_ull() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ull,
-        expected = TESTLIB_TESTCLASS_ULL,
+        expected = TESTLIB_TESTCLASS_ULL
     )
 
     @Test
     fun testTestClass_f() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.f,
-        expected = TESTLIB_TESTCLASS_F,
+        expected = TESTLIB_TESTCLASS_F
     )
 
     @Test
     fun testTestClass_d() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.d,
-        expected = TESTLIB_TESTCLASS_D,
+        expected = TESTLIB_TESTCLASS_D
     )
 
     @Test
@@ -834,386 +835,388 @@ class FullKotlinTests {
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ld,
 
-        expected = TESTLIB_TESTCLASS_LD,
+        expected = TESTLIB_TESTCLASS_LD
     )
 
     @Test
     fun testTestClass_pb() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pb,
-        expected = TESTLIB_TESTCLASS_PB,
+        expected = TESTLIB_TESTCLASS_PB
     )
 
     @Test
     fun testTestClass_pc() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pc,
-        expected = TESTLIB_TESTCLASS_PC,
+        expected = TESTLIB_TESTCLASS_PC
     )
 
     @Test
     fun testTestClass_puc() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.puc,
-        expected = TESTLIB_TESTCLASS_PUC,
+        expected = TESTLIB_TESTCLASS_PUC
     )
 
     @Test
     fun testTestClass_ps() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.ps,
-        expected = TESTLIB_TESTCLASS_PS,
+        expected = TESTLIB_TESTCLASS_PS
     )
 
     @Test
     fun testTestClass_pus() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pus,
-        expected = TESTLIB_TESTCLASS_PUS,
+        expected = TESTLIB_TESTCLASS_PUS
     )
 
     @Test
     fun testTestClass_pi() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pi,
-        expected = TESTLIB_TESTCLASS_PI,
+        expected = TESTLIB_TESTCLASS_PI
     )
 
     @Test
     fun testTestClass_pui() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pui,
-        expected = TESTLIB_TESTCLASS_PUI,
+        expected = TESTLIB_TESTCLASS_PUI
     )
 
     @Test
     fun testTestClass_pl() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pl,
-        expected = TESTLIB_TESTCLASS_PL,
+        expected = TESTLIB_TESTCLASS_PL
     )
 
     @Test
     fun testTestClass_pul() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pul,
-        expected = TESTLIB_TESTCLASS_PUL,
+        expected = TESTLIB_TESTCLASS_PUL
     )
 
     @Test
     fun testTestClass_pll() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pll,
-        expected = TESTLIB_TESTCLASS_PLL,
+        expected = TESTLIB_TESTCLASS_PLL
     )
 
     @Test
     fun testTestClass_pull() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pull,
-        expected = TESTLIB_TESTCLASS_PULL,
+        expected = TESTLIB_TESTCLASS_PULL
     )
 
     @Test
     fun testTestClass_pf() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pf,
-        expected = TESTLIB_TESTCLASS_PF,
+        expected = TESTLIB_TESTCLASS_PF
     )
 
     @Test
     fun testTestClass_pd() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.pd,
-        expected = TESTLIB_TESTCLASS_PD,
+        expected = TESTLIB_TESTCLASS_PD
     )
 
     @Test
     fun testTestClass_new() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.constructor,
-        expected = TESTLIB_TESTCLASS_NEW,
+        expected = TESTLIB_TESTCLASS_NEW
     )
 
     @Test
     fun testTestClass__new() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.copyConstructor,
-        expected = TESTLIB_TESTCLASS__NEW,
+        expected = TESTLIB_TESTCLASS__NEW
     )
 
     @Test
     fun testTestClass___new() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.otherConstructor,
-        expected = TESTLIB_TESTCLASS___NEW,
+        expected = TESTLIB_TESTCLASS___NEW
     )
 
     @Test
     fun testTestClass____new() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.twoParamConstructor,
-        expected = TESTLIB_TESTCLASS____NEW,
+        expected = TESTLIB_TESTCLASS____NEW
     )
 
     @Test
     fun testTestClass_dispose() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.destructor,
-        expected = TESTLIB_TESTCLASS_DISPOSE,
+        expected = TESTLIB_TESTCLASS_DISPOSE
     )
 
     @Test
     fun testTestClass_sum() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.sum,
-        expected = TESTLIB_TESTCLASS_SUM,
+        expected = TESTLIB_TESTCLASS_SUM
     )
 
     @Test
     fun testTestClass_longPointer() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.longPointer,
-        expected = TESTLIB_TESTCLASS_LONG_POINTER,
+        expected = TESTLIB_TESTCLASS_LONG_POINTER
     )
 
     @Test
     fun testTestClass_setSome() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.setSome,
-        expected = TESTLIB_TESTCLASS_SET_SOME,
+        expected = TESTLIB_TESTCLASS_SET_SOME
     )
 
     @Test
     fun testTestClass_setPointers() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.setPointers,
-        expected = TESTLIB_TESTCLASS_SET_POINTERS,
+        expected = TESTLIB_TESTCLASS_SET_POINTERS
     )
 
     @Test
     fun testTestClass_setPrivateString() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.setPrivateString,
-        expected = TESTLIB_TESTCLASS_SET_PRIVATE_STRING,
+        expected = TESTLIB_TESTCLASS_SET_PRIVATE_STRING
     )
 
     @Test
     fun testTestClass_setPrivateFrom() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.setPrivateFrom,
-        expected = TESTLIB_TESTCLASS_SET_PRIVATE_FROM,
+        expected = TESTLIB_TESTCLASS_SET_PRIVATE_FROM
     )
 
     @Test
     fun testTestClass_output() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.output,
-        expected = TESTLIB_TESTCLASS_OUTPUT,
+        expected = TESTLIB_TESTCLASS_OUTPUT
     )
 
     @Test
     fun testTestClass_op_minus() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorMinus,
-        expected = TESTLIB_TESTCLASS_MINUS,
+        expected = TESTLIB_TESTCLASS_MINUS
     )
 
     @Test
     fun testTestClass_op_minus_unary() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorUnaryMinus,
-        expected = TESTLIB_TESTCLASS_MINUS_UNARY,
+        expected = TESTLIB_TESTCLASS_MINUS_UNARY
     )
 
     @Test
     fun testTestClass_op_plus() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorPlus,
-        expected = TESTLIB_TESTCLASS_PLUS,
+        expected = TESTLIB_TESTCLASS_PLUS
     )
 
     @Test
     fun testTestClass_op_plus_unary() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorUnaryPlus,
-        expected = TESTLIB_TESTCLASS_PLUS_UNARY,
+        expected = TESTLIB_TESTCLASS_PLUS_UNARY
     )
 
     @Test
     fun testTestClass_op_times() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorTimes,
-        expected = TESTLIB_TESTCLASS_TIMES,
+        expected = TESTLIB_TESTCLASS_TIMES
     )
 
     @Test
     fun testTestClass_op_divide() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorDiv,
-        expected = TESTLIB_TESTCLASS_DIVIDE,
+        expected = TESTLIB_TESTCLASS_DIVIDE
     )
 
     @Test
     fun testTestClass_op_modulo() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorRem,
-        expected = TESTLIB_TESTCLASS_MODULO,
+        expected = TESTLIB_TESTCLASS_MODULO
     )
 
     @Test
     fun testTestClass_op_preinc() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorInc,
-        expected = TESTLIB_TESTCLASS_PRE_INC,
+        expected = TESTLIB_TESTCLASS_PRE_INC
     )
 
     @Test
     fun testTestClass_op_postinc() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorPostInc,
-        expected = TESTLIB_TESTCLASS_POST_INC,
+        expected = TESTLIB_TESTCLASS_POST_INC
     )
 
     @Test
     fun testTestClass_op_predec() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorDec,
-        expected = TESTLIB_TESTCLASS_PRE_DEC,
+        expected = TESTLIB_TESTCLASS_PRE_DEC
     )
 
     @Test
     fun testTestClass_op_postdec() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorPostDec,
-        expected = TESTLIB_TESTCLASS_POST_DEC,
+        expected = TESTLIB_TESTCLASS_POST_DEC
     )
 
     @Test
     fun testTestClass_op_eq() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorEq,
-        expected = TESTLIB_TESTCLASS_EQ_CMP,
+        expected = TESTLIB_TESTCLASS_EQ_CMP
     )
 
     @Test
     fun testTestClass_op_neq() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorNeq,
-        expected = TESTLIB_TESTCLASS_NEQ,
+        expected = TESTLIB_TESTCLASS_NEQ
     )
 
     @Test
     fun testTestClass_op_lt() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorLt,
-        expected = TESTLIB_TESTCLASS_LT,
+        expected = TESTLIB_TESTCLASS_LT
     )
 
     @Test
     fun testTestClass_op_gt() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorGt,
-        expected = TESTLIB_TESTCLASS_GT,
+        expected = TESTLIB_TESTCLASS_GT
     )
 
     @Test
     fun testTestClass_op_lteq() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorLteq,
-        expected = TESTLIB_TESTCLASS_LTEQ,
+        expected = TESTLIB_TESTCLASS_LTEQ
     )
 
     @Test
     fun testTestClass_op_gteq() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorGteq,
-        expected = TESTLIB_TESTCLASS_GTEQ,
+        expected = TESTLIB_TESTCLASS_GTEQ
     )
 
     @Test
     fun testTestClass_op_bnot() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorNot,
-        expected = TESTLIB_TESTCLASS_BNOT,
+        expected = TESTLIB_TESTCLASS_BNOT
     )
 
     @Test
     fun testTestClass_op_band() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorBinaryAnd,
-        expected = TESTLIB_TESTCLASS_BAND,
+        expected = TESTLIB_TESTCLASS_BAND
     )
 
     @Test
     fun testTestClass_op_bor() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorBinaryOr,
-        expected = TESTLIB_TESTCLASS_BOR,
+        expected = TESTLIB_TESTCLASS_BOR
     )
 
     @Test
     fun testTestClass_op_not() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorInv,
-        expected = TESTLIB_TESTCLASS_NOT,
+        expected = TESTLIB_TESTCLASS_NOT
     )
 
     @Test
     fun testTestClass_op_and() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorBitwiseAnd,
-        expected = TESTLIB_TESTCLASS_AND,
+        expected = TESTLIB_TESTCLASS_AND
     )
 
     @Test
     fun testTestClass_op_or() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorBitwiseOr,
-        expected = TESTLIB_TESTCLASS_OR,
+        expected = TESTLIB_TESTCLASS_OR
     )
 
     @Test
     fun testTestClass_op_xor() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorXor,
-        expected = TESTLIB_TESTCLASS_XOR,
+        expected = TESTLIB_TESTCLASS_XOR
     )
 
     @Test
     fun testTestClass_op_shl() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorShl,
-        expected = TESTLIB_TESTCLASS_SHL,
+        expected = TESTLIB_TESTCLASS_SHL
     )
 
     @Test
     fun testTestClass_op_shr() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorShr,
-        expected = TESTLIB_TESTCLASS_SHR,
+        expected = TESTLIB_TESTCLASS_SHR
     )
 
     @Test
     fun testTestClass_op_ind() = runTest(
         cls = TestData.TestClass.cls,
         target = TestData.TestClass.operatorInd,
-        expected = TESTLIB_TESTCLASS_IND,
+        expected = TESTLIB_TESTCLASS_IND
     )
 
-    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
-        assertCode(expected, buildCode(cls, target).toString())
-    }
+    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String): Unit =
+        runBlocking {
+            assertCode(expected, buildCode(cls, target).toString())
+        }
 
-    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String) {
-        assertCode(expected, buildCode(cls, target).toString())
-    }
+    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String): Unit =
+        runBlocking {
+            assertCode(expected, buildCode(cls, target).toString())
+        }
 
     private fun runTest(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedMethod,
         expected: String
-    ) {
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -1221,13 +1224,13 @@ class FullKotlinTests {
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedField,
         expected: String
-    ) {
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
-        target: WrappedField,
+        target: WrappedField
     ): KotlinCodeBuilder {
         val code = codeBuilder()
         val writer = kotlinWriter(code)
@@ -1239,9 +1242,9 @@ class FullKotlinTests {
         return code
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
-        target: WrappedMethod,
+        target: WrappedMethod
     ): KotlinCodeBuilder {
         val code = codeBuilder()
         val writer = kotlinWriter(code)
@@ -1249,7 +1252,8 @@ class FullKotlinTests {
         val target = element as ResolvedMethod
         with(writer) {
             code.onGenerate(
-                rcls, target,
+                rcls,
+                target,
                 object : LocalVar {
                     override val name: String
                         get() = "size"
@@ -1263,7 +1267,7 @@ class FullKotlinTests {
         return code
     }
 
-    private fun resolveType(
+    private suspend fun resolveType(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedElement
     ): Pair<ResolvedClass, ResolvedElement> {
@@ -1280,7 +1284,7 @@ class FullKotlinTests {
         return rcls to target
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: WrappedClass,
         target: WrappedField
     ): KotlinCodeBuilder {
@@ -1296,7 +1300,7 @@ class FullKotlinTests {
         return code
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: WrappedClass,
         target: WrappedMethod
     ): KotlinCodeBuilder {

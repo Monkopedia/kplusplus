@@ -36,7 +36,7 @@ class WrappedTU : WrappedElement() {
         }
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedTU {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedTU {
         return ResolvedTU().also {
             it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
         }

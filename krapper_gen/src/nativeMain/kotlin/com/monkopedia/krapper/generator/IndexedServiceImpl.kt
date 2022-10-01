@@ -14,6 +14,7 @@ import com.monkopedia.krapper.RemoveChild
 import com.monkopedia.krapper.RemoveParent
 import com.monkopedia.krapper.ReplaceChild
 import com.monkopedia.krapper.ReplaceParent
+import com.monkopedia.krapper.ResolverService
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.CppCompiler
 import com.monkopedia.krapper.generator.codegen.CppWriter
@@ -22,12 +23,16 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
-import com.monkopedia.krapper.generator.codegen.getcwd
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
 import kotlinx.cinterop.Arena
+import kotlinx.coroutines.runBlocking
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
     IndexedService {
@@ -48,19 +53,26 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     init {
         if (config.debug) {
-            println("Args: ${args.toList()}")
+            runBlocking {
+                Log.i("Args: ${args.toList()}")
+            }
         }
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {
-        val resolver = scope.parseHeader(index, request.headers, includePaths, debug = config.debug)
+        val resolver = scope.parseHeader(
+            index,
+            request.headers,
+            includePaths + request.headerDirectories,
+            debug = config.debug
+        )
         val initialClasses = resolver.findClasses(filter.wrapperFilter())
         if (config.debug) {
             val resolvingStr = initialClasses
                 .map { (it as? WrappedClass)?.type?.toString() ?: it.toString() }
                 .sorted()
                 .joinToString(",\n    ")
-            println("Resolving: [\n    $resolvingStr\n]")
+            Log.i("Resolving: [\n    $resolvingStr\n]")
         }
         classes = initialClasses.resolveAll(resolver, config.referencePolicy)
     }
@@ -71,7 +83,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun writeTo(output: String) {
         if (config.debug) {
-            println("Running mapping")
+            Log.i("Running mapping")
         }
         if (mappings.isNotEmpty()) {
             executeMappings()
@@ -81,7 +93,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 .map { (it as? ResolvedClass)?.type?.toString() ?: it.toString() }
                 .sorted()
                 .joinToString(",\n    ")
-            println("Generating for [\n    $resolvedClasses\n]")
+            Log.i("Generating for [\n    $resolvedClasses\n]")
         }
         val outputBase = File(output)
         outputBase.mkdirs()
@@ -129,13 +141,28 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     }
 
     private suspend fun executeMappings() {
-        val mappingsAndFilters = mappings.map { it.getFilter(Unit).resolveFilter() to it }
+        val resolver = object : ResolverService {
+            override suspend fun resolvedType(typeStr: String): ResolvedType {
+                return toResolvedCppType(WrappedType(typeStr))
+            }
+
+            override suspend fun resolvedKotlinType(typeStr: String): ResolvedKotlinType {
+                return toResolvedKotlinType(WrappedType(typeStr).kotlinType)
+            }
+
+            override suspend fun resolvedCType(typeStr: String): ResolvedCType {
+                return toResolvedCType(WrappedType(typeStr).cType)
+            }
+        }
+        val mappingsAndFilters = mappings.map {
+            it.getFilter(resolver).resolveFilter() to it
+        }
 
         classes.recursiveSequence().forEach { element ->
             for ((filter, mapper) in mappingsAndFilters) {
                 if (!filter(element)) continue
                 if (config.debug) {
-                    println("Executing mapping ($mapper) on $element")
+                    Log.i("Executing mapping ($mapper) on $element")
                 }
 
                 try {
@@ -146,15 +173,13 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                         )
                     )
                     if (config.debug) {
-                        println("     --> $results")
+                        Log.i("     --> $results")
                     }
                     for (result in results) {
                         applyResult(result, element)
                     }
                 } catch (t: Throwable) {
-                    if (config.debug) {
-                        t.printStackTrace()
-                    }
+                    Log.w(t.message + "\n" + t.stackTraceToString())
                     throw RuntimeException("Mapping failed for $element", t)
                 }
             }

@@ -50,7 +50,9 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolved_model.resolvedSerializerModule
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
+import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.channels.asConnection
 import com.monkopedia.ksrpc.channels.registerDefault
 import com.monkopedia.ksrpc.ksrpcEnvironment
@@ -61,9 +63,12 @@ import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
+import kotlin.system.exitProcess
 
 val ErrorPolicy.policy: CodeGenerationPolicy
     get() = when (this) {
@@ -140,29 +145,29 @@ class KrapperGen : CliktCommand() {
 //                    tu.dispose()
 //                }
 //                        val info = Utils.CursorTreeInfo(tu.cursor)
-//                        println("Writing ${tu.cursor.usr.toKString()}")
+//                        Log.i("Writing ${tu.cursor.usr.toKString()}")
 //                        File("/tmp/full_tree.json").writeText(Json.encodeToString(info))
 //                tu.cursor.filterChildrenRecursive {
 //                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
 //                        val info = Utils.CursorTreeInfo(it)
-//                        println("Writing ${it.usr.toKString()}")
+//                        Log.i("Writing ${it.usr.toKString()}")
 //                        File("/tmp/testlib_otherclass.json").writeText(Json.encodeToString(info))
 //                    }
 //                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("TestClass")) {
 //                        val info = Utils.CursorTreeInfo(it)
-//                        println("Writing ${it.usr.toKString()}")
+//                        Log.i("Writing ${it.usr.toKString()}")
 //                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
 //                    }
 //                    if (it.kind == CXCursorKind.CXCursor_ClassTemplate && it.fullyQualified.contains("basic_string") && !it.fullyQualified.contains("basic_stringbuf")) {
 //                        val info = Utils.CursorTreeInfo(it)
-//                        println("Writing ${it.usr.toKString()}")
+//                        Log.i("Writing ${it.usr.toKString()}")
 //                        File("/tmp/basic_string.json").writeText(Json.encodeToString(info))
 //                    }
 //                    false
 //                }
 // //                tu.cursor.filterChildren { true }.forEach {
 // //                    val cursor = KXCursor.generate(tu.cursor)
-// //                    println("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
+// //                    Log.i("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
 // //                }
 //            }
             indexService.addTypedMapping(
@@ -172,7 +177,7 @@ class KrapperGen : CliktCommand() {
                         (methodName eq "options")
                 },
                 handler = { element ->
-                    println("Setting return type on $element")
+                    Log.i("Setting return type on $element")
                     element.replaceWith(
                         element.copy(
                             returnStyle = COPY_CONSTRUCTOR,
@@ -195,7 +200,7 @@ class KrapperGen : CliktCommand() {
                         (methodReturnType startsWith "const v8::Location<")
                 },
                 handler = { element ->
-                    println("Clearing const return type on $element")
+                    Log.i("Clearing const return type on $element")
                     listOf(
                         ReplaceChild(
                             element.copy(
@@ -219,12 +224,12 @@ class KrapperGen : CliktCommand() {
                         element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
                         element.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
                     ) {
-                        println("Removing $element")
+                        Log.i("Removing $element")
                         element.remove()
                     }
                 }
             )
-            indexService.addTypedMapping(ResolvedClass)
+//            indexService.addTypedMapping(ResolvedClass)
             indexService.addMapping(
                 filter = {
                     (thiz isType ResolvedClass) and
@@ -260,14 +265,14 @@ class KrapperGen : CliktCommand() {
                                 listOf(
                                     ResolvedArgument(
                                         "thiz",
-                                        parent.type.copy().apply {
-                                            typeString += "*"
+                                        parent.type.copy(
+                                            typeString = parent.type.type + "*",
                                             cType = ResolvedCType("void*", false)
-                                        },
-                                        parent.type.copy().apply {
-                                            typeString += "*"
+                                        ),
+                                        parent.type.copy(
+                                            typeString = parent.type.type + "*",
                                             cType = ResolvedCType("void*", false)
-                                        },
+                                        ),
                                         "",
                                         REINT_CAST,
                                         needsDereference = true,
@@ -278,7 +283,7 @@ class KrapperGen : CliktCommand() {
                                 false,
                                 parent.type.typeString
                             ).also {
-                                println("Adding $it to $parent")
+                                Log.i("Adding $it to $parent")
                             }
                         )
                     )
@@ -299,14 +304,21 @@ class KrapperGen : CliktCommand() {
             runBlocking {
                 val connection = (input to output).asConnection(
                     ksrpcEnvironment {
+                        serialization = Json {
+                            serializersModule = resolvedSerializerModule
+                        }
+                        errorListener = ErrorListener { t ->
+                            launch {
+                                Log.e("Exception: " + t.message + "\n" + t.stackTraceToString())
+                            }
+                        }
                     }
                 )
                 connection.registerDefault<KrapperService>(KrapperServiceImpl())
                 val deferred = CompletableDeferred<Unit>()
                 connection.onClose {
-                    deferred.complete(Unit)
+                    exitProcess(0)
                 }
-                deferred.await()
             }
         }
     }

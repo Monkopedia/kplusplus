@@ -80,7 +80,7 @@ abstract class WrappedElement(
     }
 
     abstract fun clone(): WrappedElement
-    abstract fun resolve(resolverContext: ResolveContext): ResolvedElement?
+    abstract suspend fun resolve(resolverContext: ResolveContext): ResolvedElement?
 
     companion object {
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {

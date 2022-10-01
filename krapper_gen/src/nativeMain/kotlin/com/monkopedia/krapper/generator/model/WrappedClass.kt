@@ -47,7 +47,7 @@ class WrappedBase(val type: WrappedType?) : WrappedElement() {
         }
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 }
 
 data class ClassMetadata(
@@ -98,7 +98,7 @@ class WrappedClass(
         }
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedClass? {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedClass? {
         val baseClasses = resolverContext.findBases(this)
         modifyMethodsIfNeeded(baseClasses)
         return ResolvedClass(

@@ -39,9 +39,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1-native-mt")
 
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.10")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.2")
     implementation("com.google.guava:guava:31.1-jre")
-    implementation(project(":krapper_gen"))
+    api(project(":krapper_gen"))
     implementation("com.monkopedia:ksrpc:0.6.0")
+    implementation("io.ktor:ktor-io:2.0.3")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 
@@ -63,28 +65,71 @@ gradlePlugin {
     }
 }
 
-//val functionalTestSourceSet = sourceSets.create("functionalTest") {
-//}
+val functionalTestSourceSet = sourceSets.create("functionalTest") {
+}
 
-//configurations["functionalTestImplementation"].extendsFrom(configurations["testImplementation"])
+configurations["functionalTestImplementation"].extendsFrom(configurations["testImplementation"])
 
-//// Add a task to run the functional tests
-//val functionalTest by tasks.registering(Test::class) {
-    //testClassesDirs = functionalTestSourceSet.output.classesDirs
-    //classpath = functionalTestSourceSet.runtimeClasspath
-    //dependsOn(
-        //rootProject.findProject(":krapper_gen")?.tasks?.findByName(":linkDebugExecutableNative")
-    //)
-//}
+// Add a task to run the functional tests
+val functionalTest by tasks.registering(Test::class) {
+    testClassesDirs = functionalTestSourceSet.output.classesDirs
+    classpath = functionalTestSourceSet.runtimeClasspath
+    dependsOn(
+        rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative")
+    )
+}
 
-//gradlePlugin.testSourceSets(functionalTestSourceSet)
+gradlePlugin.testSourceSets(functionalTestSourceSet)
 
-//tasks.named<Task>("check") {
-    //dependsOn(functionalTest)
-//}
+tasks.named<Task>("check") {
+    dependsOn(functionalTest)
+}
 
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
+}
+
+val krapperGen = rootProject.findProject(":krapper_gen")!!
+
+val debugFrontend = true
+val copy = tasks.register<Copy>("copyKrapperExecutable") {
+    if (debugFrontend) {
+        from("${krapperGen.buildDir}/bin/native/debugExecutable/krapper_gen.kexe")
+    } else {
+        from("${krapperGen.buildDir}/bin/native/releaseExecutable/krapper_gen.kexe")
+    }
+    into("$buildDir/processedResources")
+}
+
+afterEvaluate {
+
+    tasks.named("copyKrapperExecutable") {
+        if (debugFrontend) {
+            dependsOn(krapperGen.tasks["linkDebugExecutableNative"])
+            mustRunAfter(krapperGen.tasks["linkDebugExecutableNative"])
+        } else {
+            dependsOn(krapperGen.tasks["linkReleaseExecutableNative"])
+            mustRunAfter(krapperGen.tasks["linkReleaseExecutableNative"])
+        }
+    }
+
+    tasks.named("jar") {
+        mustRunAfter("copyKrapperExecutable")
+    }
+}
+
+sourceSets {
+    main {
+        afterEvaluate {
+            tasks.named(processResourcesTaskName) {
+                dependsOn(copy)
+            }
+        }
+        resources {
+            srcDir("$buildDir/processedResources")
+            compiledBy(copy)
+        }
+    }
 }
 
 publishing {

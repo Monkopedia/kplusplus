@@ -30,7 +30,6 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.parentClass
-import com.monkopedia.krapper.generator.model.qualified
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
@@ -53,14 +52,14 @@ import com.monkopedia.krapper.generator.resolved_model.type.nullable
 import kotlinx.cinterop.CValue
 
 interface Resolver {
-    fun resolve(type: WrappedType, context: ResolveContext): Pair<ResolvedClass, WrappedClass>?
+    suspend fun resolve(type: WrappedType, context: ResolveContext): Pair<ResolvedClass, WrappedClass>?
     fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate
-    fun findClasses(filter: ElementFilter): List<WrappedElement>
+    suspend fun findClasses(filter: ElementFilter): List<WrappedElement>
 }
 
 class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     val resolvedClasses = mutableMapOf<String, ResolvedClass>()
-    fun canResolve(type: WrappedType, context: ResolveContext): Boolean {
+    suspend fun canResolve(type: WrappedType, context: ResolveContext): Boolean {
         if (type.isArray) return false
         if (type == WrappedType.UNRESOLVABLE) return false
         if (otherResolved.contains(type.toString())) return true
@@ -74,7 +73,7 @@ class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
         return canResolve(type.unconst.name, context)
     }
 
-    private fun canResolve(str: String, context: ResolveContext): Boolean {
+    private suspend fun canResolve(str: String, context: ResolveContext): Boolean {
         resolvedClasses[str]?.let {
             return if (it.isNotEmpty()) true else {
                 context.notifyFailed<Any>(null, null, "Empty resolve for $str")
@@ -104,7 +103,7 @@ interface ResolverBuilder {
     fun visit(type: CValue<CXType>): CValue<CXType>
 }
 
-fun List<WrappedElement>.resolveAll(
+suspend fun List<WrappedElement>.resolveAll(
     resolver: Resolver,
     policy: ReferencePolicy
 ): List<ResolvedElement> {
@@ -118,7 +117,7 @@ fun List<WrappedElement>.resolveAll(
         .withPolicy(policy)
     classes.forEach {
         if (resolveContext.resolve(it.type) == null) {
-            println("Warning: can't resolve filtered class ${it.type}")
+            Log.w("Warning: can't resolve filtered class ${it.type}")
         }
     }
     val methods = filterIsInstance<WrappedMethod>().mapNotNull { method ->
@@ -139,7 +138,7 @@ data class ResolveContext(
     var debugFilter: ((WrappedElement?, WrappedType?, String) -> Boolean)? = null
 ) {
 
-    fun map(type: WrappedType): WrappedType? {
+    suspend fun map(type: WrappedType): WrappedType? {
         if (type.isArray) return null
         return when (
             val mapResult = mappingCache.getOrPut(type) {
@@ -152,18 +151,18 @@ data class ResolveContext(
         }
     }
 
-    fun mapAndResolve(type: WrappedType): Pair<WrappedType, ResolvedCppType>? {
+    suspend fun mapAndResolve(type: WrappedType): Pair<WrappedType, ResolvedCppType>? {
         val type = map(type) ?: return null
         return type to toResolvedCppType(type)
     }
 
-    fun resolve(type: WrappedType): ResolvedCppType? {
+    suspend fun resolve(type: WrappedType): ResolvedCppType? {
         val type = map(type) ?: return null
         return toResolvedCppType(type)
     }
 
-    fun findBases(cls: WrappedClass): List<WrappedClass> {
-        cls.baseClass?.let(::resolve)
+    suspend fun findBases(cls: WrappedClass): List<WrappedClass> {
+        cls.baseClass?.let { resolve(it) }
         var baseCls = tracker.classes[cls.baseClass?.toString()]
         val list = mutableListOf<WrappedClass>()
         while (baseCls != null) {
@@ -192,7 +191,7 @@ data class ResolveContext(
         policy: ReferencePolicy
     ) = copy(typeMapping = typeMapper(policy), namer = NameHandler())
 
-    fun canAssign(type: WrappedType): Boolean {
+    suspend fun canAssign(type: WrappedType): Boolean {
         resolve(type) ?: return true
         if (type.isConst) {
             return false
@@ -214,13 +213,13 @@ data class ResolveContext(
         }
     }
 
-    fun <T> notifyFailed(
+    suspend fun <T> notifyFailed(
         element: WrappedElement?,
         type: WrappedType?,
         message: String
     ): T? {
         if (debugFilter?.invoke(element, type, message) == true) {
-            println("$element failed resolving $type: $message")
+            Log.w("$element failed resolving $type: $message")
         }
         return null
     }
@@ -230,7 +229,7 @@ data class ResolveContext(
             get() = ResolveContext(
                 ResolveTracker(mutableMapOf()),
                 object : Resolver {
-                    override fun resolve(
+                    override suspend fun resolve(
                         type: WrappedType,
                         context: ResolveContext
                     ): Pair<ResolvedClass, WrappedClass>? = null
@@ -240,7 +239,7 @@ data class ResolveContext(
                         context: ResolveContext
                     ): WrappedTemplate = error("Not found")
 
-                    override fun findClasses(filter: ElementFilter): List<WrappedClass> =
+                    override suspend fun findClasses(filter: ElementFilter): List<WrappedClass> =
                         emptyList()
                 },
                 { _, _ -> RemoveElement },
@@ -317,8 +316,8 @@ private fun typeMapper(
     }
 }
 
-fun WrappedType.operateOn(
-    typeHandler: (WrappedType) -> MapResult
+suspend fun WrappedType.operateOn(
+    typeHandler: suspend (WrappedType) -> MapResult
 ): MapResult {
     when {
         this is WrappedModifiedType -> {
@@ -347,7 +346,9 @@ fun WrappedType.operateOn(
     }
 }
 
-private fun WrappedTemplateType.handleTemplate(typeHandler: (WrappedType) -> MapResult): MapResult {
+private suspend fun WrappedTemplateType.handleTemplate(
+    typeHandler: suspend (WrappedType) -> MapResult
+): MapResult {
     val templates = templateArgs.map {
         when (val result = it.operateOn(typeHandler)) {
             RemoveElement -> return RemoveElement
@@ -373,22 +374,20 @@ inline fun MapResult.wrapOnReplace(
     }
 }
 
-private fun toResolvedCppType(type: WrappedType) =
-    ResolvedCppType(
-        type.toString(),
-        if (type.isPointer) nullable(toResolvedKotlinType(type.kotlinType))
-        else toResolvedKotlinType(type.kotlinType),
-        toResolvedCType(type.cType),
-        when {
-            type.isString -> STRING_CAST
-            type.isPointer && type.pointed.isString -> POINTED_STRING_CAST
-            type.isNative || (type.isPointer && type.pointed.isNative) -> NATIVE
-            else -> CAST
-        }
-    )
+fun toResolvedCppType(type: WrappedType) = ResolvedCppType(
+    type.toString(),
+    if (type.isPointer) nullable(toResolvedKotlinType(type.kotlinType))
+    else toResolvedKotlinType(type.kotlinType),
+    toResolvedCType(type.cType),
+    when {
+        type.isString -> STRING_CAST
+        type.isPointer && type.pointed.isString -> POINTED_STRING_CAST
+        type.isNative || (type.isPointer && type.pointed.isNative) -> NATIVE
+        else -> CAST
+    }
+)
 
-fun toResolvedCType(type: WrappedType) =
-    ResolvedCType(type.toString(), type.isVoid)
+fun toResolvedCType(type: WrappedType) = ResolvedCType(type.toString(), type.isVoid)
 
 fun toResolvedKotlinType(kotlinType: WrappedKotlinType): ResolvedKotlinType {
     if (kotlinType is NullableKotlinType) {

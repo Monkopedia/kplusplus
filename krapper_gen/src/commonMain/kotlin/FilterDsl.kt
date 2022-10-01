@@ -74,7 +74,7 @@ class FilterDsl {
 
     operator fun FilterDefinition.plus(other: FilterDefinition): FilterDefinition = and(other)
 
-    inline infix fun ElementTarget.isType(target: TypeTarget): FilterDefinition {
+    inline infix fun ElementTarget.isType(target: TypeTarget<*>): FilterDefinition {
         return wrap(TypeFilter(target.filterType))
     }
 

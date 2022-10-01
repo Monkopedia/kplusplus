@@ -68,7 +68,12 @@ import com.monkopedia.krapper.generator.builders.type
 import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
 import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolved_model.MethodType
+import com.monkopedia.krapper.generator.resolved_model.MethodType.CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolved_model.MethodType.DESTRUCTOR
+import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
 import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
+import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
+import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC_OP
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
@@ -342,17 +347,18 @@ class KotlinWriter(
         val uniqueCName =
             extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
         when (method.methodType) {
-            MethodType.CONSTRUCTOR -> {
+            CONSTRUCTOR -> {
                 generateConstructor(cls, method as ResolvedConstructor, size, uniqueCName)
             }
-            MethodType.DESTRUCTOR -> {
+            SIZE_OF,
+            DESTRUCTOR -> {
                 // Do nothing
             }
-            MethodType.STATIC -> {
+            STATIC -> {
                 onGenerate(method)
             }
-            MethodType.METHOD,
-            MethodType.STATIC_OP -> {
+            METHOD,
+            STATIC_OP -> {
                 val operator = method.operator
                 if (operator != null) {
                     generateOperator(operator, cls, method)

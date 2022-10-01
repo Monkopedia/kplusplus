@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator.resolved_model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.modules.SerializersModule
 
 @Serializable
 abstract class ResolvedElement(

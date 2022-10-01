@@ -17,7 +17,7 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.model.type.WrappedType
 
-typealias TypeMapping = (WrappedType, ResolveContext) -> MapResult
+typealias TypeMapping = suspend (WrappedType, ResolveContext) -> MapResult
 
 sealed class MapResult
 

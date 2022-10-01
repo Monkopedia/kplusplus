@@ -34,13 +34,14 @@ data class ResolvedClassMetadata(
 )
 
 @Serializable
-@SerialName("class")
+@SerialName("clazz")
 data class ResolvedClass(
     val name: String,
     val isAbstract: Boolean = false,
     val specifiedType: ResolvedType? = null,
     val metadata: ResolvedClassMetadata,
     val baseClass: ResolvedType?,
+    @SerialName("cppType")
     val type: ResolvedCppType
 ) : ResolvedElement() {
 

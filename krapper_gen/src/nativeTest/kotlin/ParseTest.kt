@@ -24,6 +24,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
 import kotlinx.cinterop.memScoped
+import kotlinx.coroutines.runBlocking
 import platform.posix.random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -42,7 +43,7 @@ class ParseTest {
 //    }
 
     @Test
-    fun testResolve() {
+    fun testResolve(): Unit = runBlocking {
         try {
             val resolver = ParsedResolver(TestData.TU)
             val cls = resolver.findClasses(WrappedElement::defaultFilter)
@@ -56,53 +57,66 @@ class ParseTest {
 
     @Test
     fun testTemplate() = memScoped {
-        val index = createIndex(0, 0) ?: error("Failed to create Index")
-        defer { index.dispose() }
-        val tmpFile = "/tmp/${random()}_${random()}"
-        File(tmpFile).writeText(TestData.TEMPLATE_HEADER)
-        val classes = parseHeader(index, listOf(tmpFile), generateIncludes("clang++")).also { println("Parsed") }.findClasses {
-            println("Filter $this")
-            defaultFilter()
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/${random()}_${random()}"
+            File(tmpFile).writeText(TestData.TEMPLATE_HEADER)
+            val classes = parseHeader(
+                index,
+                listOf(tmpFile),
+                generateIncludes("clang++")
+            ).also { println("Parsed") }.findClasses {
+                println("Filter $this")
+                defaultFilter()
+            }
+            println("Found classes ${classes.size}")
+            println(classes)
         }
-        println("Found classes ${classes.size}")
-        println(classes)
     }
 
     @Test
     fun testQualifiers() = memScoped {
-        val str = "std::vector<std::string>::iterator"
-        val indices = findQualifiers(str)
-        assertEquals(
-            listOf(
-                "std",
-                "vector<std::string>",
-                "iterator"
-            ),
-            indices.map { str.substring(it.start, it.endInclusive + 1) }
-        )
+        runBlocking {
+            val str = "std::vector<std::string>::iterator"
+            val indices = findQualifiers(str)
+            assertEquals(
+                listOf(
+                    "std",
+                    "vector<std::string>",
+                    "iterator"
+                ),
+                indices.map { str.substring(it.start, it.endInclusive + 1) }
+            )
+        }
     }
 
     @Test
     fun testResolveConstRef() = memScoped {
-        val result = listOf(TestData.TestClass.cls).resolveAll(
-            object : Resolver {
-                override fun resolve(type: WrappedType, context: ResolveContext): Pair<ResolvedClass, WrappedClass>? {
-                    error("Not supported")
-                }
+        runBlocking {
+            val result = listOf(TestData.TestClass.cls).resolveAll(
+                object : Resolver {
+                    override suspend fun resolve(
+                        type: WrappedType,
+                        context: ResolveContext
+                    ): Pair<ResolvedClass, WrappedClass>? {
+                        error("Not supported")
+                    }
 
-                override fun resolveTemplate(
-                    type: WrappedType,
-                    context: ResolveContext
-                ): WrappedTemplate {
-                    error("Not supported")
-                }
+                    override fun resolveTemplate(
+                        type: WrappedType,
+                        context: ResolveContext
+                    ): WrappedTemplate {
+                        error("Not supported")
+                    }
 
-                override fun findClasses(filter: ElementFilter): List<WrappedClass> {
-                    return emptyList()
-                }
-            },
-            ReferencePolicy.IGNORE_MISSING
-        )
-        assertTrue(result.first().children.any { (it as? ResolvedConstructor)?.isCopyConstructor == true })
+                    override suspend fun findClasses(filter: ElementFilter): List<WrappedClass> {
+                        return emptyList()
+                    }
+                },
+                ReferencePolicy.IGNORE_MISSING
+            )
+            assertTrue(result.first().children.any { (it as? ResolvedConstructor)?.isCopyConstructor == true })
+        }
     }
 }

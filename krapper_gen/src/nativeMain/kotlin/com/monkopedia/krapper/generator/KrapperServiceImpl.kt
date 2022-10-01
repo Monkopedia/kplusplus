@@ -4,6 +4,7 @@ import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.IndexedService
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.KrapperService
+import com.monkopedia.krapper.RemoteLogger
 import platform.posix.exit
 
 class KrapperServiceImpl : KrapperService {
@@ -11,6 +12,10 @@ class KrapperServiceImpl : KrapperService {
 
     override suspend fun ping(message: String): String {
         return "Krapper ping $message"
+    }
+
+    override suspend fun setLogger(logger: RemoteLogger) {
+        Log.loggerImpl = logger
     }
 
     override suspend fun setConfig(config: KrapperConfig) {

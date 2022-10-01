@@ -28,6 +28,7 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.fail
@@ -876,11 +877,11 @@ class CppHeaderTests {
         expected = TESTLIB_TESTCLASS_IND,
     )
 
-    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) {
+    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
-    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String) {
+    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -888,7 +889,7 @@ class CppHeaderTests {
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedMethod,
         expected: String
-    ) {
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -896,11 +897,11 @@ class CppHeaderTests {
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedField,
         expected: String
-    ) {
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedField,
     ): CppCodeBuilder {
@@ -914,7 +915,7 @@ class CppHeaderTests {
         return code
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedMethod,
     ): CppCodeBuilder {
@@ -928,7 +929,7 @@ class CppHeaderTests {
         return code
     }
 
-    private fun resolveType(
+    private suspend fun resolveType(
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedElement
     ): Pair<ResolvedClass, ResolvedElement> {
@@ -945,7 +946,7 @@ class CppHeaderTests {
         return rcls to target
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: WrappedClass,
         target: WrappedField
     ): CppCodeBuilder {
@@ -960,7 +961,7 @@ class CppHeaderTests {
         return code
     }
 
-    private fun buildCode(
+    private suspend fun buildCode(
         cls: WrappedClass,
         target: WrappedMethod
     ): CppCodeBuilder {

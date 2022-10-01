@@ -75,7 +75,7 @@ val ResolvedElement.parentClass: ResolvedClass?
 val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
 
-fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgument? {
+suspend fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgument? {
     val pointerParent = pointerTo(
         parentClass?.type ?: return resolverContext.notifyFailed(
             this,
@@ -91,7 +91,7 @@ fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgum
         type,
         castMode = REINT_CAST,
         needsDereference = true,
-        hasDefault = false,
+        hasDefault = false
     )
 }
 
@@ -129,7 +129,7 @@ class WrappedConstructor(
         }
     }
 
-    override fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument> {
+    override suspend fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument> {
         val type = resolverContext.resolve(pointerTo(VOID))!!
         return listOf(
             ResolvedArgument(
@@ -144,9 +144,9 @@ class WrappedConstructor(
         )
     }
 
-    private fun postArgs(resolverContext: ResolveContext): List<ResolvedArgument>? {
+    private suspend fun postArgs(resolverContext: ResolveContext): List<ResolvedArgument>? {
         if (allocationStyle != STACK) return emptyList()
-        val clsType = parentClass?.type?.let(resolverContext::resolve)
+        val clsType = parentClass?.type?.let { resolverContext.resolve(it) }
             ?: return resolverContext.notifyFailed(
                 this,
                 parentClass?.type,
@@ -174,7 +174,7 @@ class WrappedConstructor(
         )
     }
 
-    override fun resolve(
+    override suspend fun resolve(
         resolverContext: ResolveContext
     ): ResolvedConstructor? =
         with(resolverContext.currentNamer) {
@@ -208,7 +208,7 @@ class WrappedConstructor(
 
 class WrappedDestructor(
     name: String,
-    returnType: WrappedType,
+    returnType: WrappedType
 ) : WrappedMethod(name, returnType, MethodType.DESTRUCTOR) {
     override fun copy(
         name: String,
@@ -229,7 +229,7 @@ class WrappedDestructor(
         }
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedDestructor? =
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedDestructor? =
         with(resolverContext.currentNamer) {
             return ResolvedDestructor(
                 name,
@@ -244,7 +244,7 @@ class WrappedDestructor(
         }
 }
 
-fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext): ReturnStyle =
+suspend fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext): ReturnStyle =
     when {
         returnType.isVoid -> ReturnStyle.VOID
         !returnType.isReturnable ->
@@ -295,12 +295,12 @@ open class WrappedMethod(
         }
     }
 
-    protected open fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
+    protected open suspend fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
         if (methodType == SIZE_OF || methodType == STATIC) return emptyList()
         return listOf(createThisArg(resolverContext) ?: return null)
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedMethod? =
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedMethod? =
         with(resolverContext.currentNamer) {
             val (rawMapping, rawResolved) = resolverContext.mapAndResolve(returnType)
                 ?: return resolverContext.notifyFailed(
@@ -312,13 +312,15 @@ open class WrappedMethod(
             val type =
                 if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping)
                 else rawMapping
-            val resolvedReturnType = resolverContext.resolve(type)
+            var resolvedReturnType = resolverContext.resolve(type)
                 ?: return resolverContext.notifyFailed(
                     this@WrappedMethod,
                     type,
                     "Couldn't resolve pointed return"
                 )
-            resolvedReturnType.kotlinType = rawResolved.kotlinType
+            resolvedReturnType = resolvedReturnType.copy(
+                kotlinType = rawResolved.kotlinType
+            )
             val argCastNeedsPointer = if (returnStyle == ARG_CAST) {
                 val type =
                     if (rawMapping.isReference) rawMapping.unreferenced
@@ -326,13 +328,15 @@ open class WrappedMethod(
                 !type.isPointer
             } else false
             if (argCastNeedsPointer) {
-                resolvedReturnType.cType =
+                resolvedReturnType = resolvedReturnType.copy(
+                    cType =
                     resolverContext.resolve(pointerTo(rawMapping))?.cType
                         ?: return resolverContext.notifyFailed(
                             this@WrappedMethod,
                             pointerTo(rawMapping),
                             "Couldn't resolve argCast"
                         )
+                )
             }
             return ResolvedMethod(
                 name,
@@ -350,7 +354,7 @@ open class WrappedMethod(
             }
         }
 
-    protected fun resolveArguments(resolverContext: ResolveContext): List<ResolvedArgument>? {
+    protected suspend fun resolveArguments(resolverContext: ResolveContext): List<ResolvedArgument>? {
         val retArgs = mutableListOf<ResolvedArgument>()
 
         args.forEachIndexed { index, wrappedArgument ->
@@ -412,9 +416,9 @@ class WrappedArgument(
         return (other as? WrappedArgument)?.name == name && other.type == type
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 
-    fun resolveArgument(resolverContext: ResolveContext): ResolvedArgument? {
+    suspend fun resolveArgument(resolverContext: ResolveContext): ResolvedArgument? {
         val unreferencedType = if (type.isReference) type.unreferenced else type
         val (type, resolved) =
             resolverContext.mapAndResolve(unreferencedType)

@@ -53,7 +53,7 @@ data class WrappedField(
         return "$name: $type"
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedField? =
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedField? =
         with(resolverContext.currentNamer) {
             val (mappedType, resolvedType) = resolverContext.mapAndResolve(type)
                 ?: return resolverContext.notifyFailed(this@WrappedField, type, "Field type")

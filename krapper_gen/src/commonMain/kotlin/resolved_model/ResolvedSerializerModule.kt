@@ -19,7 +19,6 @@ val resolvedSerializerModule = SerializersModule {
         subclass(ResolvedDestructor::class)
         subclass(ResolvedMethod::class)
         subclass(ResolvedField::class)
-        subclass(ResolvedType::class)
         subclass(ResolvedCType::class)
         subclass(ResolvedCppType::class)
         subclass(ResolvedKotlinType::class)

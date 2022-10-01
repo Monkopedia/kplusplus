@@ -7,30 +7,37 @@ import com.monkopedia.ksrpc.channels.Connection
 import com.monkopedia.ksrpc.channels.asConnection
 import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.toStub
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertTrue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 
 class TestExecution {
 
     @Test
     fun testExecution(): Unit = runBlocking {
         withContext(Dispatchers.IO) {
+            val executable =
+                File("../krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe")
+            assertTrue(executable.exists())
+            val process = ProcessBuilder()
+                .command(executable.absolutePath, "-s")
+            val startedProcess = process.redirectInput(ProcessBuilder.Redirect.PIPE)
+                .redirectOutput(ProcessBuilder.Redirect.PIPE)
+                .start()
             try {
-                val executable =
-                    File("../krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe")
-                assertTrue(executable.exists())
-                val process = ProcessBuilder()
-                    .command(executable.absolutePath, "-s")
-                val connection = process.asConnection(
+                val input = startedProcess.inputStream
+                val output = startedProcess.outputStream
+                val connection = createConnection(
+                    input,
+                    output,
                     ksrpcEnvironment {
                         errorListener = ErrorListener {
                             it.printStackTrace()
@@ -40,8 +47,12 @@ class TestExecution {
                 val service = connection.defaultChannel().toStub<KrapperService>()
                 val ping = service.ping("A message")
                 println("Response: $ping")
-                connection.close()
+                try {
+                    connection.close()
+                } catch (t: CancellationException) {
+                }
             } catch (t: Throwable) {
+                println("Caught error $t")
                 t.printStackTrace()
             }
         }

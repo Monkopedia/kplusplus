@@ -38,7 +38,7 @@ class WrappedNamespace(val namespace: String) : WrappedElement() {
         }
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedNamespace {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedNamespace {
         return ResolvedNamespace(namespace).also {
             it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
         }

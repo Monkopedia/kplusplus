@@ -62,7 +62,7 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         value.spelling.toKString() ?: error("Missing name")
     )
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
         return ResolvedTemplate(
             name,
             baseClass?.let {
@@ -141,9 +141,9 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         return "$name${defaultType?.let { " $it" } ?: ""} ($children)"
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 
-    fun resolveTemplateParam(resolverContext: ResolveContext): ResolvedTemplateParam? {
+    suspend fun resolveTemplateParam(resolverContext: ResolveContext): ResolvedTemplateParam? {
         return ResolvedTemplateParam(
             name,
             usr,
@@ -194,7 +194,7 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
         return "typedef $name = $targetType"
     }
 
-    override fun resolve(resolverContext: ResolveContext): ResolvedElement? {
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? {
         return ResolvedTypedef(
             name,
             resolverContext.resolve(targetType) ?: return resolverContext.notifyFailed(

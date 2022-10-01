@@ -31,6 +31,7 @@ import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import kotlinx.coroutines.runBlocking
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -47,7 +48,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testEmptyFile() {
+    fun testEmptyFile() : Unit = runBlocking {
         val cls = WrappedClass("EmptyClass").apply {
             addChild(WrappedType("std::string")) // avoid being empty/removed.
             metadata.hasConstructor = true
@@ -105,7 +106,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testConstructor_noDestructor() {
+    fun testConstructor_noDestructor() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -162,7 +163,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testConstructor_destructor() {
+    fun testConstructor_destructor() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -225,7 +226,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_voidReturn() {
+    fun testMethod_voidReturn() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -276,7 +277,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_pointerInput() {
+    fun testMethod_pointerInput() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -327,7 +328,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_returnValue() {
+    fun testMethod_returnValue() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -370,7 +371,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_returnString() {
+    fun testMethod_returnString() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -422,7 +423,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_inputWrapped() {
+    fun testMethod_inputWrapped() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -480,7 +481,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testMethod_returnWrapped() {
+    fun testMethod_returnWrapped() : Unit = runBlocking {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
@@ -539,7 +540,7 @@ class KotlinCodeTests {
     }
 
     @Test
-    fun testTemplateNaming() {
+    fun testTemplateNaming() : Unit = runBlocking {
         val cls = WrappedClass("vector<std::string>::iterator").apply {
             addChild(WrappedType("std::string")) // Avoid being empty/removed
             metadata.hasConstructor = true
