@@ -1,0 +1,2 @@
+headers = v8config.h v8-cppgc.h v8-fast-api-calls.h v8.h v8-inspector.h v8-inspector-protocol.h v8-internal.h v8-metrics.h v8-platform.h v8-profiler.h v8-unwinder-state.h v8-util.h v8-value-serializer-version.h v8-version.h v8-version-string.h v8-wasm-trap-handler-posix.h
+staticLibraries = libv8_monolith.a
