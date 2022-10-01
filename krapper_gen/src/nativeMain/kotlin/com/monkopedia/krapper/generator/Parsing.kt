@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -82,6 +82,7 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
 import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
 import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.DeferScope
@@ -100,7 +101,6 @@ import platform.posix.getenv
 import platform.posix.read
 import platform.posix.system
 import platform.posix.write
-import kotlin.math.min
 
 typealias ElementFilter = WrappedElement.() -> Boolean
 

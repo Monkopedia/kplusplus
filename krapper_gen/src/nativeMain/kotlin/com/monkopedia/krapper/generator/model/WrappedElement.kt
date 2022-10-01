@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -115,7 +115,10 @@ abstract class WrappedElement(
                         return@forEachRecursive
                     }
                     val parentKind = childCursor.semanticParent.kind
-                    if (parentKind == CXCursor_ClassDecl || parentKind == CXCursor_ClassTemplate || parentKind == CXCursor_StructDecl) {
+                    if (parentKind == CXCursor_ClassDecl ||
+                        parentKind == CXCursor_ClassTemplate ||
+                        parentKind == CXCursor_StructDecl
+                    ) {
                         return@forEachRecursive
                     }
                 }
@@ -206,33 +209,35 @@ abstract class WrappedElement(
                 CXCursorKind.CXCursor_Namespace -> WrappedNamespace(
                     value.spelling.toKString() ?: error("Namespace without name")
                 )
-                CXCursorKind.CXCursor_Constructor -> WrappedConstructor(
-                    value.spelling.toKString() ?: "constructor", WrappedType.VOID,
-                    value.isCopyConstructor, value.isDefaultConstructor
-                ).also {
-                    for (i in 0 until value.numArguments) {
-                        it.addChild(
-                            WrappedArgument(
-                                value.getArgument(i.toUInt()),
-                                resolverBuilder,
-                                i
+                CXCursorKind.CXCursor_Constructor ->
+                    WrappedConstructor(
+                        value.spelling.toKString() ?: "constructor", WrappedType.VOID,
+                        value.isCopyConstructor, value.isDefaultConstructor
+                    ).also {
+                        for (i in 0 until value.numArguments) {
+                            it.addChild(
+                                WrappedArgument(
+                                    value.getArgument(i.toUInt()),
+                                    resolverBuilder,
+                                    i
+                                )
                             )
-                        )
+                        }
                     }
-                }
-                CXCursorKind.CXCursor_Destructor -> WrappedDestructor(
-                    value.spelling.toKString() ?: "destructor", WrappedType.VOID
-                ).also {
-                    for (i in 0 until value.numArguments) {
-                        it.addChild(
-                            WrappedArgument(
-                                value.getArgument(i.toUInt()),
-                                resolverBuilder,
-                                i
+                CXCursorKind.CXCursor_Destructor ->
+                    WrappedDestructor(
+                        value.spelling.toKString() ?: "destructor", WrappedType.VOID
+                    ).also {
+                        for (i in 0 until value.numArguments) {
+                            it.addChild(
+                                WrappedArgument(
+                                    value.getArgument(i.toUInt()),
+                                    resolverBuilder,
+                                    i
+                                )
                             )
-                        )
+                        }
                     }
-                }
 //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
                 CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
                     value,

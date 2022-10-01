@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -58,6 +58,7 @@ import com.monkopedia.ksrpc.channels.registerDefault
 import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.posixFileReadChannel
 import com.monkopedia.ksrpc.posixFileWriteChannel
+import kotlin.system.exitProcess
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
@@ -68,7 +69,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import platform.posix.STDIN_FILENO
 import platform.posix.STDOUT_FILENO
-import kotlin.system.exitProcess
 
 val ErrorPolicy.policy: CodeGenerationPolicy
     get() = when (this) {
@@ -183,8 +183,8 @@ class KrapperGen : CliktCommand() {
                             returnStyle = COPY_CONSTRUCTOR,
                             returnType = element.returnType.copy(
                                 typeString =
-                                element.returnType.typeString.removePrefix("const ")
-                                    .trimEnd('*')
+                                    element.returnType.typeString.removePrefix("const ")
+                                        .trimEnd('*')
                             )
                         )
                     )
@@ -222,7 +222,8 @@ class KrapperGen : CliktCommand() {
                 handler = { element ->
                     if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
                         element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
-                        element.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
+                        element.uniqueCName == "v8_platform_tracing_TraceWriter_create_" +
+                        "system_instrumentation_trace_writer"
                     ) {
                         Log.i("Removing $element")
                         element.remove()

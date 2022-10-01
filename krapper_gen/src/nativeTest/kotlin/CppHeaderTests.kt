@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Jason Monk
+ * Copyright 2022 Jason Monk
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,10 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.fail
+import kotlinx.coroutines.runBlocking
 
 class CppHeaderTests {
 
@@ -202,11 +202,14 @@ class CppHeaderTests {
 
     private val TESTLIB_TESTCLASS_NEW = "void* TestLib_TestClass_new(void* location);\n\n"
 
-    private val TESTLIB_TESTCLASS__NEW = "void* _TestLib_TestClass_new(void* location, void* other);\n\n"
+    private val TESTLIB_TESTCLASS__NEW =
+        "void* _TestLib_TestClass_new(void* location, void* other);\n\n"
 
-    private val TESTLIB_TESTCLASS___NEW = "void* __TestLib_TestClass_new(void* location, int a);\n\n"
+    private val TESTLIB_TESTCLASS___NEW =
+        "void* __TestLib_TestClass_new(void* location, int a);\n\n"
 
-    private val TESTLIB_TESTCLASS____NEW = "void* ___TestLib_TestClass_new(void* location, int a, double b);\n\n"
+    private val TESTLIB_TESTCLASS____NEW =
+        "void* ___TestLib_TestClass_new(void* location, int a, double b);\n\n"
 
     private val TESTLIB_TESTCLASS_DISPOSE = "void TestLib_TestClass_dispose(void* thiz);\n\n"
 
@@ -877,11 +880,19 @@ class CppHeaderTests {
         expected = TESTLIB_TESTCLASS_IND,
     )
 
-    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String): Unit = runBlocking {
+    private fun runTest(
+        cls: WrappedClass,
+        target: WrappedMethod,
+        expected: String
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
-    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String): Unit = runBlocking {
+    private fun runTest(
+        cls: WrappedClass,
+        target: WrappedField,
+        expected: String
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -954,7 +965,8 @@ class CppHeaderTests {
         val writer = headerWriter(code)
         val ctx = resolveContext()
         val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
-        val target = target.resolve(ctx + cls) ?: throw UnsupportedOperationException("Couldn't resolve $target")
+        val target = target.resolve(ctx + cls)
+            ?: throw UnsupportedOperationException("Couldn't resolve $target")
         with(writer) {
             code.onGenerate(rcls, target)
         }

@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -244,18 +244,20 @@ class WrappedDestructor(
         }
 }
 
-suspend fun determineReturnStyle(returnType: WrappedType, resolverContext: ResolveContext): ReturnStyle =
-    when {
-        returnType.isVoid -> ReturnStyle.VOID
-        !returnType.isReturnable ->
-            if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
-        returnType.isString -> STRING
-        returnType.isPointer && returnType.pointed.isString -> STRING_POINTER
-        returnType.isNative || returnType == LONG_DOUBLE ->
-            if (returnType.isReference) RETURN_REFERENCE else RETURN
-        returnType.isReference -> VOIDP_REFERENCE
-        else -> VOIDP
-    }
+suspend fun determineReturnStyle(
+    returnType: WrappedType,
+    resolverContext: ResolveContext
+): ReturnStyle = when {
+    returnType.isVoid -> ReturnStyle.VOID
+    !returnType.isReturnable ->
+        if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
+    returnType.isString -> STRING
+    returnType.isPointer && returnType.pointed.isString -> STRING_POINTER
+    returnType.isNative || returnType == LONG_DOUBLE ->
+        if (returnType.isReference) RETURN_REFERENCE else RETURN
+    returnType.isReference -> VOIDP_REFERENCE
+    else -> VOIDP
+}
 
 open class WrappedMethod(
     val name: String,
@@ -330,12 +332,12 @@ open class WrappedMethod(
             if (argCastNeedsPointer) {
                 resolvedReturnType = resolvedReturnType.copy(
                     cType =
-                    resolverContext.resolve(pointerTo(rawMapping))?.cType
-                        ?: return resolverContext.notifyFailed(
-                            this@WrappedMethod,
-                            pointerTo(rawMapping),
-                            "Couldn't resolve argCast"
-                        )
+                        resolverContext.resolve(pointerTo(rawMapping))?.cType
+                            ?: return resolverContext.notifyFailed(
+                                this@WrappedMethod,
+                                pointerTo(rawMapping),
+                                "Couldn't resolve argCast"
+                            )
                 )
             }
             return ResolvedMethod(
@@ -354,7 +356,9 @@ open class WrappedMethod(
             }
         }
 
-    protected suspend fun resolveArguments(resolverContext: ResolveContext): List<ResolvedArgument>? {
+    protected suspend fun resolveArguments(
+        resolverContext: ResolveContext
+    ): List<ResolvedArgument>? {
         val retArgs = mutableListOf<ResolvedArgument>()
 
         args.forEachIndexed { index, wrappedArgument ->

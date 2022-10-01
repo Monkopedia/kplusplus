@@ -1,3 +1,18 @@
+/*
+ * Copyright 2022 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.kplusplus
 
 import com.monkopedia.krapper.ErrorPolicy
@@ -12,9 +27,8 @@ import com.monkopedia.krapper.TypeTarget
 import com.monkopedia.krapper.filter
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.typedMapping
+import javax.inject.Inject
 import org.gradle.api.Action
-import org.gradle.api.Project
-import org.gradle.api.file.FileCollection
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.Input
@@ -22,7 +36,6 @@ import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Nested
 import org.gradle.api.tasks.Optional
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
-import javax.inject.Inject
 
 open class KPlusPlusExtension(
     @Nested
@@ -42,8 +55,14 @@ open class KPlusPlusExtension(
         val config = imports.find { it.name == name }
             ?: ImportConfig(
                 name,
-                headers = objectFactory.sourceDirectorySet("${name}Headers", "Header files for kplusplus $name import"),
-                library = objectFactory.sourceDirectorySet("${name}Library", "Library files for kplusplus $name import"),
+                headers = objectFactory.sourceDirectorySet(
+                    "${name}Headers",
+                    "Header files for kplusplus $name import"
+                ),
+                library = objectFactory.sourceDirectorySet(
+                    "${name}Library",
+                    "Library files for kplusplus $name import"
+                ),
             ).also { imports.add(it) }
         configure.execute(config)
     }
@@ -93,14 +112,18 @@ open class MappingBuilder<T : ResolvedElement>(
     }
 }
 
-inline fun <reified T : ResolvedElement> MappingBuilder<T>.find(noinline filter: FilterDsl.() -> FilterDefinition) {
+inline fun <reified T : ResolvedElement> MappingBuilder<T>.find(
+    noinline filter: FilterDsl.() -> FilterDefinition
+) {
     require(filterMethod == null) {
         "Cannot call find multiple times"
     }
     filterMethod = filter
 }
 
-inline fun <reified T : ResolvedElement> MappingBuilder<T>.onEach(noinline handler: suspend MappingScope.(T) -> Unit) {
+inline fun <reified T : ResolvedElement> MappingBuilder<T>.onEach(
+    noinline handler: suspend MappingScope.(T) -> Unit
+) {
     require(mappingMethod == null) {
         "Cannot call onEach multiple times"
     }

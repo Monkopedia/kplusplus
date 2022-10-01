@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,12 +23,12 @@ import com.monkopedia.krapper.generator.model.findQualifiers
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
-import kotlinx.cinterop.memScoped
-import kotlinx.coroutines.runBlocking
-import platform.posix.random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import kotlinx.coroutines.runBlocking
+import platform.posix.random
 
 class ParseTest {
 //    @Test
@@ -116,7 +116,11 @@ class ParseTest {
                 },
                 ReferencePolicy.IGNORE_MISSING
             )
-            assertTrue(result.first().children.any { (it as? ResolvedConstructor)?.isCopyConstructor == true })
+            assertTrue(
+                result.first().children.any {
+                    (it as? ResolvedConstructor)?.isCopyConstructor == true
+                }
+            )
         }
     }
 }

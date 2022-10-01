@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,9 +29,9 @@ import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
 import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
 import com.monkopedia.krapper.generator.resolved_model.ResolvedField
 import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.fail
+import kotlinx.coroutines.runBlocking
 
 class CppCodeTests {
     private val file = File("/tmp/out.cpp")
@@ -1332,11 +1332,19 @@ class CppCodeTests {
         assertCode(EMPTY, code.toString())
     }
 
-    private fun runTest(cls: WrappedClass, target: WrappedMethod, expected: String) : Unit = runBlocking{
+    private fun runTest(
+        cls: WrappedClass,
+        target: WrappedMethod,
+        expected: String
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
-    private fun runTest(cls: WrappedClass, target: WrappedField, expected: String) : Unit = runBlocking{
+    private fun runTest(
+        cls: WrappedClass,
+        target: WrappedField,
+        expected: String
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -1344,7 +1352,7 @@ class CppCodeTests {
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedMethod,
         expected: String
-    ) :Unit = runBlocking{
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -1352,7 +1360,7 @@ class CppCodeTests {
         cls: Pair<WrappedTemplate, WrappedTemplateType>,
         target: WrappedField,
         expected: String
-    ) : Unit = runBlocking{
+    ): Unit = runBlocking {
         assertCode(expected, buildCode(cls, target).toString())
     }
 
@@ -1410,7 +1418,8 @@ class CppCodeTests {
         val writer = cppWriter(code)
         val ctx = resolveContext()
         val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
-        val target = target.resolve(ctx + cls) ?: throw UnsupportedOperationException("Couldn't resolve $target")
+        val target = target.resolve(ctx + cls)
+            ?: throw UnsupportedOperationException("Couldn't resolve $target")
         with(writer) {
             code.onGenerate(rcls, target)
         }

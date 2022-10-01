@@ -1,9 +1,26 @@
+/*
+ * Copyright 2022 Jason Monk
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.monkopedia.kplusplus
 
 import com.monkopedia.krapper.DefaultFilter
 import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.RemoteLogger
+import java.io.File
+import java.util.Properties
 import kotlinx.coroutines.runBlocking
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -17,8 +34,6 @@ import org.gradle.api.tasks.TaskAction
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 import org.jetbrains.kotlin.konan.target.KonanTarget
-import java.io.File
-import java.util.*
 
 open class KPlusPlusPlugin : Plugin<Project> {
     override fun apply(target: Project) {
@@ -35,9 +50,10 @@ open class KPlusPlusPlugin : Plugin<Project> {
                 it.mkdirs()
             }
             for ((index, import) in ext.imports.withIndex()) {
-                // (cd ~/ksrpc/ksbox/k2v8/v8/include && rm -rf testout &&  ~/kplusplus/krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe -c /home/jmonk/.konan/dependencies/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2/bin/x86_64-unknown-linux-gnu-g++ -h v8-combined.h -l ../libv8_monolith.a libv8 -o testout -r include_missing )
                 val compilations = import.compilations?.takeIf { it.isNotEmpty() }
-                    ?: kotlinExt.targets.flatMap { it.compilations.filterIsInstance<KotlinNativeCompilation>() }
+                    ?: kotlinExt.targets.flatMap {
+                        it.compilations.filterIsInstance<KotlinNativeCompilation>()
+                    }
                 compilations.forEach { compilation ->
                     val importName =
                         (import.name ?: "${target.name}${if (index != 0) index else ""}") +

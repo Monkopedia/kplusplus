@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Jason Monk
- *
+ * Copyright 2022 Jason Monk
+ * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *     https://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -52,7 +52,11 @@ import com.monkopedia.krapper.generator.resolved_model.type.nullable
 import kotlinx.cinterop.CValue
 
 interface Resolver {
-    suspend fun resolve(type: WrappedType, context: ResolveContext): Pair<ResolvedClass, WrappedClass>?
+    suspend fun resolve(
+        type: WrappedType,
+        context: ResolveContext
+    ): Pair<ResolvedClass, WrappedClass>?
+
     fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate
     suspend fun findClasses(filter: ElementFilter): List<WrappedElement>
 }
@@ -109,10 +113,13 @@ suspend fun List<WrappedElement>.resolveAll(
 ): List<ResolvedElement> {
     val classes = filterIsInstance<WrappedClass>()
     val resolveContext = ResolveContext.Empty
-        .copy(resolver = resolver, debugFilter = { element, type, message ->
-            element?.parentClass?.toString()?.contains("CreateParams") ?: false ||
-                (element == null && message.contains("CreateParams"))
-        })
+        .copy(
+            resolver = resolver,
+            debugFilter = { element, type, message ->
+                element?.parentClass?.toString()?.contains("CreateParams") ?: false ||
+                    (element == null && message.contains("CreateParams"))
+            }
+        )
         .withClasses(classes)
         .withPolicy(policy)
     classes.forEach {
