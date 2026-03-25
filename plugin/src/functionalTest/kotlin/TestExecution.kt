@@ -18,9 +18,8 @@ package com.monkopedia.kplusplus.plugin
 import com.monkopedia.krapper.KrapperService
 import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.KsrpcEnvironment
-import com.monkopedia.ksrpc.channels.Connection
-import com.monkopedia.ksrpc.channels.asConnection
 import com.monkopedia.ksrpc.ksrpcEnvironment
+import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.toStub
 import java.io.File
 import java.io.PipedInputStream
@@ -43,22 +42,14 @@ class TestExecution {
             assertTrue(executable.exists())
             val process = ProcessBuilder()
                 .command(executable.absolutePath, "-s")
-            val startedProcess = process.redirectInput(ProcessBuilder.Redirect.PIPE)
-                .redirectOutput(ProcessBuilder.Redirect.PIPE)
-                .start()
+            val env = ksrpcEnvironment {
+                errorListener = ErrorListener {
+                    it.printStackTrace()
+                }
+            }
             try {
-                val input = startedProcess.inputStream
-                val output = startedProcess.outputStream
-                val connection = createConnection(
-                    input,
-                    output,
-                    ksrpcEnvironment {
-                        errorListener = ErrorListener {
-                            it.printStackTrace()
-                        }
-                    }
-                )
-                val service = connection.defaultChannel().toStub<KrapperService>()
+                val connection = process.asConnection(env)
+                val service = connection.defaultChannel().toStub<KrapperService, String>()
                 val ping = service.ping("A message")
                 println("Response: $ping")
                 try {
@@ -72,7 +63,7 @@ class TestExecution {
         }
     }
 
-    private suspend fun ProcessBuilder.asConnectionLogger(env: KsrpcEnvironment): Connection {
+    private suspend fun ProcessBuilder.asConnectionLogger(env: KsrpcEnvironment<String>) = run {
         val process = redirectInput(ProcessBuilder.Redirect.PIPE)
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .start()
@@ -105,6 +96,6 @@ class TestExecution {
                 output.flush()
             }
         }
-        return (pipedInputInput to pipedOutputOutput).asConnection(env)
+        (pipedInputInput to pipedOutputOutput).asConnection(env)
     }
 }

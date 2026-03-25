@@ -53,18 +53,17 @@ import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolvedmodel.resolvedSerializerModule
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.ksrpc.ErrorListener
-import com.monkopedia.ksrpc.channels.asConnection
 import com.monkopedia.ksrpc.channels.registerDefault
 import com.monkopedia.ksrpc.ksrpcEnvironment
-import com.monkopedia.ksrpc.posixFileReadChannel
-import com.monkopedia.ksrpc.posixFileWriteChannel
+import com.monkopedia.ksrpc.sockets.asConnection
+import com.monkopedia.ksrpc.sockets.posixFileReadChannel
+import com.monkopedia.ksrpc.sockets.posixFileWriteChannel
 import kotlin.system.exitProcess
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import platform.posix.STDIN_FILENO
@@ -303,23 +302,22 @@ class KrapperGen : CliktCommand() {
         val output = posixFileWriteChannel(STDOUT_FILENO)
         withoutIcanon {
             runBlocking {
-                val connection = (input to output).asConnection(
-                    ksrpcEnvironment {
-                        serialization = Json {
-                            serializersModule = resolvedSerializerModule
-                        }
-                        errorListener = ErrorListener { t ->
-                            launch {
-                                Log.e("Exception: " + t.message + "\n" + t.stackTraceToString())
-                            }
-                        }
+                val env = ksrpcEnvironment(
+                    Json {
+                        serializersModule = resolvedSerializerModule
                     }
-                )
-                connection.registerDefault<KrapperService>(KrapperServiceImpl())
+                ) {
+                    errorListener = ErrorListener { t ->
+                        println("Exception: " + t.message + "\n" + t.stackTraceToString())
+                    }
+                }
+                val connection = (input to output).asConnection(env)
+                connection.registerDefault(KrapperServiceImpl())
                 val deferred = CompletableDeferred<Unit>()
                 connection.onClose {
                     exitProcess(0)
                 }
+                deferred.await()
             }
         }
     }

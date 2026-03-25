@@ -25,16 +25,19 @@ import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.TypeTarget
 import com.monkopedia.krapper.filter
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.typedMapping
 import javax.inject.Inject
 import org.gradle.api.Action
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Nested
 import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 
 open class KPlusPlusExtension(
@@ -78,11 +81,11 @@ open class ImportConfig(
     @Optional
     @Input
     open var classFilter: FilterDefinition? = null,
-    @Inject
-    @Input
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
     open val headers: SourceDirectorySet,
-    @Inject
-    @Input
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
     open val library: SourceDirectorySet,
     @Internal
     open val mappings: MutableList<MappingService> = mutableListOf()
@@ -145,7 +148,6 @@ open class KPlusPlusConfig(
     @Optional
     @Input
     open var referencePolicy: ReferencePolicy = INCLUDE_MISSING,
-    @Optional
     @Input
     open var debug: Boolean = false
 )

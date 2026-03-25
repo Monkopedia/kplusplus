@@ -31,6 +31,7 @@ import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Nested
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 import org.jetbrains.kotlin.konan.target.KonanTarget
@@ -46,7 +47,10 @@ open class KPlusPlusPlugin : Plugin<Project> {
             val ext = target.extensions.getByName("kplusplus") as KPlusPlusExtension
             val kotlinExt = target.extensions.getByType(KotlinMultiplatformExtension::class.java)
 
-            val importsDir = File(target.buildDir, "krapped_imports").also {
+            val importsDir = File(
+                target.layout.buildDirectory.get().asFile,
+                "krapped_imports"
+            ).also {
                 it.mkdirs()
             }
             for ((index, import) in ext.imports.withIndex()) {
@@ -66,9 +70,10 @@ open class KPlusPlusPlugin : Plugin<Project> {
                             task.target = compilation.konanTarget
                             task.config = ext.config
                             task.import = import
-                            task.exeHome = File(target.buildDir, "krapperExe").also {
-                                it.mkdirs()
-                            }
+                            task.exeHome =
+                                File(target.layout.buildDirectory.get().asFile, "krapperExe").also {
+                                    it.mkdirs()
+                                }
                             task.outputDirectory = outputDir
                         }
                     compilation.cinterops { interops ->
@@ -93,6 +98,7 @@ open class KPlusPlusPlugin : Plugin<Project> {
     }
 }
 
+@DisableCachingByDefault(because = "Runs an external code generator process")
 abstract class RunKrapperGenTask : DefaultTask() {
     @Input
     var target: KonanTarget? = null
@@ -188,11 +194,11 @@ abstract class RunKrapperGenTask : DefaultTask() {
         }
         // /home/jmonk/.konan/dependencies/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2/bin/x86_64-unknown-linux-gnu-g++
         // ~/.konan/kotlin-native-prebuilt-linux-x86_64-1.7.10/konan/konan.properties
-        val toolchain = props["gccToolchain.${target!!.name}"]
+        val toolchain = resolveKonanProperty(props, "gccToolchain.${target!!.name}")
             ?: error("Can't find default gcc, please specify compiler manually")
         val konanHomeParent = konanDir.parentFile.parentFile
         val dependencies = File(konanHomeParent, "dependencies")
-        val gccDir = File(dependencies, toolchain.toString())
+        val gccDir = File(dependencies, toolchain)
         if (!gccDir.exists()) {
             error("Can't find default gcc, please specify compiler manually")
         }
@@ -203,5 +209,13 @@ abstract class RunKrapperGenTask : DefaultTask() {
             error("Can't find default gcc, please specify compiler manually")
         }
         return gppFile.absolutePath
+    }
+
+    private fun resolveKonanProperty(props: Properties, key: String): String? {
+        val value = props[key]?.toString() ?: return null
+        return Regex("\\$\\{?(\\w+(?:\\.\\w+)*)\\}?").replace(value) { match ->
+            val refKey = match.groupValues[1]
+            resolveKonanProperty(props, refKey) ?: match.value
+        }
     }
 }

@@ -36,7 +36,7 @@ import v8.string.Utf8Value.Companion.Utf8Value
  * limitations under the License.
  */
 
-fun main(args: List<String>): Int {
+fun main(args: Array<String>) {
     println("Got args: ${args.size}")
     for (arg in args) {
         println("   $arg")
@@ -78,5 +78,4 @@ fun main(args: List<String>): Int {
         Dispose()
         DisposePlatform()
     }
-    return 0
 }

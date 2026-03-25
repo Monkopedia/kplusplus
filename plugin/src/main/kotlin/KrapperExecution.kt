@@ -16,12 +16,12 @@
 package com.monkopedia.kplusplus
 
 import com.monkopedia.krapper.KrapperService
-import com.monkopedia.krapper.generator.resolved_model.resolvedSerializerModule
+import com.monkopedia.krapper.generator.resolvedmodel.resolvedSerializerModule
 import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.ksrpcEnvironment
+import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.toStub
 import java.io.File
-import java.lang.ProcessBuilder.Redirect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,25 +32,18 @@ object KrapperExecution {
         withContext(Dispatchers.IO) {
             val process = ProcessBuilder()
                 .command(executable.absolutePath, "-s")
-            val startedProcess = process.redirectInput(Redirect.PIPE)
-                .redirectOutput(Redirect.PIPE)
-                .start()
+            val env = ksrpcEnvironment(
+                Json {
+                    serializersModule = resolvedSerializerModule
+                }
+            ) {
+                errorListener = ErrorListener {
+                    it.printStackTrace()
+                }
+            }
             try {
-                val input = startedProcess.inputStream
-                val output = startedProcess.outputStream
-                val connection = createConnection(
-                    input,
-                    output,
-                    ksrpcEnvironment {
-                        serialization = Json {
-                            serializersModule = resolvedSerializerModule
-                        }
-                        errorListener = ErrorListener {
-                            it.printStackTrace()
-                        }
-                    }
-                )
-                val service = connection.defaultChannel().toStub<KrapperService>()
+                val connection = process.asConnection(env)
+                val service = connection.defaultChannel().toStub<KrapperService, String>()
                 execute(service)
                 try {
                     connection.close()
