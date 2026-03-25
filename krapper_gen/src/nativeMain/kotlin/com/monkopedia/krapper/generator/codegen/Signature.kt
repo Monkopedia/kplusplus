@@ -53,6 +53,7 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(method: 
 
         MethodType.STATIC,
         MethodType.SIZE_OF,
+        MethodType.ALIGN_OF,
         MethodType.STATIC_OP,
         MethodType.METHOD -> {
             retType =

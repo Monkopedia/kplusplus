@@ -75,6 +75,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {
+        Log.i("Parsing headers: ${request.headers}")
         val resolver = scope.parseHeader(
             index,
             request.headers,
@@ -82,6 +83,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             debug = config.debug
         )
         val initialClasses = resolver.findClasses(filter.wrapperFilter())
+        Log.i("Found ${initialClasses.size} classes to resolve")
         if (config.debug) {
             val resolvingStr = initialClasses
                 .map { (it as? WrappedClass)?.type?.toString() ?: it.toString() }
@@ -90,6 +92,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             Log.i("Resolving: [\n    $resolvingStr\n]")
         }
         classes = initialClasses.resolveAll(resolver, config.referencePolicy)
+        Log.i("Resolved ${classes.size} top-level elements")
     }
 
     override suspend fun addMapping(mappingService: MappingService) {
@@ -113,6 +116,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         val outputBase = File(output)
         outputBase.mkdirs()
         val namer = NameHandler()
+        Log.i("Generating header file")
         File(outputBase, "${config.moduleName}.h").writeText(
             CppCodeBuilder().also {
                 HeaderWriter(
@@ -121,6 +125,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 ).generate(config.moduleName!!, request.headers, classes)
             }.toString()
         )
+        Log.i("Generating C++ wrapper")
         val cppFile = File(outputBase, "${config.moduleName}.cc")
         cppFile.writeText(
             CppCodeBuilder().also {
@@ -141,11 +146,13 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 request.libraries
             )
         )
+        Log.i("Compiling native wrapper library")
         CppCompiler(File(outputBase, "lib${config.moduleName}.a"), config.compiler).compile(
             cppFile,
             request.headers,
             request.libraries
         )
+        Log.i("Generating Kotlin bindings")
         KotlinWriter(
             "$pkg.internal",
             policy = config.errorPolicy.policy
@@ -153,6 +160,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             File(outputBase, "src"),
             classes
         )
+        Log.i("Code generation complete")
     }
 
     private suspend fun executeMappings() {
@@ -166,13 +174,21 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             override suspend fun resolvedCType(typeStr: String): ResolvedCType =
                 toResolvedCType(WrappedType(typeStr).cType)
         }
+        Log.i("Resolving ${mappings.size} mapping filters")
         val mappingsAndFilters = mappings.map {
             it.getFilter(resolver).resolveFilter() to it
         }
 
-        classes.recursiveSequence().forEach { element ->
+        val allElements = classes.recursiveSequence().toList()
+        Log.i("Applying mappings to ${allElements.size} elements")
+        var matched = 0
+        for ((index, element) in allElements.withIndex()) {
+            if (index > 0 && index % 500 == 0) {
+                Log.i("  Processed $index/${allElements.size} elements ($matched matched)")
+            }
             for ((filter, mapper) in mappingsAndFilters) {
                 if (!filter(element)) continue
+                matched++
                 if (config.debug) {
                     Log.i("Executing mapping ($mapper) on $element")
                 }
@@ -196,6 +212,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 }
             }
         }
+        Log.i("Mappings complete: $matched matches across ${allElements.size} elements")
     }
 
     private fun applyResult(result: MapResult, element: ResolvedElement) = when (result) {

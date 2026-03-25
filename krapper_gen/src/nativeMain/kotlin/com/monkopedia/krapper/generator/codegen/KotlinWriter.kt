@@ -71,6 +71,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.DESTRUCTOR
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC_OP
@@ -222,7 +223,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             it.methodType == MethodType.STATIC_OP || it.methodType == MethodType.METHOD
         }.forEach { method ->
             try {
-                onGenerate(cls, method, null)
+                onGenerate(cls, method, null, null)
             } catch (t: Throwable) {
                 codeGenerationPolicy.onGenerateMethodFailed(cls, method, t)
             }
@@ -240,13 +241,25 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     }
                 )
             }
+            val alignOf = methods.find { (it as? ResolvedMethod)?.methodType == ALIGN_OF }!!
+            val align = define(
+                "align",
+                alignOf.returnType
+            )
+            +property(align) {
+                getter = inline(
+                    getter {
+                        +Return(Call(extensionMethod(pkg, alignOf.uniqueCName!!)))
+                    }
+                )
+            }
             for (
             method in methods.filter {
                 it.methodType == MethodType.CONSTRUCTOR || it.methodType == MethodType.STATIC
             }
             ) {
                 try {
-                    onGenerate(cls, method, size)
+                    onGenerate(cls, method, size, align)
                 } catch (t: Throwable) {
                     codeGenerationPolicy.onGenerateMethodFailed(cls, method, t)
                 }
@@ -274,7 +287,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                                 Call(
                                     "alloc",
                                     size.reference,
-                                    size.reference
+                                    align.reference
                                 ) dot Raw("rawPtr")
                             ) elvis Call("error", "Allocation failed".symbol)
                             )
@@ -310,7 +323,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private val memScope = Raw("memScope")
 
     override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
-        onGenerate(cls, method, null)
+        onGenerate(cls, method, null, null)
     }
 
     override fun KotlinCodeBuilder.onGenerate(method: ResolvedMethod) {
@@ -345,15 +358,16 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod, size: LocalVar?) {
+    fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod, size: LocalVar?, align: LocalVar?) {
         val uniqueCName =
             extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
         when (method.methodType) {
             CONSTRUCTOR -> {
-                generateConstructor(cls, method as ResolvedConstructor, size, uniqueCName)
+                generateConstructor(cls, method as ResolvedConstructor, size, align, uniqueCName)
             }
 
             SIZE_OF,
+            ALIGN_OF,
             DESTRUCTOR -> {
                 // Do nothing
             }
@@ -380,10 +394,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         cls: ResolvedClass,
         method: ResolvedConstructor,
         size: LocalVar?,
+        align: LocalVar?,
         uniqueCName: Symbol
     ) {
         when (method.allocationStyle) {
-            DIRECT -> generateDirectConstructor(cls, method, size, uniqueCName)
+            DIRECT -> generateDirectConstructor(cls, method, size, align, uniqueCName)
             STACK -> generateStackConstructor(cls, method, uniqueCName)
         }
     }
@@ -452,6 +467,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         cls: ResolvedClass,
         method: ResolvedConstructor,
         size: LocalVar?,
+        align: LocalVar?,
         uniqueCName: Symbol
     ) {
         val destructor =
@@ -473,7 +489,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                             Call(
                                 "alloc",
                                 size!!.reference,
-                                size.reference
+                                align!!.reference
                             ) dot Raw("rawPtr")
                         ) elvis Call("error", "Allocation failed".symbol)
                         )

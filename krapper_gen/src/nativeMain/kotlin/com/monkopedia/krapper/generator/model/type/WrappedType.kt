@@ -34,6 +34,7 @@ import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
+import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
@@ -126,12 +127,24 @@ abstract class WrappedType : WrappedElement() {
                     return referenceTo(invoke(type.pointeeType, resolverBuilder))
                         .maybeConst(type.isConstQualifiedType)
                 }
-                if (type.numTemplateArguments > 0) {
-                    val templateReference = createForType(type, resolverBuilder)
+                // Check both the type and its canonical form for template arguments,
+                // since some type representations (e.g. elaborated types) may not
+                // report template arguments even when the canonical type has them.
+                val templateType =
+                    if (type.numTemplateArguments > 0) {
+                        type
+                    } else {
+                        val canonical = type.canonicalType
+                        if (canonical.numTemplateArguments > 0) canonical else null
+                    }
+                if (templateType != null) {
+                    val templateReference =
+                        createForType(type, resolverBuilder, forTemplateBase = true)
                     return WrappedTemplateType(
                         templateReference,
-                        List(type.numTemplateArguments) {
-                            val tempType = type.getTemplateArgumentType(it.toUInt())
+                        List(templateType.numTemplateArguments) {
+                            val tempType =
+                                templateType.getTemplateArgumentType(it.toUInt())
                             if (tempType.useContents { kind } == CXType_Invalid) {
                                 null
                             } else {
@@ -158,7 +171,8 @@ abstract class WrappedType : WrappedElement() {
 
         private fun createForType(
             type: CValue<CXType>,
-            resolverBuilder: ResolverBuilder
+            resolverBuilder: ResolverBuilder,
+            forTemplateBase: Boolean = false
         ): WrappedType {
             val type = resolverBuilder.visit(type)
             var spelling =
@@ -166,6 +180,7 @@ abstract class WrappedType : WrappedElement() {
             if (spelling.startsWith("const ")) {
                 spelling = spelling.substring("const ".length)
             }
+            val fullSpelling = spelling
             if (spelling.contains('<')) {
                 spelling = spelling.substring(0, spelling.indexOf('<'))
             }
@@ -184,7 +199,17 @@ abstract class WrappedType : WrappedElement() {
                 }
 
                 referencedDecl.kind == CXCursor_ClassTemplate -> {
-                    invoke(referencedDecl.fullyQualified)
+                    val baseType = invoke(referencedDecl.fullyQualified)
+                    if (!forTemplateBase && fullSpelling.contains('<')) {
+                        // Template args exist in spelling but the caller didn't detect them
+                        // (clang doesn't report numTemplateArguments for some type kinds).
+                        // Reconstruct the full type with template args from the spelling.
+                        val templateArgsPart =
+                            fullSpelling.substring(fullSpelling.indexOf('<'))
+                        invoke(referencedDecl.fullyQualified + templateArgsPart)
+                    } else {
+                        baseType
+                    }
                 }
 
                 referencedDecl.kind == CXCursor_ClassDecl -> {

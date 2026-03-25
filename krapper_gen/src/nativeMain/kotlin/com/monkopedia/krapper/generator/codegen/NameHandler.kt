@@ -87,6 +87,10 @@ class NameHandler {
                             cName + "_size_of"
                         }
 
+                        MethodType.ALIGN_OF -> {
+                            cName + "_align_of"
+                        }
+
                         MethodType.STATIC,
                         MethodType.STATIC_OP,
                         MethodType.METHOD -> {

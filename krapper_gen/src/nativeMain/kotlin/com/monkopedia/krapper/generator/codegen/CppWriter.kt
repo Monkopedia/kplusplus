@@ -224,6 +224,15 @@ class CppWriter(
                 )
             }
 
+            MethodType.ALIGN_OF -> {
+                +Return(
+                    Call(
+                        "alignof",
+                        Raw(cls.type.toString())
+                    )
+                )
+            }
+
             MethodType.DESTRUCTOR -> {
                 val thizCast = argCasts.removeFirst()
                 +(thizCast.pointerReference arrow Call(method.name.removeTemplate()))

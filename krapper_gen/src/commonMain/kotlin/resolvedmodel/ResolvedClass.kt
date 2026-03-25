@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator.resolvedmodel
 
 import com.monkopedia.krapper.FilterableTypes.CLASS
 import com.monkopedia.krapper.TypeTarget
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
@@ -72,6 +73,7 @@ data class ResolvedClass(
 
     private fun calculateNotEmpty(): Boolean = baseClass != null || children.any {
         ((it as? ResolvedMethod)?.methodType != SIZE_OF) &&
+        ((it as? ResolvedMethod)?.methodType != ALIGN_OF) &&
             ((it as? ResolvedConstructor)?.children?.isNotEmpty() != false)
     }
 

@@ -26,6 +26,7 @@ import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClassMetadata
@@ -122,7 +123,7 @@ class WrappedClass(
             )
         ).also {
             it.addAllChildren(
-                children.mapNotNull { child ->
+                children.toList().mapNotNull { child ->
                     if (isAbstract && child is WrappedConstructor) {
                         null
                     } else {
@@ -185,6 +186,13 @@ class WrappedClass(
                 MethodType.SIZE_OF
             )
         )
+        addChild(
+            WrappedMethod(
+                "alignOf",
+                WrappedTypeReference("int"),
+                MethodType.ALIGN_OF
+            )
+        )
     }
 
     override fun toString(): String = qualified
@@ -208,6 +216,7 @@ class WrappedClass(
     private fun calculateNotEmpty() = baseClass != null || children.any {
         (it !is WrappedBase) &&
             ((it as? WrappedMethod)?.methodType != SIZE_OF) &&
+            ((it as? WrappedMethod)?.methodType != ALIGN_OF) &&
             ((it as? WrappedConstructor)?.children?.isNotEmpty() != false)
     }
 }

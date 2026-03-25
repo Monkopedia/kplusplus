@@ -22,7 +22,6 @@ import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.toStub
 import java.io.File
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -41,18 +40,15 @@ object KrapperExecution {
                     it.printStackTrace()
                 }
             }
+            val connection = process.asConnection(env)
             try {
-                val connection = process.asConnection(env)
                 val service = connection.defaultChannel().toStub<KrapperService, String>()
                 execute(service)
+            } finally {
                 try {
                     connection.close()
-                } catch (t: CancellationException) {
+                } catch (_: Throwable) {
                 }
-            } catch (t: Throwable) {
-                println("Caught error $t")
-                t.printStackTrace()
-                throw t
             }
         }
     }

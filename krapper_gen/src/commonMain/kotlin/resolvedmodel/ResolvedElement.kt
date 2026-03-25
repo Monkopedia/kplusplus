@@ -78,7 +78,7 @@ fun Collection<ResolvedElement>.recursiveSequence() = sequence {
 
 private suspend fun SequenceScope<ResolvedElement>.emitRecursive(element: ResolvedElement) {
     yield(element)
-    for (child in element.children) {
+    for (child in element.children.toList()) {
         emitRecursive(child)
     }
 }

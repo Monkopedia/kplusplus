@@ -58,6 +58,7 @@ import com.monkopedia.krapper.StringSelector.NAMESPACE
 import com.monkopedia.krapper.StringSelector.STRINGIFY
 import com.monkopedia.krapper.TypeFilter
 import com.monkopedia.krapper.filter
+import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
@@ -441,7 +442,21 @@ private class ResolverBuilderImpl : ResolverBuilder {
     val desiredTemplates = mutableListOf<CValue<CXType>>()
 
     override fun visit(type: CValue<CXType>): CValue<CXType> {
-        val strType = type.spelling.toKString()?.trim() ?: return type
+        // Use canonical type spelling as cache key to avoid collisions between
+        // inner classes with the same short name (e.g. Serializer::Delegate vs
+        // Deserializer::Delegate both spelling as just "Delegate").
+        // However, template type parameters have positional canonical forms like
+        // "type-parameter-0-0" that collide across different templates (e.g.,
+        // _Tp and _Alloc from different templates both become type-parameter-0-0).
+        // For those, use the original spelling which preserves the parameter name.
+        val strType = run {
+            val canonical = type.canonicalType.spelling.toKString()?.trim()
+            if (canonical != null && !canonical.contains("type-parameter")) {
+                canonical
+            } else {
+                type.spelling.toKString()?.trim()
+            }
+        } ?: return type
         return seenNames.getOrPut(strType) {
             val declaration = type.typeDeclaration
             when (declaration.kind) {

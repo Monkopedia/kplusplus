@@ -40,6 +40,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.NATIVE
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.RAW_CAST
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.STD_MOVE
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
@@ -296,7 +297,7 @@ open class WrappedMethod(
     }
 
     protected open suspend fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
-        if (methodType == SIZE_OF || methodType == STATIC) return emptyList()
+        if (methodType == SIZE_OF || methodType == ALIGN_OF || methodType == STATIC) return emptyList()
         return listOf(createThisArg(resolverContext) ?: return null)
     }
 

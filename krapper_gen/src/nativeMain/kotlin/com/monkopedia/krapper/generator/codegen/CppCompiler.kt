@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import platform.posix.remove
 import platform.posix.system
 
 class CppCompiler(private val outputFile: File, private val compiler: String) {
@@ -23,10 +24,17 @@ class CppCompiler(private val outputFile: File, private val compiler: String) {
         val flags = CompileFlags(header, library, linkStatics = true)
         val command = "$compiler -c -fPIE -o ${outputFile.path} ${flags.includeDirs ?: ""} " +
             "${flags.linkerOpts ?: ""} ${cppFile.path}"
-        println("Running:\n$command")
-        val result = system(command)
+        val logFile = "${outputFile.path}.compile.log"
+        val wrappedCommand = "$command >$logFile 2>&1"
+        val result = system(wrappedCommand)
+        val output = try {
+            File(logFile).readText()
+        } catch (_: Throwable) {
+            ""
+        }
+        remove(logFile)
         require(result == 0) {
-            "Command \"$command\" exited with result $result"
+            "Compilation failed (exit $result):\n$command\n\n$output"
         }
     }
 }

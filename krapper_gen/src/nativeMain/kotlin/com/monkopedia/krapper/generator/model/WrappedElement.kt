@@ -296,7 +296,7 @@ abstract class WrappedElement(
 }
 
 fun WrappedElement.forEachRecursive(onEach: (WrappedElement) -> Unit) {
-    for (child in children) {
+    for (child in children.toList()) {
         onEach(child)
         child.forEachRecursive(onEach)
     }
@@ -306,7 +306,7 @@ fun WrappedElement.filterRecursive(
     ret: MutableList<WrappedElement> = mutableListOf(),
     onEach: (WrappedElement) -> Boolean
 ): List<WrappedElement> {
-    for (child in children) {
+    for (child in children.toList()) {
         if (onEach(child)) {
             ret.add(child)
         }

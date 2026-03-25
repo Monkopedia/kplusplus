@@ -57,6 +57,7 @@ open class KPlusPlusPlugin : Plugin<Project> {
                 val compilations = import.compilations?.takeIf { it.isNotEmpty() }
                     ?: kotlinExt.targets.flatMap {
                         it.compilations.filterIsInstance<KotlinNativeCompilation>()
+                            .filter { compilation -> compilation.name == "main" }
                     }
                 compilations.forEach { compilation ->
                     val importName =
@@ -174,7 +175,7 @@ abstract class RunKrapperGenTask : DefaultTask() {
         }
         println("Done with task")
     } catch (t: Throwable) {
-        throw RuntimeException("Problem executing krapper", t)
+        throw RuntimeException("Problem executing krapper: ${t.message}", t)
     }
 
     private fun findCompiler(): String {

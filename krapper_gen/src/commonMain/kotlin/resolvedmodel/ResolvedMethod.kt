@@ -30,7 +30,8 @@ enum class MethodType {
     METHOD,
     STATIC_OP,
     STATIC,
-    SIZE_OF
+    SIZE_OF,
+    ALIGN_OF
 }
 
 enum class ReturnStyle {
