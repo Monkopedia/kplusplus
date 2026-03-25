@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import com.github.ajalt.clikt.core.main
 import com.monkopedia.krapper.generator.KrapperGen
 
 fun main(args: Array<String>) = KrapperGen().main(args)

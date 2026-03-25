@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,7 @@ plugins {
     `java-gradle-plugin`
 
     id("org.jetbrains.kotlin.jvm")
-    id("com.gradle.plugin-publish") version "1.0.0-rc-1"
+    id("com.gradle.plugin-publish") version "2.1.0"
     `maven-publish`
     `signing`
 }
@@ -35,20 +35,19 @@ description = "Tool to link kotlin/native binaries with clang or other linkers"
 dependencies {
     implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
 
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1-native-mt")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.10")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.2")
-    implementation("com.google.guava:guava:31.1-jre")
+    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+    implementation("com.google.guava:guava:33.5.0-jre")
     api(project(":krapper_gen"))
-    implementation("com.monkopedia:ksrpc:0.6.0")
-    implementation("io.ktor:ktor-io:2.0.3")
+    implementation("com.monkopedia:ksrpc:0.11.0")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
-    testApi("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.6.1-native-mt")
+    testApi("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.10.2")
 }
 
 java {
@@ -57,16 +56,20 @@ java {
 }
 
 gradlePlugin {
+    website.set("https://github.com/monkopedia/kplusplus")
+    vcsUrl.set("https://github.com/monkopedia/kplusplus")
     val kplusplus by plugins.creating {
         id = "com.monkopedia.kplusplus.plugin"
         implementationClass = "com.monkopedia.kplusplus.KPlusPlusPlugin"
         displayName = "K++ Gradle Plugin"
         description = project.description
+        tags.set(listOf("kotlin", "kotlin/native", "c++", "interop"))
     }
 }
 
-val functionalTestSourceSet = sourceSets.create("functionalTest") {
-}
+val functionalTestSourceSet =
+    sourceSets.create("functionalTest") {
+    }
 
 configurations["functionalTestImplementation"].extendsFrom(configurations["testImplementation"])
 
@@ -75,7 +78,7 @@ val functionalTest by tasks.registering(Test::class) {
     testClassesDirs = functionalTestSourceSet.output.classesDirs
     classpath = functionalTestSourceSet.runtimeClasspath
     dependsOn(
-        rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative")
+        rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative"),
     )
 }
 
@@ -86,20 +89,31 @@ tasks.named<Task>("check") {
 }
 
 tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "1.8"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    }
 }
 
 val krapperGen = rootProject.findProject(":krapper_gen")!!
 
 val debugFrontend = true
-val copy = tasks.register<Copy>("copyKrapperExecutable") {
-    if (debugFrontend) {
-        from("${krapperGen.buildDir}/bin/native/debugExecutable/krapper_gen.kexe")
-    } else {
-        from("${krapperGen.buildDir}/bin/native/releaseExecutable/krapper_gen.kexe")
+val copy =
+    tasks.register<Copy>("copyKrapperExecutable") {
+        if (debugFrontend) {
+            from(
+                krapperGen.layout.buildDirectory.file(
+                    "bin/native/debugExecutable/krapper_gen.kexe",
+                ),
+            )
+        } else {
+            from(
+                krapperGen.layout.buildDirectory.file(
+                    "bin/native/releaseExecutable/krapper_gen.kexe",
+                ),
+            )
+        }
+        into(layout.buildDirectory.dir("processedResources"))
     }
-    into("$buildDir/processedResources")
-}
 
 afterEvaluate {
 
@@ -126,7 +140,7 @@ sourceSets {
             }
         }
         resources {
-            srcDir("$buildDir/processedResources")
+            srcDir(layout.buildDirectory.dir("processedResources"))
             compiledBy(copy)
         }
     }
@@ -171,14 +185,6 @@ publishing {
             }
         }
     }
-}
-
-pluginBundle {
-    website = "https://github.com/monkopedia/kplusplus"
-    vcsUrl = "https://github.com/monkopedia/kplusplus"
-
-    description = project.description
-    tags = listOf("kotlin", "kotlin/native", "c++", "interop")
 }
 
 signing {

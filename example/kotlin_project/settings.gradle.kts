@@ -3,9 +3,8 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
         mavenCentral()
-        jcenter()
         mavenLocal()
     }
     includeBuild("../../")
+    includeBuild("../../../klinker")
 }
-

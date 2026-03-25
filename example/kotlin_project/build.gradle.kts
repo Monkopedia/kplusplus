@@ -17,35 +17,31 @@ import com.monkopedia.klinker.klinkedExecutable
 import com.monkopedia.kplusplus.find
 import com.monkopedia.kplusplus.onEach
 import com.monkopedia.krapper.ReferencePolicy
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 
 buildscript {
     repositories {
         mavenCentral()
-        jcenter()
         mavenLocal()
-    }
-    dependencies {
-        classpath("com.monkopedia.klinker:plugin:0.1.0")
     }
 }
 plugins {
-    kotlin("multiplatform") version "1.7.10"
-    kotlin("plugin.serialization") version "1.7.10"
-    id("com.monkopedia.klinker.plugin") version "0.1.0"
+    kotlin("multiplatform") version "2.3.0"
+    kotlin("plugin.serialization") version "2.3.0"
     id("com.monkopedia.kplusplus.plugin")
+    id("com.monkopedia.klinker.plugin") version "0.2.0"
 }
 
 repositories {
     mavenLocal()
-    jcenter()
+    mavenCentral()
 }
 
 kotlin {
@@ -53,26 +49,37 @@ kotlin {
     val hostOs = System.getProperty("os.name")
 
     // Create target for the host platform.
-    val hostTarget = when {
-        hostOs == "Mac OS X" -> macosX64("native")
-        hostOs == "Linux" -> linuxX64("native")
-        hostOs.startsWith("Windows") -> mingwX64("native")
-        else -> throw GradleException(
-            "Host OS '$hostOs' is not supported in Kotlin/Native $project."
-        )
-    }
+    val hostTarget =
+        when {
+            hostOs == "Mac OS X" -> macosX64("native")
+
+            hostOs == "Linux" -> linuxX64("native")
+
+            hostOs.startsWith("Windows") -> mingwX64("native")
+
+            else -> throw GradleException(
+                "Host OS '$hostOs' is not supported in Kotlin/Native $project.",
+            )
+        }
 
     hostTarget.apply {
         binaries {
             klinkedExecutable {
-                compilerOpts("-g")
-                runTask {
+                compilerOpts("-lstdc++", "-lm", "-lpthread")
+                runTask()
+            }
+        }
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
+                    freeCompilerArgs.add("-g")
                 }
             }
         }
     }
     sourceSets["nativeMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1-native-mt")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     }
 }
 
@@ -93,14 +100,18 @@ kplusplus {
             }
             onEach { element ->
                 println("Setting return type on $element")
-                val retType = element.returnType.copy(
-                    typeString = element.returnType.typeString.removePrefix("const ").trimEnd('*')
-                )
+                val retType =
+                    element.returnType.copy(
+                        typeString =
+                            element.returnType.typeString
+                                .removePrefix("const ")
+                                .trimEnd('*'),
+                    )
                 element.replaceWith(
                     element.copy(
                         returnStyle = ReturnStyle.COPY_CONSTRUCTOR,
-                        returnType = retType
-                    )
+                        returnType = retType,
+                    ),
                 )
             }
         }
@@ -114,9 +125,10 @@ kplusplus {
             }
             onEach { element ->
                 println("Clearing const return type on $element")
-                val nonConstReturn = element.returnType.copy(
-                    typeString = element.returnType.typeString.removePrefix("const ")
-                )
+                val nonConstReturn =
+                    element.returnType.copy(
+                        typeString = element.returnType.typeString.removePrefix("const "),
+                    )
                 element.replaceWith(element.copy(returnType = nonConstReturn))
             }
         }
@@ -128,7 +140,8 @@ kplusplus {
             onEach { element ->
                 if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
                     element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
-                    element.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
+                    element.uniqueCName ==
+                    "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
                 ) {
                     println("Removing $element")
                     element.remove()
@@ -142,42 +155,51 @@ kplusplus {
                     (className eq "unique_ptr")
             }
             onEach { parent ->
-                val baseType = parent.type.typeString.replace(
-                    "std::unique_ptr<",
-                    ""
-                ).removeSuffix(">")
-                val thisPtrType = parent.type.copy(
-                    typeString = parent.type.type + "*",
-                    cType = ResolvedCType("void*", false)
-                )
-                val thizArgument = ResolvedArgument(
-                    "thiz",
-                    thisPtrType,
-                    thisPtrType,
-                    "",
-                    REINT_CAST,
-                    needsDereference = true,
-                    hasDefault = false
-                )
-                val uniqueCName = "_custom_unique_ptr_get_" +
-                    parent.type.typeString.replace("<", "_").replace(">", "_")
-                        .replace("::", "_")
-                val returnType = parent.type.copy(
-                    typeString = baseType,
-                    kotlinType = resolvedKotlinType(baseType),
-                    cType = resolvedCType(baseType)
-                )
-                val getMethod = ResolvedMethod(
-                    name = "get",
-                    returnType = returnType,
-                    methodType = METHOD,
-                    uniqueCName = uniqueCName,
-                    operator = null,
-                    args = listOf(thizArgument),
-                    returnStyle = VOIDP,
-                    argCastNeedsPointer = false,
-                    qualified = parent.type.typeString
-                )
+                val baseType =
+                    parent.type.typeString
+                        .replace(
+                            "std::unique_ptr<",
+                            "",
+                        ).removeSuffix(">")
+                val thisPtrType =
+                    parent.type.copy(
+                        typeString = parent.type.type + "*",
+                        cType = ResolvedCType("void*", false),
+                    )
+                val thizArgument =
+                    ResolvedArgument(
+                        "thiz",
+                        thisPtrType,
+                        thisPtrType,
+                        "",
+                        REINT_CAST,
+                        needsDereference = true,
+                        hasDefault = false,
+                    )
+                val uniqueCName =
+                    "_custom_unique_ptr_get_" +
+                        parent.type.typeString
+                            .replace("<", "_")
+                            .replace(">", "_")
+                            .replace("::", "_")
+                val returnType =
+                    parent.type.copy(
+                        typeString = baseType,
+                        kotlinType = resolvedKotlinType(baseType),
+                        cType = resolvedCType(baseType),
+                    )
+                val getMethod =
+                    ResolvedMethod(
+                        name = "get",
+                        returnType = returnType,
+                        methodType = METHOD,
+                        uniqueCName = uniqueCName,
+                        operator = null,
+                        args = listOf(thizArgument),
+                        returnStyle = VOIDP,
+                        argCastNeedsPointer = false,
+                        qualified = parent.type.typeString,
+                    )
                 println("Adding $getMethod to $parent")
                 parent.add(getMethod)
             }
@@ -186,9 +208,7 @@ kplusplus {
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
-    kotlinOptions {
-        jvmTarget = "1.8"
-        freeCompilerArgs = freeCompilerArgs + "-Xskip-prerelease-check"
-        freeCompilerArgs = freeCompilerArgs + "-Xno-param-assertions"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 }
