@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
@@ -24,9 +24,7 @@ class Scope<T : LangFactory>(internal val parent: Scope<T>? = null) {
         "object"
     )
 
-    private fun isUsed(name: String): Boolean {
-        return names.contains(name) || parent?.isUsed(name) == true
-    }
+    private fun isUsed(name: String): Boolean = names.contains(name) || parent?.isUsed(name) == true
 
     fun allocateName(desiredName: String): String {
         if (desiredName.isEmpty()) return allocateName("v")
@@ -37,11 +35,9 @@ class Scope<T : LangFactory>(internal val parent: Scope<T>? = null) {
         return desiredName
     }
 
-    override fun toString(): String {
-        return "Scope{${hashCode()}} (${
+    override fun toString(): String = "Scope{${hashCode()}} (${
         names.reversed().take(5).joinToString(", ")
-        }${if (names.size > 5) "..." else ""})"
-    }
+    }${if (names.size > 5) "..." else ""})"
 }
 
 val <T : LangFactory> CodeBuilder<T>.base: CodeBuilderBase<T>

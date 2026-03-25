@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -57,7 +57,7 @@ sealed class Operator {
             BasicUnaryOperator.REFERENCE,
             BasicUnaryOperator.POINTER_REFERENCE,
             BasicAssignmentOperator.ASSIGN,
-            BasicAssignmentOperator.PLUS_EQUALS,
+            BasicAssignmentOperator.PLUS_EQUALS
         )
 
         fun from(method: WrappedMethod): Operator? {
@@ -74,18 +74,14 @@ data class BasicBinaryOperator private constructor(
     val supportsDirectCall: Boolean = true
 ) : Operator() {
 
-    override fun name(namer: Namer, method: WrappedMethod): String =
-        with(namer) {
-            return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
-        }
-
-    override fun matches(method: WrappedMethod): Boolean {
-        return method.args.size == 1 && method.name.substring("operator".length) == cppOp
+    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
     }
 
-    override fun toString(): String {
-        return "binary($cppOp, $cOp, $resolvedOperator)"
-    }
+    override fun matches(method: WrappedMethod): Boolean =
+        method.args.size == 1 && method.name.substring("operator".length) == cppOp
+
+    override fun toString(): String = "binary($cppOp, $cOp, $resolvedOperator)"
 
     companion object {
         val MINUS = BasicBinaryOperator("-", "Minus", ResolvedOperator.MINUS)
@@ -111,12 +107,14 @@ data class BasicBinaryOperator private constructor(
         val POST_INC = BasicBinaryOperator(
             "++",
             "PostIncrement",
-            ResolvedOperator.POST_INC, supportsDirectCall = false
+            ResolvedOperator.POST_INC,
+            supportsDirectCall = false
         )
         val POST_DEC = BasicBinaryOperator(
             "--",
             "PostDecrement",
-            ResolvedOperator.POST_DEC, supportsDirectCall = false
+            ResolvedOperator.POST_DEC,
+            supportsDirectCall = false
         )
     }
 }
@@ -127,18 +125,14 @@ data class BasicAssignmentOperator private constructor(
     override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
-    override fun name(namer: Namer, method: WrappedMethod): String =
-        with(namer) {
-            return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
-        }
-
-    override fun matches(method: WrappedMethod): Boolean {
-        return method.args.size == 1 && method.name.substring("operator".length) == cppOp
+    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
     }
 
-    override fun toString(): String {
-        return "assignment($cppOp, $cOp, $resolvedOperator)"
-    }
+    override fun matches(method: WrappedMethod): Boolean =
+        method.args.size == 1 && method.name.substring("operator".length) == cppOp
+
+    override fun toString(): String = "assignment($cppOp, $cOp, $resolvedOperator)"
 
     companion object {
         val ASSIGN = BasicAssignmentOperator("=", "Assign", ResolvedOperator.ASSIGN)
@@ -152,18 +146,14 @@ data class BasicUnaryOperator private constructor(
     override val resolvedOperator: ResolvedOperator
 ) : Operator() {
 
-    override fun name(namer: Namer, method: WrappedMethod): String =
-        with(namer) {
-            return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
-        }
-
-    override fun matches(method: WrappedMethod): Boolean {
-        return method.args.isEmpty() && method.name.substring("operator".length) == cppOp
+    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
     }
 
-    override fun toString(): String {
-        return "unary($cppOp, $cOp, $resolvedOperator)"
-    }
+    override fun matches(method: WrappedMethod): Boolean =
+        method.args.isEmpty() && method.name.substring("operator".length) == cppOp
+
+    override fun toString(): String = "unary($cppOp, $cOp, $resolvedOperator)"
 
     companion object {
         val INC = BasicUnaryOperator("++", "Increment", ResolvedOperator.INC)

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,15 +43,15 @@ import com.monkopedia.krapper.generator.builders.ThrowPolicy
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.getcwd
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
-import com.monkopedia.krapper.generator.resolved_model.resolvedSerializerModule
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolvedmodel.resolvedSerializerModule
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.channels.asConnection
 import com.monkopedia.ksrpc.channels.registerDefault
@@ -259,8 +259,8 @@ class KrapperGen : CliktCommand() {
                                 ),
                                 METHOD,
                                 "_custom_unique_ptr_get_${
-                                parent.type.typeString.replace("<", "_").replace(">", "_")
-                                    .replace("::", "_")
+                                    parent.type.typeString.replace("<", "_").replace(">", "_")
+                                        .replace("::", "_")
                                 }",
                                 null,
                                 listOf(
@@ -347,28 +347,37 @@ private val CValue<CXCursor>.templatedName: String
     }
 val CValue<CXCursor>?.fullyQualified: String
     get() =
-        if (this == null || this == CXCursor.NULL) ""
-        else if (kind == CXCursorKind.CXCursor_TranslationUnit) ""
-        else {
+        if (this == null || this == CXCursor.NULL) {
+            ""
+        } else if (kind == CXCursorKind.CXCursor_TranslationUnit) {
+            ""
+        } else {
             val res = semanticParent.fullyQualified
-            if (res.isNotEmpty()) "$res::$templatedName"
-            else templatedName ?: ""
+            if (res.isNotEmpty()) {
+                "$res::$templatedName"
+            } else {
+                templatedName ?: ""
+            }
         }
 
 typealias ChildVisitor = (child: CValue<CXCursor>, parent: CValue<CXCursor>) -> Unit
 
 val recurseVisitor =
-    staticCFunction { child: CValue<CXCursor>,
-        parent: CValue<CXCursor>,
-        children: clang.CXClientData? ->
+    staticCFunction {
+            child: CValue<CXCursor>,
+            parent: CValue<CXCursor>,
+            children: clang.CXClientData?
+        ->
         children!!.asStableRef<ChildVisitor>().get().invoke(child, parent)
         CXChildVisitResult.CXChildVisit_Recurse
     }
 
 val visitor =
-    staticCFunction { child: CValue<CXCursor>,
-        _: CValue<CXCursor>,
-        children: clang.CXClientData? ->
+    staticCFunction {
+            child: CValue<CXCursor>,
+            _: CValue<CXCursor>,
+            children: clang.CXClientData?
+        ->
         children!!.asStableRef<(CValue<CXCursor>) -> Unit>().get()
             .invoke(child)
         CXChildVisitResult.CXChildVisit_Continue
@@ -386,37 +395,30 @@ inline fun CValue<CXCursor>.forEach(noinline childHandler: (CValue<CXCursor>) ->
 
 inline fun CValue<CXCursor>.filterChildrenRecursive(
     crossinline filter: (CValue<CXCursor>) -> Boolean
-): List<CValue<CXCursor>> {
-    return mutableListOf<CValue<CXCursor>>().also { list ->
-        forEachRecursive { child, _ ->
-            if (filter(child)) {
-                list.add(child)
-            }
+): List<CValue<CXCursor>> = mutableListOf<CValue<CXCursor>>().also { list ->
+    forEachRecursive { child, _ ->
+        if (filter(child)) {
+            list.add(child)
         }
     }
 }
 
 inline fun CValue<CXCursor>.filterChildren(
     crossinline filter: (CValue<CXCursor>) -> Boolean
-): List<CValue<CXCursor>> {
-    return mutableListOf<CValue<CXCursor>>().also { list ->
-        forEach {
-            if (filter(it)) {
-                list.add(it)
-            }
+): List<CValue<CXCursor>> = mutableListOf<CValue<CXCursor>>().also { list ->
+    forEach {
+        if (filter(it)) {
+            list.add(it)
         }
     }
 }
 
-inline fun <T> CValue<CXCursor>.mapChildren(
-    crossinline filter: (CValue<CXCursor>) -> T
-): List<T> {
-    return mutableListOf<T>().also { list ->
+inline fun <T> CValue<CXCursor>.mapChildren(crossinline filter: (CValue<CXCursor>) -> T): List<T> =
+    mutableListOf<T>().also { list ->
         forEach {
             list.add(filter(it))
         }
     }
-}
 
 val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
     get() {

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,14 +15,13 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 inline fun <T : LangFactory> CodeBuilder<T>.funSig(
     name: String,
     retType: Symbol?,
     args: List<LocalVar>
-): Symbol =
-    factory.funSig(name, retType, args)
+): Symbol = factory.funSig(name, retType, args)
 
 sealed class FunctionBuilder<T : LangFactory>(
     var name: String? = null,
@@ -36,13 +35,11 @@ sealed class FunctionBuilder<T : LangFactory>(
         body!!.apply(block)
     }
 
-    fun define(name: String, type: ResolvedType): LocalVar {
-        return functionBuilder.define(
-            name,
-            type
-        ).also(args::add).also {
-            (it as? KotlinLocalVar)?.isVal = null
-        }
+    fun define(name: String, type: ResolvedType): LocalVar = functionBuilder.define(
+        name,
+        type
+    ).also(args::add).also {
+        (it as? KotlinLocalVar)?.isVal = null
     }
 }
 
@@ -53,7 +50,9 @@ private object EndFunction : Symbol {
 }
 
 open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
-    FunctionBuilder<T>(functionBuilder = functionBuilder), Symbol, SymbolContainer {
+    FunctionBuilder<T>(functionBuilder = functionBuilder),
+    Symbol,
+    SymbolContainer {
     private val block = BlockSymbol(functionBuilder, this, EndFunction)
     lateinit var signature: Symbol
     val symbol: Symbol
@@ -67,7 +66,8 @@ open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
     open fun init() {
         signature = functionBuilder.funSig(
             functionBuilder.scope.allocateName(name ?: error("Name was not specified")),
-            retType, args
+            retType,
+            args
         )
     }
 
@@ -76,9 +76,7 @@ open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
         builder.append(" {\n")
     }
 
-    override fun toString(): String {
-        return signature.toString()
-    }
+    override fun toString(): String = signature.toString()
 }
 
 inline fun <T : LangFactory> CodeBuilder<T>.function(
@@ -96,9 +94,8 @@ class FunctionDeclarationSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>
     override val body: CodeBuilder<T>?
         get() = null
 
-    fun init(): Symbol {
-        return functionBuilder.funSig(name ?: error("Name was not specified"), retType, args)
-    }
+    fun init(): Symbol =
+        functionBuilder.funSig(name ?: error("Name was not specified"), retType, args)
 }
 
 inline fun <T : LangFactory> CodeBuilder<T>.functionDeclaration(

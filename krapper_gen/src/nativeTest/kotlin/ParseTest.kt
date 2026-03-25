@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,8 +21,8 @@ import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.findQualifiers
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedConstructor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -94,7 +94,7 @@ class ParseTest {
     @Test
     fun testResolveConstRef() = memScoped {
         runBlocking {
-            val result = listOf(TestData.TestClass.cls).resolveAll(
+            val result = listOf(TestData.testClass.cls).resolveAll(
                 object : Resolver {
                     override suspend fun resolve(
                         type: WrappedType,
@@ -110,9 +110,8 @@ class ParseTest {
                         error("Not supported")
                     }
 
-                    override suspend fun findClasses(filter: ElementFilter): List<WrappedClass> {
-                        return emptyList()
-                    }
+                    override suspend fun findClasses(filter: ElementFilter): List<WrappedClass> =
+                        emptyList()
                 },
                 ReferencePolicy.IGNORE_MISSING
             )

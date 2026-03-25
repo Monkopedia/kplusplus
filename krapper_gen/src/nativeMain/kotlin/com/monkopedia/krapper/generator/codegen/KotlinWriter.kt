@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -65,36 +65,34 @@ import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.setter
 import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
-import com.monkopedia.krapper.generator.resolved_model.MethodType
-import com.monkopedia.krapper.generator.resolved_model.MethodType.CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.MethodType.DESTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
-import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
-import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC_OP
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
-import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
-import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
-import com.monkopedia.krapper.generator.resolved_model.type.nullable
-import com.monkopedia.krapper.generator.resolved_model.type.typedWith
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.DESTRUCTOR
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC_OP
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedConstructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedDestructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING_POINTER
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.fullyQualifiedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
+import com.monkopedia.krapper.generator.resolvedmodel.type.typedWith
 
-class KotlinWriter(
-    private val pkg: String,
-    policy: CodeGenerationPolicy = ThrowPolicy
-) : CodeGeneratorBase<KotlinCodeBuilder>(policy) {
+class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = ThrowPolicy) :
+    CodeGeneratorBase<KotlinCodeBuilder>(policy) {
     private var currentClasses = mapOf<String, ResolvedClass>()
     private var needsCCaller = false
     private val staticRouterPkg = "krapper.static"
@@ -233,7 +231,7 @@ class KotlinWriter(
             val sizeOf = methods.find { (it as? ResolvedMethod)?.methodType == SIZE_OF }!!
             val size = define(
                 "size",
-                sizeOf.returnType,
+                sizeOf.returnType
             )
             +property(size) {
                 getter = inline(
@@ -243,9 +241,9 @@ class KotlinWriter(
                 )
             }
             for (
-                method in methods.filter {
-                    it.methodType == MethodType.CONSTRUCTOR || it.methodType == MethodType.STATIC
-                }
+            method in methods.filter {
+                it.methodType == MethodType.CONSTRUCTOR || it.methodType == MethodType.STATIC
+            }
             ) {
                 try {
                     onGenerate(cls, method, size)
@@ -328,15 +326,19 @@ class KotlinWriter(
                 val returnType = method.returnType
                 val returnStyle = method.returnStyle
                 retType = type(returnType)
-                var args = if (method.args.isNotEmpty()) method.args.map {
-                    define(it.name, it.type)
-                } else emptyList()
+                var args = if (method.args.isNotEmpty()) {
+                    method.args.map {
+                        define(it.name, it.type)
+                    }
+                } else {
+                    emptyList()
+                }
                 body {
                     generateMethodBody(
                         args.map { reference(it) },
                         returnStyle,
                         method.returnType,
-                        uniqueCName,
+                        uniqueCName
                     )
                 }
             }
@@ -350,13 +352,16 @@ class KotlinWriter(
             CONSTRUCTOR -> {
                 generateConstructor(cls, method as ResolvedConstructor, size, uniqueCName)
             }
+
             SIZE_OF,
             DESTRUCTOR -> {
                 // Do nothing
             }
+
             STATIC -> {
                 onGenerate(method)
             }
+
             METHOD,
             STATIC_OP -> {
                 val operator = method.operator
@@ -417,7 +422,7 @@ class KotlinWriter(
                                 generateConstructorCall(
                                     cls.type.kotlinType,
                                     ptr.reference,
-                                    thiz.reference,
+                                    thiz.reference
                                 )
                             )
                         }
@@ -505,7 +510,7 @@ class KotlinWriter(
         }
     }
 
-    private val INFIX_LIST = setOf(
+    private val infixList = setOf(
         "assign",
         "plusEquals",
         "eq",
@@ -523,12 +528,10 @@ class KotlinWriter(
         "shr"
     )
 
-    private fun fixNaming(method: ResolvedMethod): ResolvedMethod {
-        return if (method.name in INFIX_LIST) {
-            method.copy(name = method.name + "_method")
-        } else {
-            method
-        }
+    private fun fixNaming(method: ResolvedMethod): ResolvedMethod = if (method.name in infixList) {
+        method.copy(name = method.name + "_method")
+    } else {
+        method
     }
 
     private fun String.kotlinMethodName() = replace("<", "_lt")
@@ -556,18 +559,22 @@ class KotlinWriter(
             val returnType = method.returnType
             val returnStyle = method.returnStyle
             retType = type(returnType)
-            var args = if (method.args.isNotEmpty()) method.args.subList(
-                if (skipFirstArg) 1 else 0,
-                method.args.size
-            ).map {
-                define(it.name, it.type)
-            } else emptyList()
+            var args = if (method.args.isNotEmpty()) {
+                method.args.subList(
+                    if (skipFirstArg) 1 else 0,
+                    method.args.size
+                ).map {
+                    define(it.name, it.type)
+                }
+            } else {
+                emptyList()
+            }
             body {
                 generateMethodBody(
                     startArgs + args.map { reference(it) },
                     returnStyle,
                     method.returnType,
-                    uniqueCName,
+                    uniqueCName
                 )
             }
         }
@@ -577,7 +584,7 @@ class KotlinWriter(
         args: List<Symbol>,
         returnStyle: ReturnStyle,
         returnType: ResolvedCppType,
-        uniqueCName: Symbol,
+        uniqueCName: Symbol
     ) {
         val kotlinType = returnType.kotlinType
         if (returnStyle == ARG_CAST && kotlinType.isWrapper) {
@@ -589,7 +596,7 @@ class KotlinWriter(
                         kotlinType.fullyQualified + ".Companion",
                         kotlinType.name.trimEnd('?') + "_Holder"
                     )
-                ),
+                )
             ).also {
                 it.isVal = true
             }
@@ -628,6 +635,7 @@ class KotlinWriter(
                     }
                 }
             }
+
             is InfixMethod -> {
                 inline {
                     infix {
@@ -639,6 +647,7 @@ class KotlinWriter(
                     }
                 }
             }
+
             is BasicWithDummyMethod -> {
                 inline {
                     generateBasicMethod(
@@ -649,6 +658,7 @@ class KotlinWriter(
                     )
                 }
             }
+
             is BasicMethod -> {
                 inline {
                     generateBasicMethod(
@@ -667,15 +677,16 @@ class KotlinWriter(
         return reference(type, v)
     }
 
-    private fun reference(type: ResolvedKotlinType?, v: LocalVar): Symbol {
-        return if (type != null && type.isWrapper) {
+    private fun reference(type: ResolvedKotlinType?, v: LocalVar): Symbol =
+        if (type != null && type.isWrapper) {
             if (type.toString().endsWith("?")) {
                 v.reference qdot ptr
             } else {
                 v.reference dot ptr
             }
-        } else v.reference
-    }
+        } else {
+            v.reference
+        }
 
     override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
         +property(define(field.name, field.kotlinType)) {
@@ -713,18 +724,23 @@ class KotlinWriter(
                 +Return(
                     generateConstructorCall(
                         returnType,
-                        if (returnType.isNullable) call elvis Return(Raw("null"))
-                        else asserting(call),
+                        if (returnType.isNullable) {
+                            call elvis Return(Raw("null"))
+                        } else {
+                            asserting(call)
+                        },
                         memScope
                     )
                 )
             }
+
             returnType.fullyQualified == "kotlin.String" -> {
                 generateStringReturn(
                     call,
                     free = returnStyle == STRING || returnStyle == STRING_POINTER
                 )
             }
+
             else -> {
                 +Return(call)
             }
@@ -735,9 +751,7 @@ class KotlinWriter(
         type: ResolvedKotlinType,
         ptr: Symbol,
         memScope: Symbol
-    ): Symbol {
-        return Call(constructorMethod(type), ptr, memScope)
-    }
+    ): Symbol = Call(constructorMethod(type), ptr, memScope)
 
     private fun constructorMethod(type: ResolvedKotlinType) = extensionMethod(
         type.pkg,

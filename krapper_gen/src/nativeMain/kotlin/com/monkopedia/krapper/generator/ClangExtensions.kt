@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -229,17 +229,13 @@ inline fun CXTranslationUnit.dispose(token: CValue<CXToken>) {
     }
 }
 
-inline fun CValue<CXCursor>.equals(other: CValue<CXCursor>): Boolean {
-    return clang_equalCursors(this, other) != 0U
-}
+inline fun CValue<CXCursor>.equals(other: CValue<CXCursor>): Boolean =
+    clang_equalCursors(this, other) != 0U
 
-inline fun CValue<CXType>.equals(other: CValue<CXType>): Boolean {
-    return clang_equalTypes(this, other) != 0U
-}
+inline fun CValue<CXType>.equals(other: CValue<CXType>): Boolean =
+    clang_equalTypes(this, other) != 0U
 
-inline fun CValue<CXType>.getArgType(index: UInt): CValue<CXType> {
-    return clang_getArgType(this, index)
-}
+inline fun CValue<CXType>.getArgType(index: UInt): CValue<CXType> = clang_getArgType(this, index)
 
 inline val CValue<CXType>.arrayElementType: CValue<CXType>
     get() = clang_getArrayElementType(this)
@@ -329,9 +325,8 @@ inline val CValue<CXType>.numElements: Long
 inline val CValue<CXCursor>.numOverloadedDecls: UInt
     get() = clang_getNumOverloadedDecls(this)
 
-inline fun CValue<CXCursor>.getOverload(index: UInt): CValue<CXCursor> {
-    return clang_getOverloadedDecl(this, index)
-}
+inline fun CValue<CXCursor>.getOverload(index: UInt): CValue<CXCursor> =
+    clang_getOverloadedDecl(this, index)
 
 inline val CValue<CXType>.pointeeType: CValue<CXType>
     get() = clang_getPointeeType(this)
@@ -448,17 +443,15 @@ inline fun CXIndex.parseTranslationUnit(
     unsaved_files: CValuesRef<CXUnsavedFile>?,
     num_unsaved_files: UInt,
     options: UInt
-): CXTranslationUnit? {
-    return clang_parseTranslationUnit(
-        this,
-        script,
-        command_line_args,
-        num_command_line_args,
-        unsaved_files,
-        num_unsaved_files,
-        options
-    )
-}
+): CXTranslationUnit? = clang_parseTranslationUnit(
+    this,
+    script,
+    command_line_args,
+    num_command_line_args,
+    unsaved_files,
+    num_unsaved_files,
+    options
+)
 
 inline val CValue<CXCursor>.includedFile: CXFile?
     get() = clang_getIncludedFile(this)
@@ -469,9 +462,7 @@ inline val CXFile.path: CValue<CXString>
 inline fun CValue<CXCursor>.visitChildren(
     visitor: CXCursorVisitor?,
     client_data: CXClientData?
-): UInt {
-    return clang_visitChildren(this, visitor, client_data)
-}
+): UInt = clang_visitChildren(this, visitor, client_data)
 
 inline val CValue<CXCursor>.numArguments: Int
     get() = clang_Cursor_getNumArguments(this)

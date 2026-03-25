@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -39,16 +39,16 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.arrayOf
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.CAST
-import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.NATIVE
-import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.POINTED_STRING_CAST
-import com.monkopedia.krapper.generator.resolved_model.type.CastMethod.STRING_CAST
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.nullable
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.CAST
+import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.NATIVE
+import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.POINTED_STRING_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.STRING_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
 import kotlinx.cinterop.CValue
 
 interface Resolver {
@@ -79,7 +79,9 @@ class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
 
     private suspend fun canResolve(str: String, context: ResolveContext): Boolean {
         resolvedClasses[str]?.let {
-            return if (it.isNotEmpty()) true else {
+            return if (it.isNotEmpty()) {
+                true
+            } else {
                 context.notifyFailed<Any>(null, null, "Empty resolve for $str")
                 false
             }
@@ -179,24 +181,19 @@ data class ResolveContext(
         return list
     }
 
-    operator fun plus(wrappedClass: WrappedClass): ResolveContext {
-        return copy(currentNamer = namer.namerFor(wrappedClass), mappingCache = mappingCache)
-    }
+    operator fun plus(wrappedClass: WrappedClass): ResolveContext =
+        copy(currentNamer = namer.namerFor(wrappedClass), mappingCache = mappingCache)
 
-    operator fun plus(wrappedClass: WrappedNamespace): ResolveContext {
-        return copy(currentNamer = namer.namerFor(wrappedClass), mappingCache = mappingCache)
-    }
+    operator fun plus(wrappedClass: WrappedNamespace): ResolveContext =
+        copy(currentNamer = namer.namerFor(wrappedClass), mappingCache = mappingCache)
 
-    fun withClasses(
-        classes: List<WrappedClass>
-    ) = copy(
+    fun withClasses(classes: List<WrappedClass>) = copy(
         tracker = ResolveTracker(classes.associateBy { it.type.toString() }.toMutableMap()),
         namer = NameHandler()
     )
 
-    fun withPolicy(
-        policy: ReferencePolicy
-    ) = copy(typeMapping = typeMapper(policy), namer = NameHandler())
+    fun withPolicy(policy: ReferencePolicy) =
+        copy(typeMapping = typeMapper(policy), namer = NameHandler())
 
     suspend fun canAssign(type: WrappedType): Boolean {
         resolve(type) ?: return true
@@ -256,9 +253,7 @@ data class ResolveContext(
     }
 }
 
-private fun typeMapper(
-    policy: ReferencePolicy
-): TypeMapping {
+private fun typeMapper(policy: ReferencePolicy): TypeMapping {
     return when (policy) {
         ReferencePolicy.IGNORE_MISSING -> return { t, context ->
             t.operateOn {
@@ -269,6 +264,7 @@ private fun typeMapper(
                 }
             }
         }
+
         ReferencePolicy.OPAQUE_MISSING -> return { t, context ->
             t.operateOn {
                 if (context.tracker.canResolve(it, context)) {
@@ -278,6 +274,7 @@ private fun typeMapper(
                 }
             }
         }
+
         ReferencePolicy.THROW_MISSING -> return { t, context ->
             t.operateOn {
                 if (context.tracker.canResolve(it, context)) {
@@ -287,6 +284,7 @@ private fun typeMapper(
                 }
             }
         }
+
         ReferencePolicy.INCLUDE_MISSING -> return { t, context ->
             t.operateOn {
                 if (it.isArray) return@operateOn RemoveElement
@@ -323,32 +321,36 @@ private fun typeMapper(
     }
 }
 
-suspend fun WrappedType.operateOn(
-    typeHandler: suspend (WrappedType) -> MapResult
-): MapResult {
+suspend fun WrappedType.operateOn(typeHandler: suspend (WrappedType) -> MapResult): MapResult {
     when {
         this is WrappedModifiedType -> {
             return (baseType.operateOn(typeHandler)).wrapOnReplace {
                 WrappedModifiedType(it, modifier)
             }
         }
+
         this is WrappedPrefixedType -> {
             return (baseType.operateOn(typeHandler)).wrapOnReplace {
                 WrappedPrefixedType(it, modifier)
             }
         }
+
         this is WrappedTypeReference && this.isArray -> {
             return (arrayType.operateOn(typeHandler)).wrapOnReplace {
                 arrayOf(it)
             }
         }
+
         this is WrappedTemplateType -> return handleTemplate(typeHandler)
+
         this.isPointer -> return (pointed.operateOn(typeHandler)).wrapOnReplace {
             pointerTo(it)
         }
+
         this.isReference -> return (unreferenced.operateOn(typeHandler)).wrapOnReplace {
             referenceTo(it)
         }
+
         else -> return typeHandler(this)
     }
 }
@@ -371,20 +373,20 @@ private suspend fun WrappedTemplateType.handleTemplate(
     }
 }
 
-inline fun MapResult.wrapOnReplace(
-    typeWrapping: (WrappedType) -> WrappedType
-): MapResult {
-    return when (this) {
+inline fun MapResult.wrapOnReplace(typeWrapping: (WrappedType) -> WrappedType): MapResult =
+    when (this) {
         is ReplaceWith -> ReplaceWith(typeWrapping(replacement))
         RemoveElement -> this
         ElementUnchanged -> this
     }
-}
 
 fun toResolvedCppType(type: WrappedType) = ResolvedCppType(
     type.toString(),
-    if (type.isPointer) nullable(toResolvedKotlinType(type.kotlinType))
-    else toResolvedKotlinType(type.kotlinType),
+    if (type.isPointer) {
+        nullable(toResolvedKotlinType(type.kotlinType))
+    } else {
+        toResolvedKotlinType(type.kotlinType)
+    },
     toResolvedCType(type.cType),
     when {
         type.isString -> STRING_CAST

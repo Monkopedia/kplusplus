@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,36 +23,34 @@ import com.monkopedia.krapper.generator.builders.Symbol
 import com.monkopedia.krapper.generator.builders.dereference
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
-import com.monkopedia.krapper.generator.resolved_model.MethodType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.STD_MOVE
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType.Companion.VOID
 
 private const val BETWEEN_LOWER_AND_UPPER = "(?<=\\p{Ll})(?=\\p{Lu})"
 private const val BEFORE_UPPER_AND_LOWER = "(?<=\\p{L})(?=\\p{Lu}\\p{Ll})"
 private val REGEX = Regex("$BETWEEN_LOWER_AND_UPPER|$BEFORE_UPPER_AND_LOWER")
-fun String.splitCamelcase(): List<String> {
-    return split(REGEX)
-}
+fun String.splitCamelcase(): List<String> = split(REGEX)
 
-inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
-    method: ResolvedMethod
-) {
-    return when (method.methodType) {
+inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(method: ResolvedMethod) =
+    when (method.methodType) {
         MethodType.CONSTRUCTOR -> {
             name = method.uniqueCName
             retType = functionBuilder.type(method.returnType.cType)
         }
+
         MethodType.DESTRUCTOR -> {
             retType = null
             name = method.uniqueCName
         }
+
         MethodType.STATIC,
         MethodType.SIZE_OF,
         MethodType.STATIC_OP,
@@ -64,12 +62,8 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateMethodSignature(
             name = method.uniqueCName
         }
     }
-}
 
-data class SignatureArgument(
-    val arg: ResolvedArgument,
-    val localVar: LocalVar,
-) {
+data class SignatureArgument(val arg: ResolvedArgument, val localVar: LocalVar) {
     val targetType: ResolvedCppType
         get() = arg.signatureType
     private val needsDereference: Boolean
@@ -92,23 +86,26 @@ data class SignatureArgument(
 inline fun <T : LangFactory> FunctionBuilder<T>.addArgs(
     method: ResolvedMethod
 ): List<SignatureArgument> {
-    val args = if (method.returnStyle == ARG_CAST) method.args + ResolvedArgument(
-        "ret_value",
-        method.returnType,
-        method.returnType,
-        "",
-        REINT_CAST,
-        method.argCastNeedsPointer,
-        false
-    ) else method.args
+    val args = if (method.returnStyle == ARG_CAST) {
+        method.args + ResolvedArgument(
+            "ret_value",
+            method.returnType,
+            method.returnType,
+            "",
+            REINT_CAST,
+            method.argCastNeedsPointer,
+            false
+        )
+    } else {
+        method.args
+    }
     return args.map {
         defineWrapperArgument(it)
     }
 }
 
-fun <T : LangFactory> FunctionBuilder<T>.defineWrapperArgument(
-    arg: ResolvedArgument
-) = SignatureArgument(arg, define(arg.name, arg.signatureType.cType))
+fun <T : LangFactory> FunctionBuilder<T>.defineWrapperArgument(arg: ResolvedArgument) =
+    SignatureArgument(arg, define(arg.name, arg.signatureType.cType))
 
 inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
     field: ResolvedField
@@ -116,18 +113,22 @@ inline fun <T : LangFactory> FunctionBuilder<T>.generateFieldGet(
     name = field.getter.uniqueCName
     retType =
         field.getter.returnType.takeIf {
-        field.getter.returnStyle != ARG_CAST && field.getter.returnStyle != ReturnStyle.VOID
-    }?.cType?.let(functionBuilder::type)
-        ?: functionBuilder.type(VOID)
-    val args = if (field.getter.returnStyle == ARG_CAST) field.getter.args + ResolvedArgument(
-        "ret_value",
-        field.getter.returnType,
-        field.getter.returnType,
-        "",
-        REINT_CAST,
-        field.getter.needsDereference,
-        false
-    ) else field.getter.args
+            field.getter.returnStyle != ARG_CAST && field.getter.returnStyle != ReturnStyle.VOID
+        }?.cType?.let(functionBuilder::type)
+            ?: functionBuilder.type(VOID)
+    val args = if (field.getter.returnStyle == ARG_CAST) {
+        field.getter.args + ResolvedArgument(
+            "ret_value",
+            field.getter.returnType,
+            field.getter.returnType,
+            "",
+            REINT_CAST,
+            field.getter.needsDereference,
+            false
+        )
+    } else {
+        field.getter.args
+    }
     return args.map {
         defineWrapperArgument(it)
     }

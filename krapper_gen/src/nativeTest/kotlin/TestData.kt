@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -41,7 +41,7 @@ val TestData by lazy {
 
 class TestDataClass {
 
-    val HEADER = """
+    val header = """
         #pragma once
 
         #include <iostream>
@@ -145,7 +145,7 @@ class TestDataClass {
         }
     """.trimIndent()
 
-    val JSON = """
+    val json = """
         [
           {
             "fullyQualified": "TestLib::OtherClass",
@@ -957,7 +957,7 @@ class TestDataClass {
         ]
     """.trimIndent()
 
-    val TEMPLATE_HEADER = """
+    val templateHeader = """
         #pragma once
         
         #include <iostream>
@@ -992,21 +992,21 @@ class TestDataClass {
         }
     """.trimIndent()
 
-    val TU = WrappedTU()
-    val TestLib = WrappedNamespace("TestLib").also {
-        TU.addChild(it)
-        it.parent = TU
+    val tu = WrappedTU()
+    val testLib = WrappedNamespace("TestLib").also {
+        tu.addChild(it)
+        it.parent = tu
     }
-    val Std = WrappedNamespace("std").also {
-        TU.addChild(it)
-        it.parent = TU
+    val std = WrappedNamespace("std").also {
+        tu.addChild(it)
+        it.parent = tu
     }
-    val V8 = WrappedNamespace("v8").also {
-        TU.addChild(it)
-        it.parent = TU
+    val v8 = WrappedNamespace("v8").also {
+        tu.addChild(it)
+        it.parent = tu
     }
 
-    val Vector = VectorClass()
+    val vector = VectorClass()
 
     inner class VectorClass {
         val localType = WrappedType("std::vector")
@@ -1029,10 +1029,10 @@ class TestDataClass {
             }
         val tmp =
             WrappedTemplate(
-                "vector",
+                "vector"
             ).also {
                 it.parent = Std
-                Std.addChild(it)
+                std.addChild(it)
                 it.addAllChildren(
                     listOf(
                         template,
@@ -1045,7 +1045,7 @@ class TestDataClass {
         val cls = tmp to type
     }
 
-    val TestClass = TestClassClass()
+    val testClass = TestClassClass()
 
     inner class TestClassClass {
         val type = WrappedType("TestLib::TestClass")
@@ -1086,13 +1086,13 @@ class TestDataClass {
         val longPointer = WrappedMethod(
             "longPointer",
             WrappedType("long *"),
-            MethodType.METHOD,
+            MethodType.METHOD
         )
         val setSome =
             WrappedMethod(
                 "setSome",
                 WrappedType("void"),
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addChild(WrappedArgument("a", WrappedType("int")))
                 it.addChild(WrappedArgument("b", WrappedType("long")))
@@ -1102,7 +1102,7 @@ class TestDataClass {
             WrappedMethod(
                 "setPointers",
                 WrappedType("void"),
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -1116,26 +1116,26 @@ class TestDataClass {
             WrappedMethod(
                 "setPrivateString",
                 WrappedType("void"),
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(
-                    listOf(WrappedArgument("value", WrappedType("std::string"))),
+                    listOf(WrappedArgument("value", WrappedType("std::string")))
                 )
             }
         val setPrivateFrom =
             WrappedMethod(
                 "setPrivateFrom",
                 WrappedType("void"),
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(
-                    listOf(WrappedArgument("value", WrappedType("TestLib::OtherClass *"))),
+                    listOf(WrappedArgument("value", WrappedType("TestLib::OtherClass *")))
                 )
             }
         val output = WrappedMethod(
             "output",
             WrappedType("void"),
-            MethodType.METHOD,
+            MethodType.METHOD
         )
         val constructor = WrappedConstructor("new", type, false, true)
         val copyConstructor =
@@ -1152,7 +1152,7 @@ class TestDataClass {
                     listOf(
                         WrappedArgument("a", WrappedType("int")),
                         WrappedArgument("b", WrappedType("double"))
-                    ),
+                    )
                 )
             }
         val destructor = WrappedDestructor("~TestClass", type)
@@ -1160,10 +1160,10 @@ class TestDataClass {
             WrappedMethod(
                 "operator-",
                 type,
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(
-                    listOf(WrappedArgument("c2", type)),
+                    listOf(WrappedArgument("c2", type))
                 )
             }
         val operatorUnaryMinus =
@@ -1172,10 +1172,10 @@ class TestDataClass {
             WrappedMethod(
                 "operator+",
                 type,
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(
-                    listOf(WrappedArgument("c2", type)),
+                    listOf(WrappedArgument("c2", type))
                 )
             }
         val operatorUnaryPlus =
@@ -1184,21 +1184,21 @@ class TestDataClass {
             WrappedMethod(
                 "operator*",
                 type,
-                MethodType.METHOD,
+                MethodType.METHOD
             ).also {
                 it.addAllChildren(listOf(WrappedArgument("c2", type)))
             }
         val operatorDiv = WrappedMethod(
             "operator/",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(listOf(WrappedArgument("c2", type)))
         }
         val operatorRem = WrappedMethod(
             "operator%",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(listOf(WrappedArgument("c2", type)))
         }
@@ -1206,74 +1206,74 @@ class TestDataClass {
         val operatorPostInc = WrappedMethod(
             "operator++",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("dummy", WrappedType("int"))),
+                listOf(WrappedArgument("dummy", WrappedType("int")))
             )
         }
         val operatorDec = WrappedMethod("operator--", type, MethodType.METHOD)
         val operatorPostDec = WrappedMethod(
             "operator--",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("dummy", WrappedType("int"))),
+                listOf(WrappedArgument("dummy", WrappedType("int")))
             )
         }
         val operatorEq = WrappedMethod(
             "operator==",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorNeq = WrappedMethod(
             "operator!=",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorLt = WrappedMethod(
             "operator<",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorGt = WrappedMethod(
             "operator>",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorLteq = WrappedMethod(
             "operator<=",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorGteq = WrappedMethod(
             "operator>=",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorNot =
@@ -1281,19 +1281,19 @@ class TestDataClass {
         val operatorBinaryAnd = WrappedMethod(
             "operator&&",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorBinaryOr = WrappedMethod(
             "operator||",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorInv =
@@ -1301,63 +1301,63 @@ class TestDataClass {
         val operatorBitwiseAnd = WrappedMethod(
             "operator&",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorBitwiseOr = WrappedMethod(
             "operator|",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorXor = WrappedMethod(
             "operator^",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorShl = WrappedMethod(
             "operator<<",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorShr = WrappedMethod(
             "operator>>",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &"))),
+                listOf(WrappedArgument("c2", WrappedType("TestLib::TestClass &")))
             )
         }
         val operatorInd = WrappedMethod(
             "operator[]",
             type,
-            MethodType.METHOD,
+            MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("c2", WrappedType("std::string &"))),
+                listOf(WrappedArgument("c2", WrappedType("std::string &")))
             )
         }
 
         val cls =
             WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
-                TestLib.addChild(it)
+                testLib.addChild(it)
                 it.parent = TestLib
                 it.addAllChildren(
                     listOf(
@@ -1436,7 +1436,7 @@ class TestDataClass {
             }
     }
 
-    val OtherClass = OtherClassClass()
+    val otherClass = OtherClassClass()
 
     inner class OtherClassClass {
         val type = WrappedType("TestLib::OtherClass")
@@ -1453,7 +1453,7 @@ class TestDataClass {
             MethodType.METHOD
         ).also {
             it.addAllChildren(
-                listOf(WrappedArgument("value", WrappedType("std::string"))),
+                listOf(WrappedArgument("value", WrappedType("std::string")))
             )
         }
         val appendText = WrappedMethod(
@@ -1463,8 +1463,8 @@ class TestDataClass {
         ).also {
             it.addAllChildren(
                 listOf(
-                    WrappedArgument("text", Vector.type)
-                ),
+                    WrappedArgument("text", vector.type)
+                )
             )
         }
         val copies = WrappedMethod(
@@ -1489,9 +1489,9 @@ class TestDataClass {
         )
         val cls =
             WrappedClass(
-                "OtherClass",
+                "OtherClass"
             ).also {
-                TestLib.addChild(it)
+                testLib.addChild(it)
                 it.parent = TestLib
                 it.addAllChildren(
                     listOf(
@@ -1507,7 +1507,7 @@ class TestDataClass {
             }
     }
 
-    val MyPair = MyPairClass()
+    val myPair = MyPairClass()
 
     inner class MyPairClass {
         val type = WrappedType("TestLib::MyPair")
@@ -1529,7 +1529,7 @@ class TestDataClass {
         )
         val template =
             WrappedTemplate("MyPair").also {
-                TestLib.addChild(it)
+                testLib.addChild(it)
                 it.parent = TestLib
                 it.addAllChildren(
                     listOf(
@@ -1541,16 +1541,16 @@ class TestDataClass {
                     )
                 )
             }
-        val cls = template to WrappedTemplateType(type, listOf(pointerTo(OtherClass.type)))
+        val cls = template to WrappedTemplateType(type, listOf(pointerTo(otherClass.type)))
     }
 
-    val Maybe = MaybeClass()
+    val maybe = MaybeClass()
 
     inner class MaybeClass {
         val localType = WrappedType("v8::Maybe")
         val template = WrappedTemplateParam("_Tp", "_Tp")
         val type = WrappedTemplateType(localType, listOf(WrappedType("double")))
-        val ToChecked =
+        val toChecked =
             WrappedMethod(
                 "ToChecked",
                 const(WrappedTemplateRef(template.usr)),
@@ -1558,10 +1558,10 @@ class TestDataClass {
             )
         val tmp =
             WrappedTemplate(
-                "Maybe",
+                "Maybe"
             ).also {
-                it.parent = V8
-                V8.addChild(it)
+                it.parent = v8
+                v8.addChild(it)
                 it.addAllChildren(
                     listOf(
                         template,

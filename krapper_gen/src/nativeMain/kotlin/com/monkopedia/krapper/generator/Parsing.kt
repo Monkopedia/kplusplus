@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -75,13 +75,13 @@ import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ResolvedNamespace
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedNamespace
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlin.math.min
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
@@ -112,44 +112,53 @@ fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
                 each.all { it(element) }
             }
         }
+
         is OrFilter -> {
             val each = this.elements.map { it.wrapperFilter() }
             return { element ->
                 each.any { it(element) }
             }
         }
+
         is NotFilter -> {
             val base = this.base.wrapperFilter()
             return { element ->
                 !base(element)
             }
         }
+
         DefaultFilter -> {
             return defaultFilter().wrapperFilter()
         }
+
         is HierarchyFilter -> {
             val base = this.filter.wrapperFilter()
             return when (this.target) {
                 PARENT -> { element ->
                     element.parent?.let { base(it) } ?: false
                 }
+
                 BASE -> { element ->
                     base(element.baseParent)
                 }
+
                 ANY_CHILD -> { element ->
                     element.children.any(base)
                 }
+
                 ALL_CHILDREN -> { element ->
                     element.children.all(base)
                 }
             }
         }
+
         is StringFilter -> {
             return { element ->
                 val str = this.selector.select(element)
                 this.matcher.matches(str)
             }
         }
+
         is TypeFilter -> {
             return { element ->
                 types.any {
@@ -174,44 +183,53 @@ fun FilterDefinition.resolveFilter(): (ResolvedElement) -> Boolean {
                 each.all { it(element) }
             }
         }
+
         is OrFilter -> {
             val each = this.elements.map { it.resolveFilter() }
             return { element ->
                 each.any { it(element) }
             }
         }
+
         is NotFilter -> {
             val base = this.base.resolveFilter()
             return { element ->
                 !base(element)
             }
         }
+
         DefaultFilter -> {
             return defaultFilter().resolveFilter()
         }
+
         is HierarchyFilter -> {
             val base = this.filter.resolveFilter()
             return when (this.target) {
                 PARENT -> { element ->
                     element.parent?.let { base(it) } ?: false
                 }
+
                 BASE -> { element ->
                     base(element.baseParent)
                 }
+
                 ANY_CHILD -> { element ->
                     element.children.any(base)
                 }
+
                 ALL_CHILDREN -> { element ->
                     element.children.all(base)
                 }
             }
         }
+
         is StringFilter -> {
             return { element ->
                 val str = this.selector.select(element)
                 this.matcher.matches(str)
             }
         }
+
         is TypeFilter -> {
             return { element ->
                 types.any {
@@ -234,59 +252,57 @@ private fun StringMatcher.matches(input: String?): Boolean {
         STARTS_WITH -> {
             target.startsWith(this.str)
         }
+
         CONTAINS -> {
             target.contains(this.str)
         }
+
         EQUALS -> {
             target == this.str
         }
+
         ENDS_WITH -> {
             target.endsWith(this.str)
         }
+
         REGEX -> {
             Regex(this.str).matches(target)
         }
     }
 }
 
-private fun StringSelector.select(element: ResolvedElement): String? {
-    return when (this) {
-        STRINGIFY -> element.toString()
-        CLASS_NAME -> (element as? ResolvedClass)?.name
-        CLASS_QUALIFIED -> (element as? ResolvedClass)?.type?.type
-        METHOD_NAME -> (element as? ResolvedMethod)?.name
-        METHOD_TYPE -> (element as? ResolvedMethod)?.methodType?.toString()
-        METHOD_RETURN_TYPE -> (element as? ResolvedMethod)?.returnType?.type
-        NAMESPACE -> (element as? ResolvedNamespace)?.namespace
-    }
+private fun StringSelector.select(element: ResolvedElement): String? = when (this) {
+    STRINGIFY -> element.toString()
+    CLASS_NAME -> (element as? ResolvedClass)?.name
+    CLASS_QUALIFIED -> (element as? ResolvedClass)?.type?.type
+    METHOD_NAME -> (element as? ResolvedMethod)?.name
+    METHOD_TYPE -> (element as? ResolvedMethod)?.methodType?.toString()
+    METHOD_RETURN_TYPE -> (element as? ResolvedMethod)?.returnType?.type
+    NAMESPACE -> (element as? ResolvedNamespace)?.namespace
 }
 
-private fun StringSelector.select(element: WrappedElement): String? {
-    return when (this) {
-        STRINGIFY -> element.toString()
-        CLASS_NAME -> (element as? WrappedClass)?.name
-        CLASS_QUALIFIED -> (element as? WrappedClass)?.type?.toString()
-        METHOD_NAME -> (element as? WrappedMethod)?.name
-        METHOD_TYPE -> (element as? WrappedMethod)?.methodType?.toString()
-        METHOD_RETURN_TYPE -> (element as? WrappedMethod)?.returnType?.toString()
-        NAMESPACE -> (element as? WrappedNamespace)?.namespace
-    }
+private fun StringSelector.select(element: WrappedElement): String? = when (this) {
+    STRINGIFY -> element.toString()
+    CLASS_NAME -> (element as? WrappedClass)?.name
+    CLASS_QUALIFIED -> (element as? WrappedClass)?.type?.toString()
+    METHOD_NAME -> (element as? WrappedMethod)?.name
+    METHOD_TYPE -> (element as? WrappedMethod)?.methodType?.toString()
+    METHOD_RETURN_TYPE -> (element as? WrappedMethod)?.returnType?.toString()
+    NAMESPACE -> (element as? WrappedNamespace)?.namespace
 }
 
-fun defaultFilter(): FilterDefinition {
-    return filter {
-        (
-            (thiz isType ResolvedClass) and
-                (!(qualified startsWith "std::")) and
-                (!(qualified.startsWith("__")))
-            ) or (
-            (thiz isType ResolvedMethod) and
-                (methodType eq STATIC.name) and
-                !(parent isType ResolvedClass) and
-                base(!(stringified startsWith "std")) and
-                parent(!((thiz isType ResolvedNamespace) and (namespace startsWith "_")))
-            )
-    }
+fun defaultFilter(): FilterDefinition = filter {
+    (
+        (thiz isType ResolvedClass) and
+            (!(qualified startsWith "std::")) and
+            (!(qualified.startsWith("__")))
+        ) or (
+        (thiz isType ResolvedMethod) and
+            (methodType eq STATIC.name) and
+            !(parent isType ResolvedClass) and
+            base(!(stringified startsWith "std")) and
+            parent(!((thiz isType ResolvedNamespace) and (namespace startsWith "_")))
+        )
 }
 
 fun WrappedElement.defaultFilter(): Boolean {
@@ -367,15 +383,14 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
     private val classMap = mutableMapOf<String, Pair<ResolvedClass, WrappedClass>?>()
     private val templateMap = mutableMapOf<String, WrappedTemplate>()
 
-    override fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate {
-        return templateMap.getOrPut(type.toString()) {
+    override fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate =
+        templateMap.getOrPut(type.toString()) {
             val templateCandidates = tu.filterRecursive {
                 ((it as? WrappedTemplate)?.qualified == type.toString())
             }
             templateCandidates.singleOrNull() as? WrappedTemplate
                 ?: error("Can't resolve template $type (${type::class.simpleName})")
         }
-    }
 
     override suspend fun resolve(
         type: WrappedType,
@@ -394,9 +409,11 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
                     val template = resolveTemplate(type.baseType, context)
                     template.typedAs(type, context)
                 }
+
                 is WrappedTemplateRef -> {
                     throw IllegalArgumentException("Can't resolve $type since it is templated")
                 }
+
                 else -> {
                     error("Can't resolve $type (${type::class.simpleName})")
                 }
@@ -438,9 +455,11 @@ private class ResolverBuilderImpl : ResolverBuilder {
                     }
                     type
                 }
+
                 CXCursor_TypedefDecl -> {
                     visit(type.typeDeclaration.typedefDeclUnderlyingType)
                 }
+
                 else -> {
                     type
                 }
@@ -547,24 +566,31 @@ suspend fun WrappedTemplate.typedAs(
         }
     }
     val mapper: TypeMapping = { type, context ->
-        if (type.toString() == fullyQualified) ReplaceWith(templateSpec)
-        else type.operateOn { type ->
-            if (type is WrappedTemplateRef) {
-                val mapping = mapping[type.target]
-                if (mapping != null) {
-                    val result = baseContext.typeMapping(mapping, context)
-                    return@operateOn if (result == ElementUnchanged) {
-                        ReplaceWith(mapping)
-                    } else result
+        if (type.toString() == fullyQualified) {
+            ReplaceWith(templateSpec)
+        } else {
+            type.operateOn { type ->
+                if (type is WrappedTemplateRef) {
+                    val mapping = mapping[type.target]
+                    if (mapping != null) {
+                        val result = baseContext.typeMapping(mapping, context)
+                        return@operateOn if (result == ElementUnchanged) {
+                            ReplaceWith(mapping)
+                        } else {
+                            result
+                        }
+                    }
                 }
-            }
-            if (type.toString() == fullyQualified) {
-                val result = baseContext.typeMapping(templateSpec, context)
-                if (result == ElementUnchanged) {
-                    ReplaceWith(templateSpec)
-                } else result
-            } else {
-                baseContext.typeMapping(type, context)
+                if (type.toString() == fullyQualified) {
+                    val result = baseContext.typeMapping(templateSpec, context)
+                    if (result == ElementUnchanged) {
+                        ReplaceWith(templateSpec)
+                    } else {
+                        result
+                    }
+                } else {
+                    baseContext.typeMapping(type, context)
+                }
             }
         }
     }
@@ -600,16 +626,14 @@ fun removeDuplicateMethods(element: WrappedElement) {
     }
 }
 
-private fun WrappedMethod.generateSignatureString(): String {
-    return buildString {
-        append(methodType.ordinal)
-        append('#')
-        append(name)
+private fun WrappedMethod.generateSignatureString(): String = buildString {
+    append(methodType.ordinal)
+    append('#')
+    append(name)
+    append(',')
+    for (argument in args) {
+        append(argument.type.maybeUnconst.maybeUnreferenced.toString())
         append(',')
-        for (argument in args) {
-            append(argument.type.maybeUnconst.maybeUnreferenced.toString())
-            append(',')
-        }
     }
 }
 

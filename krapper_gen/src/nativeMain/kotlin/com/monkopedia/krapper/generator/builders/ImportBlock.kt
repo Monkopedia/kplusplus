@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.FqSymbol
+import com.monkopedia.krapper.generator.resolvedmodel.type.FqSymbol
 
 inline fun KotlinCodeBuilder.importBlock(pkg: String, target: KotlinCodeBuilder) {
     addSymbol(ImportBlock(pkg, target))
@@ -38,7 +38,7 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
                 if (!fqName.contains(".")) continue
                 // Same pkg as file, skip import
                 if (fqName.startsWith(prefixedPkg) && !fqName.substring(prefixLength)
-                    .contains(".")
+                        .contains(".")
                 ) {
                     continue
                 }
@@ -101,9 +101,7 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
         return error("Cannot name $fqName, too many conflicts.")
     }
 
-    override fun toString(): String {
-        return "Imports@${hashCode()}"
-    }
+    override fun toString(): String = "Imports@${hashCode()}"
 }
 
 private fun findFqSymbols(
@@ -132,22 +130,20 @@ inline fun extensionMethod(fullyQualified: String): Symbol {
     return extensionMethod(list.subList(0, list.size - 1).joinToString("."), list.last())
 }
 
-inline fun extensionMethod(pkg: String, method: String): Symbol {
-    return object : Symbol, FqSymbol {
-        private val fullyQualified = "$pkg.$method"
-        private var remap: Map<String, String>? = null
+inline fun extensionMethod(pkg: String, method: String): Symbol = object : Symbol, FqSymbol {
+    private val fullyQualified = "$pkg.$method"
+    private var remap: Map<String, String>? = null
 
-        override fun setNameRemap(map: Map<String, String>) {
-            remap = map
-        }
-
-        override fun build(builder: CodeStringBuilder) {
-            builder.append(remap?.get(fullyQualified) ?: method)
-        }
-
-        override val fqNames: List<String>
-            get() = listOf(fullyQualified)
+    override fun setNameRemap(map: Map<String, String>) {
+        remap = map
     }
+
+    override fun build(builder: CodeStringBuilder) {
+        builder.append(remap?.get(fullyQualified) ?: method)
+    }
+
+    override val fqNames: List<String>
+        get() = listOf(fullyQualified)
 }
 
 interface SymbolContainer {

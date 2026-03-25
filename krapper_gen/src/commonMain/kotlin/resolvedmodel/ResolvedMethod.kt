@@ -1,26 +1,26 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.monkopedia.krapper.generator.resolved_model
+package com.monkopedia.krapper.generator.resolvedmodel
 
 import com.monkopedia.krapper.FilterableTypes
 import com.monkopedia.krapper.ResolvedOperator
 import com.monkopedia.krapper.TypeTarget
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
-import com.monkopedia.krapper.generator.resolved_model.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -42,7 +42,7 @@ enum class ReturnStyle {
     STRING_POINTER,
     COPY_CONSTRUCTOR,
     RETURN,
-    RETURN_REFERENCE,
+    RETURN_REFERENCE
 }
 
 enum class AllocationStyle {
@@ -89,17 +89,15 @@ class ResolvedConstructor : ResolvedMethod {
         isDefaultConstructor: Boolean = this.isDefaultConstructor,
         isCopyConstructor: Boolean = this.isCopyConstructor,
         allocationStyle: AllocationStyle = this.allocationStyle
-    ): ResolvedMethod {
-        return ResolvedConstructor(
-            name,
-            returnType,
-            isCopyConstructor,
-            isDefaultConstructor,
-            uniqueCName,
-            args.map { it.copy() },
-            allocationStyle
-        )
-    }
+    ): ResolvedMethod = ResolvedConstructor(
+        name,
+        returnType,
+        isCopyConstructor,
+        isDefaultConstructor,
+        uniqueCName,
+        args.map { it.copy() },
+        allocationStyle
+    )
 
     override fun copy(
         name: String,
@@ -111,18 +109,16 @@ class ResolvedConstructor : ResolvedMethod {
         returnStyle: ReturnStyle,
         argCastNeedsPointer: Boolean,
         qualified: String
-    ): ResolvedConstructor {
-        return ResolvedConstructor(
-            name,
-            returnType,
-            isCopyConstructor,
-            isDefaultConstructor,
-            uniqueCName,
-            args.map { it.copy() },
-            allocationStyle
-        ).also {
-            it.parent = parent
-        }
+    ): ResolvedConstructor = ResolvedConstructor(
+        name,
+        returnType,
+        isCopyConstructor,
+        isDefaultConstructor,
+        uniqueCName,
+        args.map { it.copy() },
+        allocationStyle
+    ).also {
+        it.parent = parent
     }
 }
 
@@ -156,15 +152,13 @@ class ResolvedDestructor : ResolvedMethod {
         returnStyle: ReturnStyle,
         argCastNeedsPointer: Boolean,
         qualified: String
-    ): ResolvedDestructor {
-        return ResolvedDestructor(
-            name,
-            returnType,
-            uniqueCName,
-            args.map { it.copy() }
-        ).also {
-            it.parent = parent
-        }
+    ): ResolvedDestructor = ResolvedDestructor(
+        name,
+        returnType,
+        uniqueCName,
+        args.map { it.copy() }
+    ).also {
+        it.parent = parent
     }
 }
 
@@ -192,29 +186,23 @@ open class ResolvedMethod(
         returnStyle: ReturnStyle = this.returnStyle,
         argCastNeedsPointer: Boolean = this.argCastNeedsPointer,
         qualified: String = this.qualified
-    ): ResolvedMethod {
-        return ResolvedMethod(
-            name,
-            returnType,
-            methodType,
-            uniqueCName,
-            operator,
-            args.map { it.copy() },
-            returnStyle,
-            argCastNeedsPointer,
-            qualified
-        ).also {
-            it.parent = parent
-        }
+    ): ResolvedMethod = ResolvedMethod(
+        name,
+        returnType,
+        methodType,
+        uniqueCName,
+        operator,
+        args.map { it.copy() },
+        returnStyle,
+        argCastNeedsPointer,
+        qualified
+    ).also {
+        it.parent = parent
     }
 
-    override fun cloneWithoutChildren(): ResolvedMethod {
-        return copy()
-    }
+    override fun cloneWithoutChildren(): ResolvedMethod = copy()
 
-    override fun toString(): String {
-        return "fun $name(${args.joinToString(", ")}): $returnType"
-    }
+    override fun toString(): String = "fun $name(${args.joinToString(", ")}): $returnType"
 
     companion object : TypeTarget<ResolvedMethod>(FilterableTypes.METHOD, ResolvedMethod::class)
 }
@@ -238,11 +226,8 @@ data class ResolvedArgument(
     var hasDefault: Boolean
 ) {
 
-    override fun toString(): String {
-        return "$name: $type"
-    }
+    override fun toString(): String = "$name: $type"
 
-    override fun equals(other: Any?): Boolean {
-        return (other as? ResolvedArgument)?.name == name && other.type == type
-    }
+    override fun equals(other: Any?): Boolean =
+        (other as? ResolvedArgument)?.name == name && other.type == type
 }

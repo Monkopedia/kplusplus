@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,10 +15,10 @@
  */
 package com.monkopedia.krapper
 
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 suspend inline fun IndexedService.addMapping(
     crossinline filter: FilterDsl.() -> FilterDefinition,
@@ -52,16 +52,10 @@ inline fun <T : ResolvedElement> typedMapping(
 inline fun mapping(
     crossinline filter: FilterDsl.() -> FilterDefinition,
     crossinline handler: suspend (MapRequest) -> List<MapResult>
-): MappingService {
-    return object : MappingService {
-        override suspend fun getFilter(resolver: ResolverService): FilterDefinition {
-            return filter(filter)
-        }
+): MappingService = object : MappingService {
+    override suspend fun getFilter(resolver: ResolverService): FilterDefinition = filter(filter)
 
-        override suspend fun mapElement(request: MapRequest): List<MapResult> {
-            return handler(request)
-        }
-    }
+    override suspend fun mapElement(request: MapRequest): List<MapResult> = handler(request)
 }
 
 interface MappingScope {
@@ -74,7 +68,9 @@ interface MappingScope {
     suspend fun resolvedType(type: String): ResolvedType
 }
 
-abstract class Mapping<T>(private val filter: FilterDefinition) : MappingScope, MappingService {
+abstract class Mapping<T>(private val filter: FilterDefinition) :
+    MappingScope,
+    MappingService {
 
     private val modifications = mutableListOf<MapResult>()
     private var currentElement: ResolvedElement? = null
@@ -157,17 +153,14 @@ abstract class Mapping<T>(private val filter: FilterDefinition) : MappingScope, 
         }
     }
 
-    override suspend fun resolvedCType(type: String): ResolvedCType {
-        return resolverService?.resolvedCType(type) ?: error("Missing resolverService")
-    }
+    override suspend fun resolvedCType(type: String): ResolvedCType =
+        resolverService?.resolvedCType(type) ?: error("Missing resolverService")
 
-    override suspend fun resolvedKotlinType(type: String): ResolvedKotlinType {
-        return resolverService?.resolvedKotlinType(type) ?: error("Missing resolverService")
-    }
+    override suspend fun resolvedKotlinType(type: String): ResolvedKotlinType =
+        resolverService?.resolvedKotlinType(type) ?: error("Missing resolverService")
 
-    override suspend fun resolvedType(type: String): ResolvedType {
-        return resolverService?.resolvedType(type) ?: error("Missing resolverService")
-    }
+    override suspend fun resolvedType(type: String): ResolvedType =
+        resolverService?.resolvedType(type) ?: error("Missing resolverService")
 
     abstract suspend fun runMapping(element: T)
 }

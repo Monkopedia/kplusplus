@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,20 +20,17 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.referenced
-import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedFieldGetter
-import com.monkopedia.krapper.generator.resolved_model.ResolvedFieldSetter
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldGetter
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldSetter
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
 import kotlinx.cinterop.CValue
 import kotlinx.serialization.Transient
 
-data class WrappedField(
-    val name: String,
-    val type: WrappedType
-) : WrappedElement() {
+data class WrappedField(val name: String, val type: WrappedType) : WrappedElement() {
     @Transient
     internal val other = Any()
 
@@ -42,16 +39,12 @@ data class WrappedField(
         WrappedType(field.type, resolverBuilder)
     )
 
-    override fun clone(): WrappedElement {
-        return WrappedField(name, type).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    override fun clone(): WrappedElement = WrappedField(name, type).also {
+        it.addAllChildren(children)
+        it.parent = parent
     }
 
-    override fun toString(): String {
-        return "$name: $type"
-    }
+    override fun toString(): String = "$name: $type"
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedField? =
         with(resolverContext.currentNamer) {
@@ -66,7 +59,9 @@ data class WrappedField(
                             unreferenced,
                             "Field unreferenced type"
                         )
-                } else mappedType
+                } else {
+                    mappedType
+                }
             val needsDereference =
                 !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE
             val wrappedArgType = if (needsDereference) WrappedType.pointerTo(type) else type

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,9 +25,7 @@ import platform.posix.exit
 class KrapperServiceImpl : KrapperService {
     private var config: KrapperConfig? = null
 
-    override suspend fun ping(message: String): String {
-        return "Krapper ping $message"
-    }
+    override suspend fun ping(message: String): String = "Krapper ping $message"
 
     override suspend fun setLogger(logger: RemoteLogger) {
         Log.loggerImpl = logger
@@ -37,13 +35,11 @@ class KrapperServiceImpl : KrapperService {
         this.config = config
     }
 
-    override suspend fun getConfig(u: Unit): KrapperConfig {
-        return config ?: error("Config has not been set")
-    }
+    override suspend fun getConfig(u: Unit): KrapperConfig =
+        config ?: error("Config has not been set")
 
-    override suspend fun index(request: IndexRequest): IndexedService {
-        return IndexedServiceImpl(getConfig(Unit), request)
-    }
+    override suspend fun index(request: IndexRequest): IndexedService =
+        IndexedServiceImpl(getConfig(Unit), request)
 
     override suspend fun quit(u: Unit) {
         exit(0)

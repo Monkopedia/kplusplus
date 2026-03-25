@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -36,7 +36,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.typeDeclaration
@@ -50,9 +50,7 @@ private val existingTypes = mutableMapOf<String, WrappedType>()
 abstract class WrappedType : WrappedElement() {
     abstract val cType: WrappedType
 
-    override fun clone(): WrappedType {
-        return this
-    }
+    override fun clone(): WrappedType = this
 
     abstract val isNative: Boolean
     abstract val isString: Boolean
@@ -72,9 +70,8 @@ abstract class WrappedType : WrappedElement() {
     abstract val isConst: Boolean
     abstract val unconst: WrappedType
 
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? {
-        return resolverContext.resolve(this)
-    }
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? =
+        resolverContext.resolve(this)
 
     companion object :
         (String) -> WrappedType,
@@ -106,10 +103,8 @@ abstract class WrappedType : WrappedElement() {
             }
         }
 
-        override fun invoke(
-            type: CValue<CXType>,
-            resolverBuilder: ResolverBuilder
-        ): WrappedType = invoke(type, resolverBuilder, throwOnError = false)
+        override fun invoke(type: CValue<CXType>, resolverBuilder: ResolverBuilder): WrappedType =
+            invoke(type, resolverBuilder, throwOnError = false)
 
         override fun invoke(
             type: CValue<CXType>,
@@ -138,8 +133,11 @@ abstract class WrappedType : WrappedElement() {
                         templateReference,
                         List(type.numTemplateArguments) {
                             val tempType = type.getTemplateArgumentType(it.toUInt())
-                            if (tempType.useContents { kind } == CXType_Invalid) null
-                            else invoke(tempType, resolverBuilder)
+                            if (tempType.useContents { kind } == CXType_Invalid) {
+                                null
+                            } else {
+                                invoke(tempType, resolverBuilder)
+                            }
                         }.filterNotNull()
                     ).maybeConst(type.isConstQualifiedType)
                 }
@@ -156,9 +154,8 @@ abstract class WrappedType : WrappedElement() {
             }
         }
 
-        private inline fun WrappedType.maybeConst(isConst: Boolean): WrappedType {
-            return if (isConst) const(this) else this
-        }
+        private inline fun WrappedType.maybeConst(isConst: Boolean): WrappedType =
+            if (isConst) const(this) else this
 
         private fun createForType(
             type: CValue<CXType>,
@@ -180,42 +177,42 @@ abstract class WrappedType : WrappedElement() {
                         referencedDecl.usr.toKString() ?: error("Declaration missing usr")
                     )
                 }
+
                 referencedDecl.kind == CXCursor_TemplateTypeParameter -> {
                     WrappedTemplateRef(
                         referencedDecl.usr.toKString() ?: error("Declaration missing usr")
                     )
                 }
+
                 referencedDecl.kind == CXCursor_ClassTemplate -> {
                     invoke(referencedDecl.fullyQualified)
                 }
+
                 referencedDecl.kind == CXCursor_ClassDecl -> {
                     invoke(referencedDecl.fullyQualified)
                 }
+
                 referencedDecl.kind == CXCursor_StructDecl -> {
                     invoke(referencedDecl.fullyQualified)
                 }
+
                 type.useContents { kind } == CXType_Unexposed &&
                     referencedDecl.kind == CXCursor_NoDeclFound &&
                     !spelling.startsWith("typename ") -> {
                     WrappedTemplateRef(spelling)
                 }
+
                 else -> {
                     invoke(spelling)
                 }
             }
         }
 
-        fun pointerTo(type: WrappedType): WrappedType {
-            return WrappedModifiedType(type, "*")
-        }
+        fun pointerTo(type: WrappedType): WrappedType = WrappedModifiedType(type, "*")
 
-        fun referenceTo(type: WrappedType): WrappedType {
-            return WrappedModifiedType(type, "&")
-        }
+        fun referenceTo(type: WrappedType): WrappedType = WrappedModifiedType(type, "&")
 
-        fun arrayOf(type: WrappedType): WrappedType {
-            return WrappedModifiedType(type, "[]")
-        }
+        fun arrayOf(type: WrappedType): WrappedType = WrappedModifiedType(type, "[]")
 
         fun const(type: WrappedType): WrappedType {
             if (type.isConst) return type

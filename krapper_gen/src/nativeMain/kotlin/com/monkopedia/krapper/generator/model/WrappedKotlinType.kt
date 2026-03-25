@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -80,7 +80,7 @@ private val pointerTypeMap = mapOf(
     "signed long long" to "kotlinx.cinterop.LongVar",
     "unsigned long long" to "kotlinx.cinterop.ULongVar",
     "float" to "kotlinx.cinterop.FloatVar",
-    "double" to "kotlinx.cinterop.DoubleVar",
+    "double" to "kotlinx.cinterop.DoubleVar"
 )
 
 fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(type)
@@ -153,8 +153,9 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
             findQualifiers(name).joinToString("::") {
                 val section = name.substring(it).trimStart(':')
                 val start = section.indexOf('<')
-                if (start < 0) section
-                else {
+                if (start < 0) {
+                    section
+                } else {
                     val base = section.substring(0, start)
                     templateTypes += parseTypes(
                         section.substring(
@@ -180,9 +181,7 @@ internal class NullableKotlinType(internal val base: WrappedKotlinType) : Wrappe
     override val pkg: String
         get() = base.pkg
 
-    override fun toString(): String {
-        return "$base?"
-    }
+    override fun toString(): String = "$base?"
 }
 
 fun nullable(base: WrappedKotlinType): WrappedKotlinType = NullableKotlinType(base)
@@ -217,57 +216,48 @@ internal class TemplatedKotlinType(
     override val pkg: String
         get() = baseType.pkg
 
-    override fun toString(): String {
-        return "$baseType<${templateTypes.joinToString(", ")}>"
+    override fun toString(): String = "$baseType<${templateTypes.joinToString(", ")}>"
+}
+
+fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKotlinType =
+    TemplatedKotlinType(this, parseTypes)
+
+fun parseTypes(argList: String): List<WrappedKotlinType> = findTemplates(argList).map {
+    argList.substring(it).trimStart(',')
+}.map(::WrappedKotlinType)
+
+fun findQualifiers(argList: String): List<IntRange> = sequence {
+    var last = -1
+    var current = 1
+    var lastColon = false
+    while (current < argList.length) {
+        val c = argList[current]
+        if (c == '<') {
+            current = argList.findEnd(start = current)
+        } else if (c == ':' && lastColon) {
+            yield(IntRange(last + 1, current - 2))
+            last = current
+        }
+        lastColon = c == ':'
+        current++
     }
-}
+    yield(IntRange(last + 1, current - 1))
+}.toList()
 
-fun WrappedKotlinType.typedWith(parseTypes: List<WrappedKotlinType>): WrappedKotlinType {
-    return TemplatedKotlinType(this, parseTypes)
-}
-
-fun parseTypes(argList: String): List<WrappedKotlinType> {
-    return findTemplates(argList).map {
-        argList.substring(it).trimStart(',')
-    }.map(::WrappedKotlinType)
-}
-
-fun findQualifiers(argList: String): List<IntRange> {
-    return sequence {
-        var last = -1
-        var current = 1
-        var lastColon = false
-        while (current < argList.length) {
-            val c = argList[current]
-            if (c == '<') {
-                current = argList.findEnd(start = current)
-            } else if (c == ':' && lastColon) {
-                yield(IntRange(last + 1, current - 2))
-                last = current
-            }
-            lastColon = c == ':'
-            current++
+fun findTemplates(argList: String): List<IntRange> = sequence {
+    var last = 0
+    var current = 1
+    while (current < argList.length) {
+        if (argList[current] == '<') {
+            current = argList.findEnd(start = current)
+        } else if (argList[current] == ',') {
+            yield(IntRange(last, current - 1))
+            last = current
         }
-        yield(IntRange(last + 1, current - 1))
-    }.toList()
-}
-
-fun findTemplates(argList: String): List<IntRange> {
-    return sequence {
-        var last = 0
-        var current = 1
-        while (current < argList.length) {
-            if (argList[current] == '<') {
-                current = argList.findEnd(start = current)
-            } else if (argList[current] == ',') {
-                yield(IntRange(last, current - 1))
-                last = current
-            }
-            current++
-        }
-        yield(IntRange(last, current - 1))
-    }.toList()
-}
+        current++
+    }
+    yield(IntRange(last, current - 1))
+}.toList()
 
 private fun String.findEnd(start: Int): Int {
     var startSearch = start
@@ -302,8 +292,6 @@ fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinT
         override val pkg: String
             get() = capitalizedNameList.toMutableList().also { it.removeLast() }.joinToString(".")
 
-        override fun toString(): String {
-            return capitalizedName
-        }
+        override fun toString(): String = capitalizedName
     }
 }

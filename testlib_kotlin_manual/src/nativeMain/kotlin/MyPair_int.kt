@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,9 +23,8 @@ import testlib.TestLib_MyPair__int_b_set
 import testlib.TestLib_MyPair__int_get_max
 import testlib.TestLib_MyPair__int_new
 
-value class MyPair_int public constructor(
-    val source: Pair<TestLib_MyPair__int, MemScope>
-) {
+@Suppress("ktlint:standard:class-naming")
+value class MyPair_int public constructor(val source: Pair<TestLib_MyPair__int, MemScope>) {
     val ptr: TestLib_MyPair__int
         inline get() = source.first
     val memScope: MemScope
@@ -47,9 +46,7 @@ value class MyPair_int public constructor(
             TestLib_MyPair__int_b_set(ptr, value)
         }
 
-    inline fun getMax(): Int {
-        return TestLib_MyPair__int_get_max(ptr)
-    }
+    inline fun getMax(): Int = TestLib_MyPair__int_get_max(ptr)
 
     companion object {
         inline fun MemScope.MyPair_int(first: Int, second: Int): MyPair_int {

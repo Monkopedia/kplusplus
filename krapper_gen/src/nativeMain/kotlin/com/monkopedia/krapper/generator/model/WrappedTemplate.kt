@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,10 +22,10 @@ import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.ResolvedTemplate
-import com.monkopedia.krapper.generator.resolved_model.ResolvedTemplateParam
-import com.monkopedia.krapper.generator.resolved_model.ResolvedTypedef
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplate
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplateParam
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTypedef
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -86,32 +86,28 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         super.addChild(child)
     }
 
-    override fun toString(): String {
-        return buildString {
-            append("class $qualified<${templateArgs.joinToString(", ")}> {\n")
-            baseClass?.let {
-                append("    super $it")
-            }
-            append("\n")
-            for (field in fields) {
-                append("    $field\n")
-            }
-            append("\n")
-            for (method in methods) {
-                append("    $method\n")
-            }
-            append("\n")
-
-            append("}\n")
+    override fun toString(): String = buildString {
+        append("class $qualified<${templateArgs.joinToString(", ")}> {\n")
+        baseClass?.let {
+            append("    super $it")
         }
+        append("\n")
+        for (field in fields) {
+            append("    $field\n")
+        }
+        append("\n")
+        for (method in methods) {
+            append("    $method\n")
+        }
+        append("\n")
+
+        append("}\n")
     }
 
-    override fun clone(): WrappedElement {
-        return WrappedTemplate(name).also {
-            it.addAllChildren(children)
-            it.parent = parent
-            it.metadata = metadata.copy()
-        }
+    override fun clone(): WrappedElement = WrappedTemplate(name).also {
+        it.addAllChildren(children)
+        it.parent = parent
+        it.metadata = metadata.copy()
     }
 }
 
@@ -130,16 +126,12 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         value.usr.toKString() ?: error("Template param without USR $value")
     )
 
-    override fun clone(): WrappedTemplateParam {
-        return WrappedTemplateParam(name, usr).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    override fun clone(): WrappedTemplateParam = WrappedTemplateParam(name, usr).also {
+        it.addAllChildren(children)
+        it.parent = parent
     }
 
-    override fun toString(): String {
-        return "$name${defaultType?.let { " $it" } ?: ""} ($children)"
-    }
+    override fun toString(): String = "$name${defaultType?.let { " $it" } ?: ""} ($children)"
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 
@@ -183,16 +175,12 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
         determineType(value, resolverBuilder)
     )
 
-    override fun clone(): WrappedTypedef {
-        return WrappedTypedef(name, targetType).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    override fun clone(): WrappedTypedef = WrappedTypedef(name, targetType).also {
+        it.addAllChildren(children)
+        it.parent = parent
     }
 
-    override fun toString(): String {
-        return "typedef $name = $targetType"
-    }
+    override fun toString(): String = "typedef $name = $targetType"
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? {
         return ResolvedTypedef(
@@ -209,8 +197,6 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
         private fun determineType(
             value: CValue<CXCursor>,
             resolverBuilder: ResolverBuilder
-        ): WrappedType {
-            return WrappedType(value.type, resolverBuilder)
-        }
+        ): WrappedType = WrappedType(value.type, resolverBuilder)
     }
 }

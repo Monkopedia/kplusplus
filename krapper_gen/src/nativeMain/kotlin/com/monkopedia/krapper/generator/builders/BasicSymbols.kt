@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,7 +24,9 @@ class Reference(private val arg: LocalVar) : Symbol {
 inline val LocalVar.reference: Symbol
     get() = Reference(this)
 
-class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
+class Dereference(private val arg: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(arg)
 
@@ -41,7 +43,9 @@ class Dereference(private val arg: Symbol) : Symbol, SymbolContainer {
     }
 }
 
-class Address(private val arg: Symbol) : Symbol, SymbolContainer {
+class Address(private val arg: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(arg)
 
@@ -69,7 +73,9 @@ inline val LocalVar.dereference: Symbol
 inline val Symbol.dereference: Symbol
     get() = Dereference(this)
 
-class Return(private val s: Symbol) : Symbol, SymbolContainer {
+class Return(private val s: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
 
@@ -79,7 +85,9 @@ class Return(private val s: Symbol) : Symbol, SymbolContainer {
     }
 }
 
-class Delete(private val s: Symbol) : Symbol, SymbolContainer {
+class Delete(private val s: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
 
@@ -89,7 +97,9 @@ class Delete(private val s: Symbol) : Symbol, SymbolContainer {
     }
 }
 
-class New(private val s: Symbol, private val location: Symbol? = null) : Symbol, SymbolContainer {
+class New(private val s: Symbol, private val location: Symbol? = null) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
 
@@ -108,7 +118,8 @@ class Call(
     private val name: Symbol,
     private val templateArgs: List<Symbol>,
     private vararg val args: Symbol
-) : Symbol, SymbolContainer {
+) : Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(name) + args + templateArgs
 
@@ -138,7 +149,9 @@ class Call(
     }
 }
 
-class ColonColon(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class ColonColon(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -149,7 +162,9 @@ class ColonColon(private val first: Symbol, private val second: Symbol) : Symbol
     }
 }
 
-class Dot(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class Dot(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -160,7 +175,9 @@ class Dot(private val first: Symbol, private val second: Symbol) : Symbol, Symbo
     }
 }
 
-class Arrow(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class Arrow(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -175,7 +192,8 @@ class Assign(
     private val first: Symbol,
     private val second: Symbol,
     private val plusEqual: Boolean = false
-) : Symbol, SymbolContainer {
+) : Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -189,7 +207,8 @@ class Assign(
 }
 
 class Op(private val operand: String, private val first: Symbol, private val second: Symbol) :
-    Symbol, SymbolContainer {
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -214,7 +233,9 @@ class Raw(val content: String) : Symbol {
     }
 }
 
-class RawCast(val content: String, val target: Symbol) : Symbol, SymbolContainer {
+class RawCast(val content: String, val target: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
 

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,11 +25,11 @@ import com.monkopedia.krapper.generator.includedFile
 import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
-import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClassMetadata
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClassMetadata
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -41,10 +41,8 @@ private val CValue<CXCursor>.fileParent: CXFile?
     }
 
 class WrappedBase(val type: WrappedType?) : WrappedElement() {
-    override fun clone(): WrappedElement {
-        return WrappedBase(type).also {
-            it.addAllChildren(children.map { it.clone() })
-        }
+    override fun clone(): WrappedElement = WrappedBase(type).also {
+        it.addAllChildren(children.map { it.clone() })
     }
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
@@ -56,18 +54,16 @@ data class ClassMetadata(
     var hasConstructor: Boolean = false,
     var hasPrivateConstField: Boolean = false,
     var hasDefaultConstructor: Boolean = false,
-    var hasCopyConstructor: Boolean = false,
+    var hasCopyConstructor: Boolean = false
 ) {
-    fun toResolved(): ResolvedClassMetadata {
-        return ResolvedClassMetadata(
-            hasHiddenNew = hasHiddenNew,
-            hasHiddenDelete = hasHiddenDelete,
-            hasConstructor = hasConstructor,
-            hasPrivateConstField = hasPrivateConstField,
-            hasDefaultConstructor = hasDefaultConstructor,
-            hasCopyConstructor = hasCopyConstructor
-        )
-    }
+    fun toResolved(): ResolvedClassMetadata = ResolvedClassMetadata(
+        hasHiddenNew = hasHiddenNew,
+        hasHiddenDelete = hasHiddenDelete,
+        hasConstructor = hasConstructor,
+        hasPrivateConstField = hasPrivateConstField,
+        hasDefaultConstructor = hasDefaultConstructor,
+        hasCopyConstructor = hasCopyConstructor
+    )
 }
 
 class WrappedClass(
@@ -83,20 +79,18 @@ class WrappedClass(
         get() = specifiedType ?: WrappedType(qualified)
 
     constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        wrapName(value, value.spelling.toKString() ?: error("Missing name")), value.isAbstract
+        wrapName(value, value.spelling.toKString() ?: error("Missing name")),
+        value.isAbstract
     )
 
-    override fun clone(): WrappedClass {
-        return clone(this.specifiedType)
-    }
+    override fun clone(): WrappedClass = clone(this.specifiedType)
 
-    fun clone(specifiedType: WrappedType? = this.specifiedType): WrappedClass {
-        return WrappedClass(name, isAbstract, specifiedType).also {
+    fun clone(specifiedType: WrappedType? = this.specifiedType): WrappedClass =
+        WrappedClass(name, isAbstract, specifiedType).also {
             it.parent = parent
             it.addAllChildren(children)
             it.metadata = metadata.copy()
         }
-    }
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedClass? {
         val baseClasses = resolverContext.findBases(this)
@@ -129,8 +123,11 @@ class WrappedClass(
         ).also {
             it.addAllChildren(
                 children.mapNotNull { child ->
-                    if (isAbstract && child is WrappedConstructor) null
-                    else child.resolve(resolverContext + this)
+                    if (isAbstract && child is WrappedConstructor) {
+                        null
+                    } else {
+                        child.resolve(resolverContext + this)
+                    }
                 }
             )
         }
@@ -190,9 +187,7 @@ class WrappedClass(
         )
     }
 
-    override fun toString(): String {
-        return qualified
-    }
+    override fun toString(): String = qualified
 
     private var isNotEmptyCache: Boolean? = null
 
@@ -206,10 +201,8 @@ class WrappedClass(
         super.addAllChildren(list)
     }
 
-    fun isNotEmpty(): Boolean {
-        return isNotEmptyCache ?: calculateNotEmpty().also {
-            isNotEmptyCache = it
-        }
+    fun isNotEmpty(): Boolean = isNotEmptyCache ?: calculateNotEmpty().also {
+        isNotEmptyCache = it
     }
 
     private fun calculateNotEmpty() = baseClass != null || children.any {

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,35 +29,31 @@ class DefWriter(private val namer: NameHandler) {
         moduleName: String,
         headers: List<String>,
         libraries: List<String>
-    ): String {
-        return buildString {
-            val flags = CompileFlags(
-                listOf(File(outputBase, "$moduleName.h").path),
-                libraries + File(outputBase, "lib$moduleName.a").path
-            )
-            appendLine("headers = ${flags.headerFiles.joinToString(" ") { it.name }}")
-            flags.includeDirs?.let {
-                appendLine("compilerOpts = $it")
-            }
-            flags.linkerOpts?.let {
-                appendLine("linkerOpts = $it")
-            }
-
-            flags.libraryOpts?.let {
-                appendLine("staticLibraries = $it")
-            }
-            flags.libraryPaths?.let {
-                appendLine("libraryPaths = $it")
-            }
-            appendLine("package = $pkg")
+    ): String = buildString {
+        val flags = CompileFlags(
+            listOf(File(outputBase, "$moduleName.h").path),
+            libraries + File(outputBase, "lib$moduleName.a").path
+        )
+        appendLine("headers = ${flags.headerFiles.joinToString(" ") { it.name }}")
+        flags.includeDirs?.let {
+            appendLine("compilerOpts = $it")
         }
+        flags.linkerOpts?.let {
+            appendLine("linkerOpts = $it")
+        }
+
+        flags.libraryOpts?.let {
+            appendLine("staticLibraries = $it")
+        }
+        flags.libraryPaths?.let {
+            appendLine("libraryPaths = $it")
+        }
+        appendLine("package = $pkg")
     }
 }
 
-fun getcwd(): String {
-    return memScoped {
-        val buffer = allocArray<ByteVar>(256)
-        getcwd(buffer, 256)
-        buffer.toKString()
-    }
+fun getcwd(): String = memScoped {
+    val buffer = allocArray<ByteVar>(256)
+    getcwd(buffer, 256)
+    buffer.toKString()
 }

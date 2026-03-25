@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,32 +32,32 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.referenced
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
-import com.monkopedia.krapper.generator.resolved_model.MethodType.SIZE_OF
-import com.monkopedia.krapper.generator.resolved_model.MethodType.STATIC
-import com.monkopedia.krapper.generator.resolved_model.ResolvedArgument
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
-import com.monkopedia.krapper.generator.resolved_model.ResolvedDestructor
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN_REFERENCE
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.NATIVE
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.RAW_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.STD_MOVE
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedConstructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedDestructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.RETURN
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.RETURN_REFERENCE
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING_POINTER
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP_REFERENCE
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.result
 import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
@@ -95,7 +95,7 @@ suspend fun WrappedElement.createThisArg(resolverContext: ResolveContext): Resol
     )
 }
 
-typealias MethodType = com.monkopedia.krapper.generator.resolved_model.MethodType
+typealias MethodType = com.monkopedia.krapper.generator.resolvedmodel.MethodType
 
 class WrappedConstructor(
     name: String,
@@ -109,19 +109,17 @@ class WrappedConstructor(
         returnType: WrappedType,
         methodType: MethodType,
         children: List<WrappedElement>
-    ): WrappedMethod {
-        return WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
+    ): WrappedMethod =
+        WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
             it.addAllChildren(children)
             it.parent = parent
         }
-    }
 
-    override fun clone(): WrappedConstructor {
-        return WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
+    override fun clone(): WrappedConstructor =
+        WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
             it.parent = parent
             it.addAllChildren(children)
         }
-    }
 
     fun checkCopyConstructor(type: WrappedType) {
         if (args.size == 1 && args.first().type == type) {
@@ -174,13 +172,14 @@ class WrappedConstructor(
         )
     }
 
-    override suspend fun resolve(
-        resolverContext: ResolveContext
-    ): ResolvedConstructor? =
+    override suspend fun resolve(resolverContext: ResolveContext): ResolvedConstructor? =
         with(resolverContext.currentNamer) {
             val pointedType = (
-                if (allocationStyle == DIRECT) parentClass?.type?.let(::pointerTo)
-                else VOID
+                if (allocationStyle == DIRECT) {
+                    parentClass?.type?.let(::pointerTo)
+                } else {
+                    VOID
+                }
                 ) ?: return resolverContext.notifyFailed(
                 this@WrappedConstructor,
                 null,
@@ -206,27 +205,21 @@ class WrappedConstructor(
         }
 }
 
-class WrappedDestructor(
-    name: String,
-    returnType: WrappedType
-) : WrappedMethod(name, returnType, MethodType.DESTRUCTOR) {
+class WrappedDestructor(name: String, returnType: WrappedType) :
+    WrappedMethod(name, returnType, MethodType.DESTRUCTOR) {
     override fun copy(
         name: String,
         returnType: WrappedType,
         methodType: MethodType,
         children: List<WrappedElement>
-    ): WrappedMethod {
-        return WrappedDestructor(name, returnType).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    ): WrappedMethod = WrappedDestructor(name, returnType).also {
+        it.addAllChildren(children)
+        it.parent = parent
     }
 
-    override fun clone(): WrappedDestructor {
-        return WrappedDestructor(name, returnType).also {
-            it.parent = parent
-            it.addAllChildren(children)
-        }
+    override fun clone(): WrappedDestructor = WrappedDestructor(name, returnType).also {
+        it.parent = parent
+        it.addAllChildren(children)
     }
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedDestructor? =
@@ -249,13 +242,19 @@ suspend fun determineReturnStyle(
     resolverContext: ResolveContext
 ): ReturnStyle = when {
     returnType.isVoid -> ReturnStyle.VOID
+
     !returnType.isReturnable ->
         if (resolverContext.canAssign(returnType)) ARG_CAST else COPY_CONSTRUCTOR
+
     returnType.isString -> STRING
+
     returnType.isPointer && returnType.pointed.isString -> STRING_POINTER
+
     returnType.isNative || returnType == LONG_DOUBLE ->
         if (returnType.isReference) RETURN_REFERENCE else RETURN
+
     returnType.isReference -> VOIDP_REFERENCE
+
     else -> VOIDP
 }
 
@@ -274,8 +273,11 @@ open class WrappedMethod(
         },
         if (method.isStatic ||
             (method.semanticParent.kind !in clsParents && method.lexicalParent.kind !in clsParents)
-        ) MethodType.STATIC
-        else MethodType.METHOD
+        ) {
+            MethodType.STATIC
+        } else {
+            MethodType.METHOD
+        }
     )
 
     open fun copy(
@@ -283,18 +285,14 @@ open class WrappedMethod(
         returnType: WrappedType = this.returnType,
         methodType: MethodType = this.methodType,
         children: List<WrappedElement> = this.children.toList()
-    ): WrappedMethod {
-        return WrappedMethod(name, returnType, methodType).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    ): WrappedMethod = WrappedMethod(name, returnType, methodType).also {
+        it.addAllChildren(children)
+        it.parent = parent
     }
 
-    override fun clone(): WrappedMethod {
-        return WrappedMethod(name, returnType, methodType).also {
-            it.parent = parent
-            it.addAllChildren(children)
-        }
+    override fun clone(): WrappedMethod = WrappedMethod(name, returnType, methodType).also {
+        it.parent = parent
+        it.addAllChildren(children)
     }
 
     protected open suspend fun thizArg(resolverContext: ResolveContext): List<ResolvedArgument>? {
@@ -312,8 +310,11 @@ open class WrappedMethod(
                 )
             val returnStyle = determineReturnStyle(rawMapping, resolverContext)
             val type =
-                if (!rawMapping.isPointer && !rawMapping.isReturnable) pointerTo(rawMapping)
-                else rawMapping
+                if (!rawMapping.isPointer && !rawMapping.isReturnable) {
+                    pointerTo(rawMapping)
+                } else {
+                    rawMapping
+                }
             var resolvedReturnType = resolverContext.resolve(type)
                 ?: return resolverContext.notifyFailed(
                     this@WrappedMethod,
@@ -325,10 +326,15 @@ open class WrappedMethod(
             )
             val argCastNeedsPointer = if (returnStyle == ARG_CAST) {
                 val type =
-                    if (rawMapping.isReference) rawMapping.unreferenced
-                    else rawMapping
+                    if (rawMapping.isReference) {
+                        rawMapping.unreferenced
+                    } else {
+                        rawMapping
+                    }
                 !type.isPointer
-            } else false
+            } else {
+                false
+            }
             if (argCastNeedsPointer) {
                 resolvedReturnType = resolvedReturnType.copy(
                     cType =
@@ -379,9 +385,7 @@ open class WrappedMethod(
         return retArgs
     }
 
-    override fun toString(): String {
-        return "fun $name(${args.joinToString(", ")}): $returnType"
-    }
+    override fun toString(): String = "fun $name(${args.joinToString(", ")}): $returnType"
 
     companion object {
         private val clsParents = listOf(
@@ -405,20 +409,15 @@ class WrappedArgument(
         hasDefault(arg)
     )
 
-    override fun clone(): WrappedArgument {
-        return WrappedArgument(name, type, usr, hasDefault).also {
-            it.parent = parent
-            it.addAllChildren(children)
-        }
+    override fun clone(): WrappedArgument = WrappedArgument(name, type, usr, hasDefault).also {
+        it.parent = parent
+        it.addAllChildren(children)
     }
 
-    override fun toString(): String {
-        return "$name: $type"
-    }
+    override fun toString(): String = "$name: $type"
 
-    override fun equals(other: Any?): Boolean {
-        return (other as? WrappedArgument)?.name == name && other.type == type
-    }
+    override fun equals(other: Any?): Boolean =
+        (other as? WrappedArgument)?.name == name && other.type == type
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
 
@@ -436,7 +435,9 @@ class WrappedArgument(
                     pointerType,
                     "Argument type"
                 )
-            } else resolved
+            } else {
+                resolved
+            }
         return ResolvedArgument(
             name,
             resolved,
@@ -467,9 +468,13 @@ fun determineArgumentCastMode(
     resolverContext: ResolveContext
 ) = when {
     type.isString -> ArgumentCastMode.STRING
+
     type.isNative -> NATIVE
+
     type == LONG_DOUBLE -> RAW_CAST
+
     // TODO: Real type check rather than prefix.
     !isReference && !type.isPointer && type.toString().startsWith("std::unique_ptr") -> STD_MOVE
+
     else -> REINT_CAST
 }

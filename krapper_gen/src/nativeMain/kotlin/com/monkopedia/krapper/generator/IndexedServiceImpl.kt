@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -40,12 +40,12 @@ import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.recursiveSequence
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlinx.cinterop.Arena
 import kotlinx.coroutines.runBlocking
 
@@ -157,17 +157,14 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     private suspend fun executeMappings() {
         val resolver = object : ResolverService {
-            override suspend fun resolvedType(typeStr: String): ResolvedType {
-                return toResolvedCppType(WrappedType(typeStr))
-            }
+            override suspend fun resolvedType(typeStr: String): ResolvedType =
+                toResolvedCppType(WrappedType(typeStr))
 
-            override suspend fun resolvedKotlinType(typeStr: String): ResolvedKotlinType {
-                return toResolvedKotlinType(WrappedType(typeStr).kotlinType)
-            }
+            override suspend fun resolvedKotlinType(typeStr: String): ResolvedKotlinType =
+                toResolvedKotlinType(WrappedType(typeStr).kotlinType)
 
-            override suspend fun resolvedCType(typeStr: String): ResolvedCType {
-                return toResolvedCType(WrappedType(typeStr).cType)
-            }
+            override suspend fun resolvedCType(typeStr: String): ResolvedCType =
+                toResolvedCType(WrappedType(typeStr).cType)
         }
         val mappingsAndFilters = mappings.map {
             it.getFilter(resolver).resolveFilter() to it
@@ -201,30 +198,32 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         }
     }
 
-    private fun applyResult(
-        result: MapResult,
-        element: ResolvedElement
-    ) = when (result) {
+    private fun applyResult(result: MapResult, element: ResolvedElement) = when (result) {
         RemoveChild -> {
             element.parent?.removeChild(element)
         }
+
         RemoveParent -> {
             element.parent?.let { parent ->
                 parent.parent?.removeChild(parent)
             }
         }
+
         is AddToChild -> {
             element.addChild(result.newChild)
         }
+
         is AddToParent -> {
             element.parent?.addChild(result.newChild)
         }
+
         is ReplaceChild -> {
             element.parent?.let { parent ->
                 parent.removeChild(element)
                 parent.addChild(result.newChild)
             }
         }
+
         is ReplaceParent -> {
             element.parent?.let { parent ->
                 parent.parent?.let { parentParent ->
@@ -233,6 +232,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 }
             }
         }
+
         NoChange -> {
             // Nothing to do.
         }

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -56,25 +56,19 @@ class NameHandler {
         return name
     }
 
-    fun namerFor(wrappedClass: WrappedClass): Namer {
-        return namerStorage.getOrPut(wrappedClass) {
-            NamerImpl(
-                cName = wrappedClass.type.toString().cleanupName()
-            )
-        }
+    fun namerFor(wrappedClass: WrappedClass): Namer = namerStorage.getOrPut(wrappedClass) {
+        NamerImpl(
+            cName = wrappedClass.type.toString().cleanupName()
+        )
     }
 
-    fun namerFor(wrappedClass: WrappedNamespace): Namer {
-        return namerStorage.getOrPut(wrappedClass) {
-            NamerImpl(
-                cName = wrappedClass.fullyQualified.cleanupName()
-            )
-        }
+    fun namerFor(wrappedClass: WrappedNamespace): Namer = namerStorage.getOrPut(wrappedClass) {
+        NamerImpl(
+            cName = wrappedClass.fullyQualified.cleanupName()
+        )
     }
 
-    private inner class NamerImpl(
-        override val cName: String
-    ) : Namer {
+    private inner class NamerImpl(override val cName: String) : Namer {
         private val nameLookup = mutableMapOf<Any, String>()
 
         override val WrappedMethod.uniqueCName: String
@@ -84,12 +78,15 @@ class NameHandler {
                         MethodType.CONSTRUCTOR -> {
                             cName + "_new"
                         }
+
                         MethodType.DESTRUCTOR -> {
                             cName + "_dispose"
                         }
+
                         MethodType.SIZE_OF -> {
                             cName + "_size_of"
                         }
+
                         MethodType.STATIC,
                         MethodType.STATIC_OP,
                         MethodType.METHOD -> {
@@ -104,9 +101,8 @@ class NameHandler {
                 )
             }
 
-        private inline fun name(obj: Any, generator: () -> String): String {
-            return nameLookup.getOrPut(obj, generator)
-        }
+        private inline fun name(obj: Any, generator: () -> String): String =
+            nameLookup.getOrPut(obj, generator)
 
         override val WrappedField.uniqueCGetter: String
             get() = name(this) {
@@ -121,16 +117,14 @@ class NameHandler {
     }
 }
 
-private fun String.cleanupName(): String {
-    return replace("::", "_")
-        .replace("<", "_")
-        .replace(",", "__")
-        .replace("!", "_EXP")
-        .replace(">", "")
-        .replace("*", "_P")
-        .replace(" ", "_")
-        .replace("==", "_cmp")
-        .replace("[]", "_ind")
-        .replace("=", "_eq")
-        .replace("\"", "_qt")
-}
+private fun String.cleanupName(): String = replace("::", "_")
+    .replace("<", "_")
+    .replace(",", "__")
+    .replace("!", "_EXP")
+    .replace(">", "")
+    .replace("*", "_P")
+    .replace(" ", "_")
+    .replace("==", "_cmp")
+    .replace("[]", "_ind")
+    .replace("=", "_eq")
+    .replace("\"", "_qt")

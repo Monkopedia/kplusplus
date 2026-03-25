@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 interface Symbol {
 
@@ -61,7 +61,8 @@ class CodeBuilderBase<T : LangFactory>(
     override val factory: T,
     rootScope: Scope<T> = Scope<T>(),
     internal val addSemis: Boolean = true
-) : CodeBuilder<T>, SymbolContainer {
+) : CodeBuilder<T>,
+    SymbolContainer {
     private val symbolList = mutableListOf<Symbol>()
     override val symbols: List<Symbol>
         get() = symbolList
@@ -74,15 +75,13 @@ class CodeBuilderBase<T : LangFactory>(
         symbolList.add(symbol)
     }
 
-    override fun toString(): String {
-        return buildCode {
-            for (symbol in symbolList) {
-                symbol.build(this)
-                if (addSemis && !symbol.blockSemi) {
-                    append(';')
-                }
-                append('\n')
+    override fun toString(): String = buildCode {
+        for (symbol in symbolList) {
+            symbol.build(this)
+            if (addSemis && !symbol.blockSemi) {
+                append(';')
             }
+            append('\n')
         }
     }
 
@@ -99,6 +98,4 @@ inline fun CodeBuilder<*>.appendLine() {
     addSymbol(Empty)
 }
 
-inline fun CodeBuilder<*>.type(type: ResolvedType): Symbol {
-    return factory.createType(type)
-}
+inline fun CodeBuilder<*>.type(type: ResolvedType): Symbol = factory.createType(type)

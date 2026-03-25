@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,9 +34,8 @@ import com.monkopedia.krapper.StringSelector.NAMESPACE
 import com.monkopedia.krapper.StringSelector.STRINGIFY
 import kotlin.reflect.KClass
 
-inline fun filter(filterBuilder: FilterDsl.() -> FilterDefinition): FilterDefinition {
-    return FilterDsl().filterBuilder()
-}
+inline fun filter(filterBuilder: FilterDsl.() -> FilterDefinition): FilterDefinition =
+    FilterDsl().filterBuilder()
 
 open class TypeTarget<T : Any>(val filterType: FilterableTypes, val targetClass: KClass<T>)
 
@@ -83,15 +82,12 @@ class FilterDsl {
     val allChildren: ElementTarget
         inline get() = ALL_CHILDREN
 
-    operator fun FilterDefinition.not(): FilterDefinition {
-        return NotFilter(this)
-    }
+    operator fun FilterDefinition.not(): FilterDefinition = NotFilter(this)
 
     operator fun FilterDefinition.plus(other: FilterDefinition): FilterDefinition = and(other)
 
-    inline infix fun ElementTarget.isType(target: TypeTarget<*>): FilterDefinition {
-        return wrap(TypeFilter(target.filterType))
-    }
+    inline infix fun ElementTarget.isType(target: TypeTarget<*>): FilterDefinition =
+        wrap(TypeFilter(target.filterType))
 
     inline infix fun FilterDefinition.and(other: FilterDefinition): FilterDefinition {
         val thisElements = if (this is AndFilter) elements else arrayOf(this)
@@ -105,23 +101,18 @@ class FilterDsl {
         return OrFilter(*thisElements, *otherElements)
     }
 
-    inline infix fun StringSelector.eq(str: String): FilterDefinition {
-        return StringFilter(this, StringMatcher(EQUALS, str))
-    }
+    inline infix fun StringSelector.eq(str: String): FilterDefinition =
+        StringFilter(this, StringMatcher(EQUALS, str))
 
-    inline infix fun StringSelector.contains(str: String): FilterDefinition {
-        return StringFilter(this, StringMatcher(CONTAINS, str))
-    }
+    inline infix fun StringSelector.contains(str: String): FilterDefinition =
+        StringFilter(this, StringMatcher(CONTAINS, str))
 
-    inline infix fun StringSelector.startsWith(str: String): FilterDefinition {
-        return StringFilter(this, StringMatcher(STARTS_WITH, str))
-    }
+    inline infix fun StringSelector.startsWith(str: String): FilterDefinition =
+        StringFilter(this, StringMatcher(STARTS_WITH, str))
 
-    inline infix fun StringSelector.endsWith(str: String): FilterDefinition {
-        return StringFilter(this, StringMatcher(ENDS_WITH, str))
-    }
+    inline infix fun StringSelector.endsWith(str: String): FilterDefinition =
+        StringFilter(this, StringMatcher(ENDS_WITH, str))
 
-    inline infix fun StringSelector.regex(str: String): FilterDefinition {
-        return StringFilter(this, StringMatcher(REGEX, str))
-    }
+    inline infix fun StringSelector.regex(str: String): FilterDefinition =
+        StringFilter(this, StringMatcher(REGEX, str))
 }

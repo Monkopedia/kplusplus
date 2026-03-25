@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,7 +30,7 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -100,7 +100,8 @@ class KotlinCodeTests {
             |}
             |
             |// END KRAPPER GEN for TestLib::EmptyClass
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             output.readText()
         )
     }
@@ -110,7 +111,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "Constructable",
+                "Constructable"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -118,7 +119,7 @@ class KotlinCodeTests {
                             "Constructable",
                             WrappedType("TestLib::Constructable"),
                             false,
-                            false,
+                            false
                         ),
                         WrappedNamespace("A")
                     )
@@ -139,7 +140,8 @@ class KotlinCodeTests {
             val rcls =
                 ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(
-                rcls, rcls.children.first() as ResolvedMethod,
+                rcls,
+                rcls.children.first() as ResolvedMethod,
                 object : LocalVar {
                     override val name: String
                         get() = "size"
@@ -157,7 +159,8 @@ class KotlinCodeTests {
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
             |    return Constructable(obj, this)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -167,7 +170,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "Constructable",
+                "Constructable"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -179,7 +182,7 @@ class KotlinCodeTests {
                         ),
                         WrappedDestructor(
                             "Constructable",
-                            WrappedType("TestLib::Constructable"),
+                            WrappedType("TestLib::Constructable")
                         )
                     )
                 )
@@ -199,7 +202,8 @@ class KotlinCodeTests {
             val rcls =
                 ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
             builder.onGenerate(
-                rcls, rcls.children.first() as ResolvedMethod,
+                rcls,
+                rcls.children.first() as ResolvedMethod,
                 object : LocalVar {
                     override val name: String
                         get() = "size"
@@ -220,7 +224,8 @@ class KotlinCodeTests {
             |    }
             |    return Constructable(obj, this)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -230,7 +235,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -244,7 +249,7 @@ class KotlinCodeTests {
                                     WrappedArgument("a", WrappedType("int")),
                                     WrappedArgument("b", WrappedType("long")),
                                     WrappedArgument("c", WrappedType("long long"))
-                                ),
+                                )
                             )
                         }
                     )
@@ -271,7 +276,8 @@ class KotlinCodeTests {
             |inline fun setSome(a: Int, b: Long, c: Long): Unit {
             |    return TestLib_TestClass_set_some(ptr, a, b, c)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -281,7 +287,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -295,7 +301,7 @@ class KotlinCodeTests {
                                     WrappedArgument("a", WrappedType("int*")),
                                     WrappedArgument("b", WrappedType("long*")),
                                     WrappedArgument("c", WrappedType("long long*"))
-                                ),
+                                )
                             )
                         }
                     )
@@ -322,7 +328,8 @@ class KotlinCodeTests {
             |inline fun setPointers(a: CValuesRef<IntVar>?, b: CValuesRef<LongVar>?, c: CValuesRef<LongVar>?): Unit {
             |    return TestLib_TestClass_set_pointers(ptr, a, b, c)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -332,7 +339,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -365,7 +372,8 @@ class KotlinCodeTests {
             |inline fun sum(): Long {
             |    return TestLib_TestClass_sum(ptr)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -375,7 +383,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "vector<std::string>",
+                "vector<std::string>"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -386,8 +394,8 @@ class KotlinCodeTests {
                         ).also {
                             it.addAllChildren(
                                 listOf(
-                                    WrappedArgument("pos", WrappedType("size_t")),
-                                ),
+                                    WrappedArgument("pos", WrappedType("size_t"))
+                                )
                             )
                         }
                     )
@@ -417,7 +425,8 @@ class KotlinCodeTests {
             |    free(str)
             |    return ret
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -427,7 +436,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -441,8 +450,8 @@ class KotlinCodeTests {
                                     WrappedArgument(
                                         "other",
                                         WrappedType("TestLib::OtherClass")
-                                    ),
-                                ),
+                                    )
+                                )
                             )
                         }
                     )
@@ -475,7 +484,8 @@ class KotlinCodeTests {
             |inline fun setPrivateFrom(other: OtherClass): Unit {
             |    return TestLib_TestClass_set_private_from(ptr, other.ptr)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -485,7 +495,7 @@ class KotlinCodeTests {
         val builder = KotlinCodeBuilder()
         with(writer) {
             val cls = WrappedClass(
-                "TestClass",
+                "TestClass"
             ).also {
                 it.addAllChildren(
                     listOf(
@@ -500,8 +510,8 @@ class KotlinCodeTests {
                                     WrappedArgument(
                                         "other",
                                         WrappedType("TestLib::OtherClass")
-                                    ),
-                                ),
+                                    )
+                                )
                             )
                         }
                     )
@@ -534,7 +544,8 @@ class KotlinCodeTests {
             |inline fun setPrivateFrom(other: OtherClass): Unit {
             |    return TestLib_TestClass_set_private_from(ptr, other.ptr)
             |}
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             builder.toString()
         )
     }
@@ -595,7 +606,8 @@ class KotlinCodeTests {
             |}
             |
             |// END KRAPPER GEN for std::vector<std::string>::iterator
-            |""".trimMargin(),
+            |
+            """.trimMargin(),
             output.readText()
         )
     }

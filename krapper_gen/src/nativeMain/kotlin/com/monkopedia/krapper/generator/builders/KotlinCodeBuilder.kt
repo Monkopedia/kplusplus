@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,18 +15,17 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.FqSymbol
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedCppType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType.Companion.VOID
-import com.monkopedia.krapper.generator.resolved_model.type.fullyQualifiedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.FqSymbol
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType.Companion.VOID
+import com.monkopedia.krapper.generator.resolvedmodel.type.fullyQualifiedType
 
 typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
 
-fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuilder {
-    return CodeBuilderBase(KotlinFactory(), rootScope, addSemis = false)
-}
+fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuilder =
+    CodeBuilderBase(KotlinFactory(), rootScope, addSemis = false)
 
 class KotlinFactory : LangFactory {
     override fun define(
@@ -46,15 +45,13 @@ class KotlinFactory : LangFactory {
         )
     }
 
-    override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol {
-        return KotlinFunctionSig(name, retType ?: KotlinType(VOID), args)
-    }
+    override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol =
+        KotlinFunctionSig(name, retType ?: KotlinType(VOID), args)
 
     override fun createType(type: ResolvedType): Symbol = KotlinType(type)
 
-    fun define(name: String, type: ResolvedKotlinType, initializer: Symbol?): LocalVar {
-        return KotlinLocalVar(name, type, initializer)
-    }
+    fun define(name: String, type: ResolvedKotlinType, initializer: Symbol?): LocalVar =
+        KotlinLocalVar(name, type, initializer)
 
     companion object {
         const val C_OPAQUE_POINTER = "kotlinx.cinterop.COpaquePointer"
@@ -69,7 +66,9 @@ class KotlinFactory : LangFactory {
     }
 }
 
-class QDot(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class QDot(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -87,9 +86,7 @@ object Private : Symbol {
         builder.append("private")
     }
 
-    override fun toString(): String {
-        return "private"
-    }
+    override fun toString(): String = "private"
 }
 
 object Public : Symbol {
@@ -97,9 +94,7 @@ object Public : Symbol {
         builder.append("public")
     }
 
-    override fun toString(): String {
-        return "public"
-    }
+    override fun toString(): String = "public"
 }
 
 object Internal : Symbol {
@@ -107,9 +102,7 @@ object Internal : Symbol {
         builder.append("internal")
     }
 
-    override fun toString(): String {
-        return "internal"
-    }
+    override fun toString(): String = "internal"
 }
 
 object Defer : Symbol {
@@ -117,9 +110,7 @@ object Defer : Symbol {
         builder.append("defer {\n")
     }
 
-    override fun toString(): String {
-        return "defer"
-    }
+    override fun toString(): String = "defer"
 }
 
 object CompanionStart : Symbol {
@@ -127,9 +118,7 @@ object CompanionStart : Symbol {
         builder.append("companion object {\n")
     }
 
-    override fun toString(): String {
-        return "companion"
-    }
+    override fun toString(): String = "companion"
 }
 
 object EndClass : Symbol {
@@ -137,9 +126,7 @@ object EndClass : Symbol {
         builder.append('}')
     }
 
-    override fun toString(): String {
-        return "end block"
-    }
+    override fun toString(): String = "end block"
 }
 
 object Getter : Symbol {
@@ -147,9 +134,7 @@ object Getter : Symbol {
         builder.append("get() {\n")
     }
 
-    override fun toString(): String {
-        return "getter"
-    }
+    override fun toString(): String = "getter"
 }
 
 object Setter : Symbol {
@@ -157,34 +142,28 @@ object Setter : Symbol {
         builder.append("set(value) {\n")
     }
 
-    override fun toString(): String {
-        return "setter"
+    override fun toString(): String = "setter"
+}
+
+inline fun KotlinCodeBuilder.getter(builder: KotlinCodeBuilder.() -> Unit) =
+    block(this, Getter, EndClass, builder)
+
+inline fun KotlinCodeBuilder.setter(builder: KotlinCodeBuilder.(LocalVar) -> Unit) =
+    block(this, Setter, EndClass) {
+        builder(object : LocalVar {
+            override val name: String
+                get() = "value"
+
+            override fun build(builder: CodeStringBuilder) {
+            }
+        })
     }
-}
 
-inline fun KotlinCodeBuilder.getter(
-    builder: KotlinCodeBuilder.() -> Unit
-) = block(this, Getter, EndClass, builder)
+inline fun KotlinCodeBuilder.companion(builder: KotlinCodeBuilder.() -> Unit) =
+    block(CompanionStart, EndClass, builder)
 
-inline fun KotlinCodeBuilder.setter(
-    builder: KotlinCodeBuilder.(LocalVar) -> Unit
-) = block(this, Setter, EndClass) {
-    builder(object : LocalVar {
-        override val name: String
-            get() = "value"
-
-        override fun build(builder: CodeStringBuilder) {
-        }
-    })
-}
-
-inline fun KotlinCodeBuilder.companion(
-    builder: KotlinCodeBuilder.() -> Unit
-) = block(CompanionStart, EndClass, builder)
-
-inline fun KotlinCodeBuilder.defer(
-    builder: KotlinCodeBuilder.() -> Unit
-) = block(Defer, EndClass, builder)
+inline fun KotlinCodeBuilder.defer(builder: KotlinCodeBuilder.() -> Unit) =
+    block(Defer, EndClass, builder)
 
 fun KotlinCodeBuilder.define(
     desiredName: String,
@@ -207,10 +186,9 @@ inline fun KotlinCodeBuilder.cls(
     }
 }
 
-class ClassStartSymbol(
-    val clsName: Symbol,
-    val constructorArgs: List<Symbol>
-) : Symbol, SymbolContainer {
+class ClassStartSymbol(val clsName: Symbol, val constructorArgs: List<Symbol>) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(clsName) + constructorArgs
 
@@ -228,19 +206,17 @@ class ClassStartSymbol(
         builder.append(") {\n")
     }
 
-    override fun toString(): String {
-        return buildString {
-            append("class@${this@ClassStartSymbol.hashCode()} ")
-            append(clsName)
-            append("(")
-            constructorArgs.forEachIndexed { index, symbol ->
-                if (index != 0) {
-                    append(", ")
-                }
-                append(symbol)
+    override fun toString(): String = buildString {
+        append("class@${this@ClassStartSymbol.hashCode()} ")
+        append(clsName)
+        append("(")
+        constructorArgs.forEachIndexed { index, symbol ->
+            if (index != 0) {
+                append(", ")
             }
-            append(")")
+            append(symbol)
         }
+        append(")")
     }
 }
 
@@ -248,7 +224,8 @@ class KotlinFunctionSig(
     private val name: String,
     private val retType: Symbol,
     private val args: List<LocalVar>
-) : Symbol, SymbolContainer {
+) : Symbol,
+    SymbolContainer {
     var receiver: Symbol? = null
 
     override val symbols: List<Symbol>
@@ -272,24 +249,22 @@ class KotlinFunctionSig(
         retType.build(builder)
     }
 
-    override fun toString(): String {
-        return buildString {
-            append("fun ")
-            receiver?.let {
-                append(it)
-                append(".")
-            }
-            append(name)
-            append('(')
-            for ((index, arg) in args.withIndex()) {
-                if (index != 0) {
-                    append(", ")
-                }
-                append(arg)
-            }
-            append("): ")
-            append(retType)
+    override fun toString(): String = buildString {
+        append("fun ")
+        receiver?.let {
+            append(it)
+            append(".")
         }
+        append(name)
+        append('(')
+        for ((index, arg) in args.withIndex()) {
+            if (index != 0) {
+                append(", ")
+            }
+            append(arg)
+        }
+        append("): ")
+        append(retType)
     }
 }
 
@@ -297,7 +272,8 @@ class KotlinLocalVar(
     override val name: String,
     val type: ResolvedKotlinType?,
     private val initializer: Symbol?
-) : LocalVar, SymbolContainer {
+) : LocalVar,
+    SymbolContainer {
     var isVal: Boolean? = false
     private val typeSymbol = type?.let { KotlinType(it) }
     override val symbols: List<Symbol>
@@ -318,25 +294,23 @@ class KotlinLocalVar(
         }
     }
 
-    override fun toString(): String {
-        return buildString {
-            isVal?.let { isVal ->
-                append(if (isVal) "val@${hashCode()} " else "var@${hashCode()} ")
-            }
-            append(name)
-            append(": ")
-            append(typeSymbol)
-            initializer?.let {
-                append(" = ")
-                append(it)
-            }
+    override fun toString(): String = buildString {
+        isVal?.let { isVal ->
+            append(if (isVal) "val@${hashCode()} " else "var@${hashCode()} ")
+        }
+        append(name)
+        append(": ")
+        append(typeSymbol)
+        initializer?.let {
+            append(" = ")
+            append(it)
         }
     }
 }
 
-class KotlinType(
-    private val type: ResolvedKotlinType
-) : Symbol, FqSymbol by type {
+class KotlinType(private val type: ResolvedKotlinType) :
+    Symbol,
+    FqSymbol by type {
     private val typeStr: String
         get() = type.name
 
@@ -349,9 +323,7 @@ class KotlinType(
         builder.append(typeStr)
     }
 
-    override fun toString(): String {
-        return "Type@${hashCode()}:[$typeStr]"
-    }
+    override fun toString(): String = "Type@${hashCode()}:[$typeStr]"
 }
 
 inline fun KotlinCodeBuilder.import(target: String) {
@@ -369,10 +341,11 @@ inline fun KotlinCodeBuilder.inline(build: KotlinCodeBuilder.() -> Unit) {
     }
 }
 
-inline fun inline(target: Symbol): Symbol =
-    Inline(target)
+inline fun inline(target: Symbol): Symbol = Inline(target)
 
-class Inline(private val target: Symbol) : Symbol, SymbolContainer {
+class Inline(private val target: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
 
@@ -381,9 +354,7 @@ class Inline(private val target: Symbol) : Symbol, SymbolContainer {
         target.build(builder)
     }
 
-    override fun toString(): String {
-        return "inline[$target]"
-    }
+    override fun toString(): String = "inline[$target]"
 }
 
 inline fun KotlinCodeBuilder.operator(build: KotlinCodeBuilder.() -> Unit) {
@@ -393,10 +364,11 @@ inline fun KotlinCodeBuilder.operator(build: KotlinCodeBuilder.() -> Unit) {
     }
 }
 
-inline fun operator(target: Symbol): Symbol =
-    Operator(target)
+inline fun operator(target: Symbol): Symbol = Operator(target)
 
-class Operator(private val target: Symbol) : Symbol, SymbolContainer {
+class Operator(private val target: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
 
@@ -413,10 +385,11 @@ inline fun KotlinCodeBuilder.infix(build: KotlinCodeBuilder.() -> Unit) {
     }
 }
 
-inline fun infix(target: Symbol): Symbol =
-    Infix(target)
+inline fun infix(target: Symbol): Symbol = Infix(target)
 
-class Infix(private val target: Symbol) : Symbol, SymbolContainer {
+class Infix(private val target: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(target)
 
@@ -449,9 +422,7 @@ class Package(private val target: String) : Symbol {
         builder.append('\n')
     }
 
-    override fun toString(): String {
-        return "pkg:$target"
-    }
+    override fun toString(): String = "pkg:$target"
 }
 
 class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
@@ -472,9 +443,7 @@ class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
         (signature as? KotlinFunctionSig)?.receiver = receiver
     }
 
-    override fun toString(): String {
-        return "Func@${hashCode()}"
-    }
+    override fun toString(): String = "Func@${hashCode()}"
 }
 
 fun KotlinCodeBuilder.fqType(fq: String): Symbol = fqType(fullyQualifiedType(fq))
@@ -488,7 +457,9 @@ inline fun KotlinCodeBuilder.extensionFunction(
     return +builder.symbol
 }
 
-class Elvis(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class Elvis(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -503,7 +474,9 @@ class Elvis(private val first: Symbol, private val second: Symbol) : Symbol, Sym
 
 inline fun asserting(s: Symbol): Symbol = Asserting(s)
 
-class Asserting(private val s: Symbol) : Symbol, SymbolContainer {
+class Asserting(private val s: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(s)
 
@@ -515,7 +488,9 @@ class Asserting(private val s: Symbol) : Symbol, SymbolContainer {
 
 inline infix fun Symbol.elvis(other: Symbol): Symbol = Elvis(this, other)
 
-class Pair(private val first: Symbol, private val second: Symbol) : Symbol, SymbolContainer {
+class Pair(private val first: Symbol, private val second: Symbol) :
+    Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOf(first, second)
 
@@ -560,13 +535,11 @@ sealed class LambdaBuilder<T : LangFactory>(
         body!!.apply(block)
     }
 
-    fun define(name: String, type: ResolvedType): LocalVar {
-        return lambdaBuilder.define(
-            name,
-            type
-        ).also(args::add).also {
-            (it as? KotlinLocalVar)?.isVal = null
-        }
+    fun define(name: String, type: ResolvedType): LocalVar = lambdaBuilder.define(
+        name,
+        type
+    ).also(args::add).also {
+        (it as? KotlinLocalVar)?.isVal = null
     }
 }
 
@@ -577,7 +550,9 @@ private object EndLambda : Symbol {
 }
 
 open class LambdaSymbol<T : LangFactory>(lambdaBuilder: CodeBuilder<T>) :
-    LambdaBuilder<T>(lambdaBuilder = lambdaBuilder), Symbol, SymbolContainer {
+    LambdaBuilder<T>(lambdaBuilder = lambdaBuilder),
+    Symbol,
+    SymbolContainer {
     private val block = BlockSymbol(lambdaBuilder, this, EndLambda)
     lateinit var signature: Symbol
     val symbol: Symbol
@@ -600,15 +575,12 @@ open class LambdaSymbol<T : LangFactory>(lambdaBuilder: CodeBuilder<T>) :
         builder.append("\n")
     }
 
-    override fun toString(): String {
-        return signature.toString()
-    }
+    override fun toString(): String = signature.toString()
 }
 
-private class LambdaFunctionSig(
-    private val type: Symbol?,
-    private val args: List<LocalVar>
-) : Symbol, SymbolContainer {
+private class LambdaFunctionSig(private val type: Symbol?, private val args: List<LocalVar>) :
+    Symbol,
+    SymbolContainer {
 
     override val symbols: List<Symbol>
         get() = listOfNotNull(type) + args
@@ -625,18 +597,16 @@ private class LambdaFunctionSig(
         builder.append(" ->")
     }
 
-    override fun toString(): String {
-        return buildString {
-            append(type)
-            append(" { ")
-            for ((index, arg) in args.withIndex()) {
-                if (index != 0) {
-                    append(", ")
-                }
-                append(arg)
+    override fun toString(): String = buildString {
+        append(type)
+        append(" { ")
+        for ((index, arg) in args.withIndex()) {
+            if (index != 0) {
+                append(", ")
             }
-            append(" -> ... }")
+            append(arg)
         }
+        append(" -> ... }")
     }
 }
 

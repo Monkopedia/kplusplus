@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,10 +15,7 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-data class PropertyBuilder(
-    var getter: Symbol? = null,
-    var setter: Symbol? = null
-)
+data class PropertyBuilder(var getter: Symbol? = null, var setter: Symbol? = null)
 
 inline fun KotlinCodeBuilder.property(
     varDecl: LocalVar,
@@ -33,7 +30,8 @@ class Property(
     private val varDecl: LocalVar,
     private val getter: Symbol?,
     private val setter: Symbol?
-) : Symbol, SymbolContainer {
+) : Symbol,
+    SymbolContainer {
     override val symbols: List<Symbol>
         get() = listOfNotNull(varDecl, getter, setter)
 
@@ -52,7 +50,5 @@ class Property(
         }
     }
 
-    override fun toString(): String {
-        return "Prop:$varDecl $getter $setter"
-    }
+    override fun toString(): String = "Prop:$varDecl $getter $setter"
 }

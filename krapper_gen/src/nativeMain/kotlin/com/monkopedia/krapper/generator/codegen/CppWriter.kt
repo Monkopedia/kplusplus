@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -46,30 +46,30 @@ import com.monkopedia.krapper.generator.builders.includeSys
 import com.monkopedia.krapper.generator.builders.op
 import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.DIRECT
-import com.monkopedia.krapper.generator.resolved_model.AllocationStyle.STACK
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.NATIVE
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.RAW_CAST
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolved_model.ArgumentCastMode.STD_MOVE
-import com.monkopedia.krapper.generator.resolved_model.MethodType
-import com.monkopedia.krapper.generator.resolved_model.ResolvedClass
-import com.monkopedia.krapper.generator.resolved_model.ResolvedConstructor
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
-import com.monkopedia.krapper.generator.resolved_model.ResolvedField
-import com.monkopedia.krapper.generator.resolved_model.ResolvedMethod
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.ARG_CAST
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.RETURN_REFERENCE
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.STRING_POINTER
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOID
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP
-import com.monkopedia.krapper.generator.resolved_model.ReturnStyle.VOIDP_REFERENCE
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
+import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.NATIVE
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.RAW_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.STD_MOVE
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedConstructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.ARG_CAST
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.COPY_CONSTRUCTOR
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.RETURN
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.RETURN_REFERENCE
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.STRING_POINTER
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOID
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP_REFERENCE
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 const val STACK_CONSTRUCTOR_CALLBACK = "StackConstructorCallback"
 class CppWriter(
@@ -201,6 +201,7 @@ class CppWriter(
                             )
                         )
                     }
+
                     STACK -> {
                         val locationCast = argCasts.removeFirst()
                         val callbackCast = argCasts.removeLast()
@@ -213,6 +214,7 @@ class CppWriter(
                     }
                 }
             }
+
             MethodType.SIZE_OF -> {
                 +Return(
                     Call(
@@ -221,10 +223,12 @@ class CppWriter(
                     )
                 )
             }
+
             MethodType.DESTRUCTOR -> {
                 val thizCast = argCasts.removeFirst()
                 +(thizCast.pointerReference arrow Call(method.name.removeTemplate()))
             }
+
             MethodType.STATIC_OP -> {
                 val thizCast = argCasts.removeFirst()
                 val call = (thizCast.reference).op(
@@ -233,6 +237,7 @@ class CppWriter(
                 )
                 generateReturn(call, method.returnStyle, method.returnType, returnCast)
             }
+
             MethodType.STATIC -> {
                 val call = Raw(cls.type.toString()) coloncolon Call(
                     method.name,
@@ -240,6 +245,7 @@ class CppWriter(
                 )
                 generateReturn(call, method.returnStyle, method.returnType, returnCast)
             }
+
             MethodType.METHOD -> {
                 val thizCast = argCasts.removeFirst()
                 val thizRef = thizCast.pointerReference
@@ -249,12 +255,14 @@ class CppWriter(
                         operator?.supportsDirectCall == true -> {
                             thizRef.dereference.op(operator.cppOp, argCasts.first().reference)
                         }
+
                         operator?.operatorType == ASSIGN -> {
                             thizRef.dereference.assign(
                                 argCasts.first().reference,
                                 operator == ResolvedOperator.PLUS_EQUALS
                             )
                         }
+
                         else -> {
                             thizRef arrow Call(
                                 method.name,
@@ -267,13 +275,12 @@ class CppWriter(
         }
     }
 
-    private fun CppCodeBuilder.generateArgumentCast(a: SignatureArgument) =
-        when (a.arg?.castMode) {
-            NATIVE -> a
-            ArgumentCastMode.STRING -> createStringCast(a)
-            RAW_CAST -> createRawCast(a)
-            STD_MOVE, REINT_CAST, null -> createCast(a)
-        }
+    private fun CppCodeBuilder.generateArgumentCast(a: SignatureArgument) = when (a.arg?.castMode) {
+        NATIVE -> a
+        ArgumentCastMode.STRING -> createStringCast(a)
+        RAW_CAST -> createRawCast(a)
+        STD_MOVE, REINT_CAST, null -> createCast(a)
+    }
 
     private fun CppCodeBuilder.generateReturn(
         call: Symbol,
@@ -294,10 +301,11 @@ class CppWriter(
         }
     }
 
-    private fun ResolvedType.toConstructor(): String {
-        return toString().trimEnd('*').let {
-            if (it.startsWith("const ")) it.substring("const ".length)
-            else it
+    private fun ResolvedType.toConstructor(): String = toString().trimEnd('*').let {
+        if (it.startsWith("const ")) {
+            it.substring("const ".length)
+        } else {
+            it
         }
     }
 
@@ -305,12 +313,12 @@ class CppWriter(
         val returnStr = +define(
             "ret_value",
             ResolvedType.PSTRING,
-            initializer = call,
+            initializer = call
         )
         val returnArray = +define(
             "ret_value_cast",
             ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}->length() + 1]")),
+            initializer = New(Raw("char[${returnStr.name}->length() + 1]"))
         )
         +(
             returnStr.reference arrow Call(
@@ -328,12 +336,12 @@ class CppWriter(
             +define(
                 "ret_value",
                 ResolvedType.STRING,
-                initializer = call,
+                initializer = call
             )
         val returnArray = +define(
             "ret_value_cast",
             ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}.length() + 1]")),
+            initializer = New(Raw("char[${returnStr.name}.length() + 1]"))
         )
         +(
             returnStr.reference dot Call(
@@ -346,41 +354,30 @@ class CppWriter(
         +Return(returnArray.reference)
     }
 
-    private fun CppCodeBuilder.createStringCast(
-        arg: SignatureArgument
-    ): SignatureArgument {
-        return arg.copy(
+    private fun CppCodeBuilder.createStringCast(arg: SignatureArgument): SignatureArgument =
+        arg.copy(
             localVar = +define(
                 arg.localVar.name + "_cast",
                 arg.targetType,
-                initializer = Call("std::string", arg.localVar.reference),
+                initializer = Call("std::string", arg.localVar.reference)
             )
         )
-    }
 
-    private fun CppCodeBuilder.createCast(
-        arg: SignatureArgument
-    ): SignatureArgument {
-        return arg.copy(
-            localVar = +define(
-                arg.localVar.name + "_cast",
-                arg.targetType,
-                reinterpret(arg.localVar, arg.targetType)
-            )
+    private fun CppCodeBuilder.createCast(arg: SignatureArgument): SignatureArgument = arg.copy(
+        localVar = +define(
+            arg.localVar.name + "_cast",
+            arg.targetType,
+            reinterpret(arg.localVar, arg.targetType)
         )
-    }
+    )
 
-    private fun CppCodeBuilder.createRawCast(
-        arg: SignatureArgument
-    ): SignatureArgument {
-        return arg.copy(
-            localVar = +define(
-                arg.localVar.name + "_cast",
-                arg.targetType,
-                RawCast(arg.targetType.toString(), arg.localVar.reference),
-            )
+    private fun CppCodeBuilder.createRawCast(arg: SignatureArgument): SignatureArgument = arg.copy(
+        localVar = +define(
+            arg.localVar.name + "_cast",
+            arg.targetType,
+            RawCast(arg.targetType.toString(), arg.localVar.reference)
         )
-    }
+    )
 
     private fun CppCodeBuilder.reinterpret(arg: LocalVar, type: ResolvedType): Symbol {
         val type = type(type)

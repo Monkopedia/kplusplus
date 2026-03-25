@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,7 +35,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.numArguments
 import com.monkopedia.krapper.generator.referenced
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.semanticParent
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
@@ -103,7 +103,9 @@ abstract class WrappedElement(
                         child is WrappedTemplateRef ||
                         child is WrappedNamespace ||
                         child == WrappedType.UNRESOLVABLE
-                    ) return@forEachRecursive
+                    ) {
+                        return@forEachRecursive
+                    }
 //                    throw IllegalArgumentException(
 //                        "Parent ($parent) already contains child ($child)"
 //                    )
@@ -170,10 +172,13 @@ abstract class WrappedElement(
 //                CXCursorKind.CXCursor_UnionDecl -> TODO()
                 CXCursorKind.CXCursor_StructDecl,
                 CXCursorKind.CXCursor_ClassDecl -> WrappedClass(value, resolverBuilder)
-//                CXCursorKind.CXCursor_EnumDecl -> TODO()
+
+                //                CXCursorKind.CXCursor_EnumDecl -> TODO()
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
                 CXCursorKind.CXCursor_FieldDecl -> WrappedField(value, resolverBuilder)
+
                 CXCursorKind.CXCursor_ParmDecl -> return null
+
                 // WrappedArgument(value, resolverBuilder)
                 CXCursorKind.CXCursor_TypedefDecl ->
                     try {
@@ -183,6 +188,7 @@ abstract class WrappedElement(
                         // it'll come up in resolution
                         return null
                     }
+
                 CXCursorKind.CXCursor_FunctionDecl,
                 CXCursorKind.CXCursor_CXXMethod -> {
                     if (value.referenced.spelling.toKString() in listOf(
@@ -206,13 +212,17 @@ abstract class WrappedElement(
                         }
                     }
                 }
+
                 CXCursorKind.CXCursor_Namespace -> WrappedNamespace(
                     value.spelling.toKString() ?: error("Namespace without name")
                 )
+
                 CXCursorKind.CXCursor_Constructor ->
                     WrappedConstructor(
-                        value.spelling.toKString() ?: "constructor", WrappedType.VOID,
-                        value.isCopyConstructor, value.isDefaultConstructor
+                        value.spelling.toKString() ?: "constructor",
+                        WrappedType.VOID,
+                        value.isCopyConstructor,
+                        value.isDefaultConstructor
                     ).also {
                         for (i in 0 until value.numArguments) {
                             it.addChild(
@@ -224,9 +234,11 @@ abstract class WrappedElement(
                             )
                         }
                     }
+
                 CXCursorKind.CXCursor_Destructor ->
                     WrappedDestructor(
-                        value.spelling.toKString() ?: "destructor", WrappedType.VOID
+                        value.spelling.toKString() ?: "destructor",
+                        WrappedType.VOID
                     ).also {
                         for (i in 0 until value.numArguments) {
                             it.addChild(
@@ -238,19 +250,23 @@ abstract class WrappedElement(
                             )
                         }
                     }
-//                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
+
+                //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
                 CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
                     value,
                     resolverBuilder
                 )
-//                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
+
+                //                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
 //                CXCursorKind.CXCursor_TemplateTemplateParameter -> TODO()
                 CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
-//                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
+
+                //                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
 //                CXCursorKind.CXCursor_TypeAliasDecl -> TODO()
                 CXCursorKind.CXCursor_TypeRef -> WrappedTemplateRef(
                     value.spelling.toKString() ?: error("TypeRef without a name")
                 )
+
                 CXCursorKind.CXCursor_CXXBaseSpecifier -> WrappedBase(
                     try {
                         WrappedType(value.type, resolverBuilder)
@@ -260,6 +276,7 @@ abstract class WrappedElement(
                         return null
                     }
                 )
+
                 CXCursorKind.CXCursor_TemplateRef ->
                     try {
                         WrappedType(value.type, resolverBuilder)
@@ -268,7 +285,9 @@ abstract class WrappedElement(
                         // it'll come up in resolution
                         return null
                     }
+
                 CXCursorKind.CXCursor_TranslationUnit -> WrappedTU()
+
                 else -> return null
             }
             elementLookup[strTag] = element
@@ -297,10 +316,8 @@ fun WrappedElement.filterRecursive(
     return ret
 }
 
-fun <T : WrappedElement> T.cloneRecursive(): T {
-    return clone().also {
-        val newChildren = it.children.map { it.cloneRecursive() }
-        it.clearChildren()
-        it.addAllChildren(newChildren)
-    } as T
-}
+fun <T : WrappedElement> T.cloneRecursive(): T = clone().also {
+    val newChildren = it.children.map { it.cloneRecursive() }
+    it.clearChildren()
+    it.addAllChildren(newChildren)
+} as T

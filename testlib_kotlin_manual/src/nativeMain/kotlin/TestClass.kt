@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -318,12 +318,8 @@ value class TestClass private constructor(val source: Pair<TestLib_TestClass, Me
             TestLib_TestClass_pd_set(ptr, value)
         }
 
-    inline fun sum(): Long {
-        return TestLib_TestClass_sum(ptr)
-    }
-    inline fun longPointer(): CPointer<LongVar>? {
-        return TestLib_TestClass_longPointer(ptr)
-    }
+    inline fun sum(): Long = TestLib_TestClass_sum(ptr)
+    inline fun longPointer(): CPointer<LongVar>? = TestLib_TestClass_longPointer(ptr)
     inline fun setSome(a: Int, b: Long, c: Long) {
         TestLib_TestClass_setSome(ptr, a, b, c)
     }

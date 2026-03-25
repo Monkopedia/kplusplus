@@ -1,23 +1,23 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.monkopedia.krapper.generator.resolved_model.type
+package com.monkopedia.krapper.generator.resolvedmodel.type
 
 import com.monkopedia.krapper.FilterableTypes.TYPE
 import com.monkopedia.krapper.TypeTarget
-import com.monkopedia.krapper.generator.resolved_model.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -25,14 +25,12 @@ enum class CastMethod {
     STRING_CAST,
     POINTED_STRING_CAST,
     CAST,
-    NATIVE,
+    NATIVE
 }
 
 @Serializable
 @SerialName("type")
-sealed class ResolvedType(
-    open val typeString: String
-) : ResolvedElement() {
+sealed class ResolvedType(open val typeString: String) : ResolvedElement() {
 
     override fun toString(): String = typeString
 
@@ -76,19 +74,15 @@ class ResolvedCppType(
         cType: ResolvedCType = this.cType,
         castMethod: CastMethod = this.castMethod,
         isVoid: Boolean = this.isVoid
-    ): ResolvedCppType {
-        return ResolvedCppType(
-            typeString,
-            kotlinType.copy(),
-            cType.copy(),
-            castMethod,
-            isVoid
-        )
-    }
+    ): ResolvedCppType = ResolvedCppType(
+        typeString,
+        kotlinType.copy(),
+        cType.copy(),
+        castMethod,
+        isVoid
+    )
 
-    override fun cloneWithoutChildren(): ResolvedCppType {
-        return copy()
-    }
+    override fun cloneWithoutChildren(): ResolvedCppType = copy()
 }
 
 @Serializable
@@ -104,9 +98,7 @@ data class ResolvedCType(
 
     override fun toString(): String = typeString
 
-    override fun cloneWithoutChildren(): ResolvedCType {
-        return copy()
-    }
+    override fun cloneWithoutChildren(): ResolvedCType = copy()
 }
 
 @Serializable
@@ -116,7 +108,8 @@ data class ResolvedKotlinType(
     val isWrapper: Boolean,
     val templates: List<ResolvedKotlinType> = emptyList(),
     val isNullable: Boolean = false
-) : ResolvedType(qualifyList.last()), FqSymbol {
+) : ResolvedType(qualifyList.last()),
+    FqSymbol {
     private val mappedName: String
         get() {
             return remap?.get(fullyQualified) ?: qualifyList.last()
@@ -125,7 +118,9 @@ data class ResolvedKotlinType(
         get() = if (templates.isNotEmpty()) {
             "$mappedName<${templates.joinToString(", ") { it.name }}>" +
                 if (isNullable) "?" else ""
-        } else "$mappedName${if (isNullable) "?" else ""}"
+        } else {
+            "$mappedName${if (isNullable) "?" else ""}"
+        }
     val pkg: String
         get() = qualifyList.subList(0, qualifyList.size - 1).joinToString(".") {
             it.replaceFirstChar { it.lowercase() }
@@ -134,7 +129,9 @@ data class ResolvedKotlinType(
         get() = qualifyList.mapIndexed { i, s ->
             if (i != qualifyList.size - 1) {
                 s.replaceFirstChar { it.lowercase() }
-            } else s
+            } else {
+                s
+            }
         }.joinToString(".")
     override val fqNames: List<String>
         get() = listOf(fullyQualified) + templates.flatMap { it.fqNames }
@@ -145,9 +142,11 @@ data class ResolvedKotlinType(
         isNullable = isNullable
     )
 
-    override fun cloneWithoutChildren(): ResolvedKotlinType {
-        return copy(templates = templates.map { it.cloneWithoutChildren() })
-    }
+    override fun cloneWithoutChildren(): ResolvedKotlinType = copy(
+        templates = templates.map {
+            it.cloneWithoutChildren()
+        }
+    )
 
     private var remap: Map<String, String>? = null
 
@@ -156,23 +155,17 @@ data class ResolvedKotlinType(
         templates.forEach { it.setNameRemap(map) }
     }
 
-    override fun toString(): String {
-        return name
-    }
+    override fun toString(): String = name
 }
 
-fun nullable(base: ResolvedKotlinType): ResolvedKotlinType {
-    return base.copy(isNullable = true)
-}
+fun nullable(base: ResolvedKotlinType): ResolvedKotlinType = base.copy(isNullable = true)
 
-fun ResolvedKotlinType.typedWith(parseTypes: List<ResolvedKotlinType>): ResolvedKotlinType {
-    return copy(templates = parseTypes)
-}
+fun ResolvedKotlinType.typedWith(parseTypes: List<ResolvedKotlinType>): ResolvedKotlinType =
+    copy(templates = parseTypes)
 
-fun fullyQualifiedType(name: String, isWrapper: Boolean = false): ResolvedKotlinType {
-    return ResolvedKotlinType(
+fun fullyQualifiedType(name: String, isWrapper: Boolean = false): ResolvedKotlinType =
+    ResolvedKotlinType(
         fullyQualified = name.trimEnd('?'),
         isWrapper = isWrapper,
         isNullable = isWrapper || name.endsWith('?')
     )
-}

@@ -1,12 +1,12 @@
 /*
  * Copyright 2022 Jason Monk
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     https://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,13 +15,11 @@
  */
 package com.monkopedia.krapper.generator.builders
 
-import com.monkopedia.krapper.generator.resolved_model.type.ResolvedType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 typealias CppCodeBuilder = CodeBuilder<CppFactory>
 
-fun CppCodeBuilder(): CppCodeBuilder {
-    return CodeBuilderBase(CppFactory(), addSemis = true)
-}
+fun CppCodeBuilder(): CppCodeBuilder = CodeBuilderBase(CppFactory(), addSemis = true)
 
 class CppFactory : LangFactory {
     override fun define(
@@ -29,13 +27,10 @@ class CppFactory : LangFactory {
         type: ResolvedType,
         initializer: Symbol?,
         constructorArgs: List<Symbol>?
-    ): LocalVar {
-        return CppLocalVar(name, type, initializer, constructorArgs)
-    }
+    ): LocalVar = CppLocalVar(name, type, initializer, constructorArgs)
 
-    override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol {
-        return CppFunctionSig(name, retType ?: CppType("void"), args)
-    }
+    override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol =
+        CppFunctionSig(name, retType ?: CppType("void"), args)
 
     override fun createType(type: ResolvedType): Symbol = CppType(type)
 }
@@ -66,7 +61,8 @@ class CppLocalVar(
     val type: ResolvedType,
     private val initializer: Symbol?,
     private val constructorArgs: List<Symbol>?
-) : LocalVar, SymbolContainer {
+) : LocalVar,
+    SymbolContainer {
     private val typeSymbol = CppType(type)
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
