@@ -108,7 +108,7 @@ class CppWriter(
         handleChildren: CppCodeBuilder.() -> Unit
     ) {
         val splitCamelcase = moduleName.splitCamelcase()
-        val headerLabel = splitCamelcase.joinToString("_") { it.toLowerCase() }
+        val headerLabel = splitCamelcase.joinToString("_") { it.lowercase() }
         include("$headerLabel.h")
         for (header in headers) {
             include("${File(header).relativeTo(cppFile)}")

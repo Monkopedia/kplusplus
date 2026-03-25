@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
@@ -45,7 +46,7 @@ class ParseTest {
     @Test
     fun testResolve(): Unit = runBlocking {
         try {
-            val resolver = ParsedResolver(TestData.TU)
+            val resolver = ParsedResolver(TestData.tu)
             val cls = resolver.findClasses(WrappedElement::defaultFilter)
             val resolved = cls.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
             println("Classes: $cls")
@@ -61,7 +62,7 @@ class ParseTest {
             val index = createIndex(0, 0) ?: error("Failed to create Index")
             defer { index.dispose() }
             val tmpFile = "/tmp/${random()}_${random()}"
-            File(tmpFile).writeText(TestData.TEMPLATE_HEADER)
+            File(tmpFile).writeText(TestData.templateHeader)
             val classes = parseHeader(
                 index,
                 listOf(tmpFile),

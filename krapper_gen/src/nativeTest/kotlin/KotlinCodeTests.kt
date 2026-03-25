@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
-import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
+import com.monkopedia.krapper.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.CodeStringBuilder
 import com.monkopedia.krapper.generator.builders.KotlinCodeBuilder
 import com.monkopedia.krapper.generator.builders.LocalVar

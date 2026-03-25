@@ -44,7 +44,6 @@ import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
 
-@ThreadLocal
 private val existingTypes = mutableMapOf<String, WrappedType>()
 
 abstract class WrappedType : WrappedElement() {

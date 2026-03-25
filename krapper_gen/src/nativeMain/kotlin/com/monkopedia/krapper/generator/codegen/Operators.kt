@@ -75,7 +75,7 @@ data class BasicBinaryOperator private constructor(
 ) : Operator() {
 
     override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
     }
 
     override fun matches(method: WrappedMethod): Boolean =
@@ -126,7 +126,7 @@ data class BasicAssignmentOperator private constructor(
 ) : Operator() {
 
     override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
     }
 
     override fun matches(method: WrappedMethod): Boolean =
@@ -147,7 +147,7 @@ data class BasicUnaryOperator private constructor(
 ) : Operator() {
 
     override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.toLowerCase() }
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
     }
 
     override fun matches(method: WrappedMethod): Boolean =

@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
-import com.monkopedia.krapper.generator.ReferencePolicy.INCLUDE_MISSING
+import com.monkopedia.krapper.ReferencePolicy.INCLUDE_MISSING
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -977,7 +977,7 @@ class CppHeaderTests {
 
     private fun resolveContext() = ResolveContext.Empty
         .withClasses(emptyList())
-        .copy(resolver = ParsedResolver(TestData.TU))
+        .copy(resolver = ParsedResolver(TestData.tu))
         .withPolicy(INCLUDE_MISSING)
 
     private fun codeBuilder() = CppCodeBuilder()

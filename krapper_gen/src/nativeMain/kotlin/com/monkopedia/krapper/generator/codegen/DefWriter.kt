@@ -54,6 +54,6 @@ class DefWriter(private val namer: NameHandler) {
 
 fun getcwd(): String = memScoped {
     val buffer = allocArray<ByteVar>(256)
-    getcwd(buffer, 256)
+    getcwd(buffer, 256.toULong())
     buffer.toKString()
 }

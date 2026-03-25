@@ -34,7 +34,6 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 
-@ThreadLocal
 val TestData by lazy {
     TestDataClass()
 }
@@ -1031,7 +1030,7 @@ class TestDataClass {
             WrappedTemplate(
                 "vector"
             ).also {
-                it.parent = Std
+                it.parent = std
                 std.addChild(it)
                 it.addAllChildren(
                     listOf(
@@ -1358,7 +1357,7 @@ class TestDataClass {
                 "TestClass"
             ).also {
                 testLib.addChild(it)
-                it.parent = TestLib
+                it.parent = testLib
                 it.addAllChildren(
                     listOf(
                         b,
@@ -1492,7 +1491,7 @@ class TestDataClass {
                 "OtherClass"
             ).also {
                 testLib.addChild(it)
-                it.parent = TestLib
+                it.parent = testLib
                 it.addAllChildren(
                     listOf(
                         constructor,
@@ -1530,7 +1529,7 @@ class TestDataClass {
         val template =
             WrappedTemplate("MyPair").also {
                 testLib.addChild(it)
-                it.parent = TestLib
+                it.parent = testLib
                 it.addAllChildren(
                     listOf(
                         templateParam,
@@ -1565,7 +1564,7 @@ class TestDataClass {
                 it.addAllChildren(
                     listOf(
                         template,
-                        ToChecked
+                        toChecked
                     )
                 )
             }

@@ -94,7 +94,7 @@ class NameHandler {
                                 it.name(this@NamerImpl, this)
                             } ?: (
                                 cName + "_" + name.splitCamelcase()
-                                    .joinToString("_") { it.toLowerCase() }.cleanupName()
+                                    .joinToString("_") { it.lowercase() }.cleanupName()
                                 )
                         }
                     }

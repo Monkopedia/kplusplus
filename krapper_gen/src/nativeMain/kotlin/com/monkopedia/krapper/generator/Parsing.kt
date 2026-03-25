@@ -343,16 +343,16 @@ fun generateIncludes(compiler: String) = memScoped {
     val buffer = alloc<ByteVar> {
         EOF
     }
-    write(process.stdIn(), buffer.ptr, 1)
+    write(process.stdIn(), buffer.ptr, 1.toULong())
     close(process.stdIn())
     process.wait()
     val readBuffer = allocArray<ByteVar>(256)
     var fullString = StringBuilder()
-    var amount = read(process.stdOut(), readBuffer, 255)
+    var amount = read(process.stdOut(), readBuffer, 255.toULong())
     while (amount > 0) {
         readBuffer[amount.toInt()] = 0.toByte()
         fullString.append(readBuffer.toKStringFromUtf8())
-        amount = read(process.stdOut(), readBuffer, 255)
+        amount = read(process.stdOut(), readBuffer, 255.toULong())
     }
     val lines = fullString.split("\n")
     val start = lines.indexOf("#include <...> search starts here:")

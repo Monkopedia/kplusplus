@@ -43,7 +43,6 @@ import com.monkopedia.krapper.generator.type
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 
-@ThreadLocal
 private val elementLookup = mutableMapOf<String, WrappedElement>()
 
 abstract class WrappedElement(

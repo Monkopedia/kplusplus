@@ -53,6 +53,13 @@ kotlin {
         binaries {
             executable()
         }
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
+                }
+            }
+        }
         compilations["main"].cinterops {
             this.create("libclang") {
                 this.defFile = file("clang.def")
@@ -66,14 +73,15 @@ kotlin {
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
         api(kotlin("stdlib"))
-        api("com.monkopedia:ksrpc:0.11.0")
+        api("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
     }
     sourceSets["nativeMain"].dependencies {
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
         implementation("com.github.ajalt.clikt:clikt:5.1.0")
         api(kotlin("reflect"))
-        api("com.monkopedia:ksrpc:0.11.0")
+        api("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
+        implementation("com.monkopedia.ksrpc:ksrpc-sockets:0.11.0")
     }
 }
 

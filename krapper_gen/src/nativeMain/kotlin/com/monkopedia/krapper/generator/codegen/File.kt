@@ -112,11 +112,11 @@ data class File(val pathSegments: List<String>) {
         fcntl(file[0]._fileno, F_SETFL, O_NONBLOCK)
         return buildString {
             val buffer = allocArray<ByteVar>(256)
-            var amount = fread(buffer, 1, 255, file)
+            var amount = fread(buffer, 1.toULong(), 255.toULong(), file)
             while (amount > 0UL) {
                 buffer[amount.toInt()] = 0
                 append(buffer.toKString())
-                amount = fread(buffer, 1, 255, file)
+                amount = fread(buffer, 1.toULong(), 255.toULong(), file)
             }
         }
     }

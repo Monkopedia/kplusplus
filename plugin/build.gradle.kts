@@ -42,7 +42,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     implementation("com.google.guava:guava:33.5.0-jre")
     api(project(":krapper_gen"))
-    implementation("com.monkopedia:ksrpc:0.11.0")
+    implementation("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
+    implementation("com.monkopedia.ksrpc:ksrpc-sockets:0.11.0")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 
@@ -51,6 +52,8 @@ dependencies {
 }
 
 java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
     withJavadocJar()
     withSourcesJar()
 }
@@ -77,9 +80,9 @@ configurations["functionalTestImplementation"].extendsFrom(configurations["testI
 val functionalTest by tasks.registering(Test::class) {
     testClassesDirs = functionalTestSourceSet.output.classesDirs
     classpath = functionalTestSourceSet.runtimeClasspath
-    dependsOn(
-        rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative"),
-    )
+    rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative")?.let {
+        dependsOn(it)
+    }
 }
 
 gradlePlugin.testSourceSets(functionalTestSourceSet)
@@ -90,7 +93,7 @@ tasks.named<Task>("check") {
 
 tasks.withType<KotlinCompile> {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
 }
 
@@ -128,6 +131,9 @@ afterEvaluate {
     }
 
     tasks.named("jar") {
+        mustRunAfter("copyKrapperExecutable")
+    }
+    tasks.named("sourcesJar") {
         mustRunAfter("copyKrapperExecutable")
     }
 }
