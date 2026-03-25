@@ -32,9 +32,7 @@ repositories {
 description = "Tool to link kotlin/native binaries with clang or other linkers"
 
 dependencies {
-    implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
-
-    implementation("org.jetbrains.kotlin:kotlin-stdlib")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:${libs.versions.kotlin.get()}")
     implementation(libs.coroutines.core)
 
     implementation(libs.kotlin.gradle.plugin)
