@@ -20,7 +20,7 @@ plugins {
 
     id("org.jetbrains.kotlin.jvm")
     alias(libs.plugins.gradle.plugin.publish)
-    `maven-publish`
+    alias(libs.plugins.vannik.publish)
     `signing`
 }
 
@@ -29,7 +29,6 @@ repositories {
     mavenLocal()
 }
 
-group = "com.monkopedia.kplusplus"
 description = "Tool to link kotlin/native binaries with clang or other linkers"
 
 dependencies {
@@ -54,8 +53,6 @@ dependencies {
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
-    withJavadocJar()
-    withSourcesJar()
 }
 
 gradlePlugin {
@@ -152,47 +149,36 @@ sourceSets {
     }
 }
 
-publishing {
-    publications.all {
-        if (this !is MavenPublication) return@all
-
-        afterEvaluate {
-            pom {
-                name.set("kplusplus-gradle-plugin")
-                description.set(project.description)
-                url.set("http://www.github.com/Monkopedia/kplusplus")
-                licenses {
-                    license {
-                        name.set("The Apache License, Version 2.0")
-                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("monkopedia")
-                        name.set("Jason Monk")
-                        email.set("monkopedia@gmail.com")
-                    }
-                }
-                scm {
-                    connection.set("scm:git:git://github.com/Monkopedia/kplusplus.git")
-                    developerConnection.set("scm:git:ssh://github.com/Monkopedia/kplusplus.git")
-                    url.set("http://github.com/Monkopedia/kplusplus/")
-                }
+mavenPublishing {
+    pom {
+        name.set("kplusplus-gradle-plugin")
+        description.set(project.description)
+        url.set("http://www.github.com/Monkopedia/kplusplus")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
             }
         }
-    }
-    repositories {
-        maven(url = "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-            name = "OSSRH"
-            credentials {
-                username = System.getenv("MAVEN_USERNAME")
-                password = System.getenv("MAVEN_PASSWORD")
+        developers {
+            developer {
+                id.set("monkopedia")
+                name.set("Jason Monk")
+                email.set("monkopedia@gmail.com")
             }
         }
+        scm {
+            connection.set("scm:git:git://github.com/Monkopedia/kplusplus.git")
+            developerConnection.set("scm:git:ssh://github.com/Monkopedia/kplusplus.git")
+            url.set("http://github.com/Monkopedia/kplusplus/")
+        }
     }
+    publishToMavenCentral()
+    signAllPublications()
 }
 
 signing {
     useGpgCmd()
+    sign(publishing.publications)
 }
+

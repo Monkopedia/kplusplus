@@ -1,0 +1,25 @@
+name: Release build
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Install gpg secret key
+        run: |
+          cat <(echo -e "${{ secrets.OSSRH_GPG_SECRET_KEY }}") | gpg --batch --import
+          gpg --list-secret-keys --keyid-format LONG
+      - name: Publish to Maven Central
+        run: ./gradlew :plugin:publish -PmavenCentralUsername=${{ secrets.OSSRH_USERNAME }} -PmavenCentralPassword=${{ secrets.OSSRH_TOKEN }} -Psigning.gnupg.passphrase='${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}'
+      - name: Publish to Gradle Plugin Portal
+        run: ./gradlew :plugin:publishPlugins -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }} -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }} -Psigning.gnupg.passphrase='${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}'
