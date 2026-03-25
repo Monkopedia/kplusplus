@@ -15,9 +15,9 @@
  */
 plugins {
     kotlin("multiplatform")
-    kotlin("plugin.serialization") version "2.3.0"
+    alias(libs.plugins.kotlin.serialization)
 
-    id("com.monkopedia.ksrpc.plugin") version "0.11.0"
+    alias(libs.plugins.ksrpc)
     id("c")
     id("cpp")
 }
@@ -70,18 +70,18 @@ kotlin {
     }
     jvm()
     sourceSets["commonMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+        implementation(libs.coroutines.core)
+        implementation(libs.serialization.json)
         api(kotlin("stdlib"))
-        api("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
+        api(libs.ksrpc.core)
     }
     sourceSets["nativeMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
-        implementation("com.github.ajalt.clikt:clikt:5.1.0")
+        implementation(libs.coroutines.core)
+        implementation(libs.serialization.json)
+        implementation(libs.clikt)
         api(kotlin("reflect"))
-        api("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
-        implementation("com.monkopedia.ksrpc:ksrpc-sockets:0.11.0")
+        api(libs.ksrpc.core)
+        implementation(libs.ksrpc.sockets)
     }
 }
 

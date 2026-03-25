@@ -1,6 +1,6 @@
 plugins {
-    kotlin("multiplatform") version "2.3.0" apply false
-    id("org.jlleitschuh.gradle.ktlint") version "14.0.1"
+    alias(libs.plugins.kotlin.multiplatform) apply false
+    alias(libs.plugins.ktlint)
 }
 
 repositories {
@@ -11,7 +11,7 @@ subprojects {
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
     configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
-        version.set("1.8.0")
+        version.set(rootProject.libs.versions.ktlint.cli)
         android.set(true)
     }
 }

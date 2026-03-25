@@ -19,7 +19,7 @@ plugins {
     `java-gradle-plugin`
 
     id("org.jetbrains.kotlin.jvm")
-    id("com.gradle.plugin-publish") version "2.1.0"
+    alias(libs.plugins.gradle.plugin.publish)
     `maven-publish`
     `signing`
 }
@@ -36,19 +36,19 @@ dependencies {
     implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
 
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation(libs.coroutines.core)
 
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
-    implementation("com.google.guava:guava:33.5.0-jre")
+    implementation(libs.kotlin.gradle.plugin)
+    implementation(libs.serialization.json)
+    implementation(libs.guava)
     api(project(":krapper_gen"))
-    implementation("com.monkopedia.ksrpc:ksrpc-core:0.11.0")
-    implementation("com.monkopedia.ksrpc:ksrpc-sockets:0.11.0")
+    implementation(libs.ksrpc.core)
+    implementation(libs.ksrpc.sockets)
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
-    testApi("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.10.2")
+    testApi(libs.coroutines.debug)
 }
 
 java {

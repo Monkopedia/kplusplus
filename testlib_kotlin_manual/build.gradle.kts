@@ -15,7 +15,7 @@
  */
 plugins {
     kotlin("multiplatform")
-    kotlin("plugin.serialization") version "2.3.0"
+    alias(libs.plugins.kotlin.serialization)
 }
 
 repositories {
@@ -51,7 +51,7 @@ kotlin {
         }
     }
     sourceSets["nativeMain"].dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+        implementation(libs.coroutines.core)
     }
 }
 
