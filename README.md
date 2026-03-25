@@ -112,8 +112,7 @@ that uses the output from krapper.
 
 # Usage
 
-Then from kplusplus, the common config can be declared, this includes things like how to handle
-errors and where the compiler lives, etc.
+The common config block declares how to handle errors, where the compiler lives, etc.
 
 ```
 kplusplus {
