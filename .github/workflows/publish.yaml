@@ -19,6 +19,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libclang-dev gcc-multilib
           sudo ln -sf /usr/lib/llvm-*/include/clang-c /usr/include/clang-c
+          sudo ln -sf /usr/lib/llvm-*/lib/libclang* /usr/lib/
       - name: Install gpg secret key
         run: |
           cat <(echo -e "${{ secrets.OSSRH_GPG_SECRET_KEY }}") | gpg --batch --import
