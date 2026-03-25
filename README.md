@@ -1,53 +1,39 @@
 # K++
 
-Tools to aid in calling c++ from kotlin/native.
+K++ lets you call C++ libraries from Kotlin/Native. It parses C++ headers and generates the necessary C interop wrappers automatically, handling the complexity of types, templates, and references so you don't have to write them by hand.
 
-## Backstory
+## Quickstart
 
-This is a bit of pointless story about K++ becoming what it is, skip it if you find it boring.
+Add the Gradle plugin:
 
-This all started because I wanted some kotlin/native code I was writing to call into v8. I thought
-no problem, kotlin/native has C interop, so it shouldn't be a big deal. However it turns out that
-v8 does not have a C API, and kotlin/native does not interop with C++, only C and Objective-C.
+```
+plugins {
+    ...
+    id("com.monkopedia.kplusplus.plugin")
+}
+```
 
-I did countless hours of research thinking this must be a mistake. Someone out there must be
-using C++ with Kotlin/Native, I could have sworn I had even heard of it. However, I found nothing
-generalizable, just instructions on how to write a couple of wrapping methods to call from C.
-I thought this must be an oversight, it can't be that hard, I'll just go do it myself.
+Configure your C++ library import:
 
-Well I created this repository over a year before writing this README, and now finally have
-something which, might work, in just a few cases, sometimes, and that was not easy.
+```
+kplusplus {
+    config {
+        compiler = "./g++" // Compiler path is picked up from konan if unspecified.
+        pkg = "com.monkopedia.example.c++"
+        moduleName = "kplusplus_example"
+        errorPolicy = ErrorPolicy.LOG
+        referencePolicy = ReferencePolicy.INCLUDE_MISSING
+    }
+    import {
+        library.srcDir("../")
+        library.include("libv8_monolith.a")
+        headers.srcDir("../include/")
+        headers.include("v8-combined.h")
+    }
+}
+```
 
-At first, I thought that I simply needed to create typeless wrappers that manually casted to the
-correct things, and it would magically work. The hardest thing about that would be tying into
-MemScoped and make sure that allocations/frees happened in the right places. Then I realized I
-had to parse out the type information so I could handle constants, pointers, references, etc.
-After this I realized all of the special handling required for native types and strings.
-
-After several layers of finding new complexities to make the project even harder, I finally ran
-into templates. At the beginning I thought templates were something I could shelve until later
-on, however I hadn't accounted for how much STL is used throughout C++ code (I have never really
-used C++ in a professional setting, and have a lot of gaps in knowledge with it). I also had not
-considered the fact that C++ templates and kotlin templates were so fundamentally different,
-because C++ generates the specializations of templates at compile time.
-
-My early attempts at templates were as silly as hardcoding pieces of STL into my wrapper program,
-and then to generate them for any referenced types. This quickly became clear that this was not
-nearly sufficient, hard coding still couldn't handle the complexity required when a template class
-has a method that returns a template type. That method would return something that could be native,
-or a pointer, or a const, or some other combination of thengs that affect how the code should
-be wrapped.
-
-At this point I realized why no one more familiar with C++ had done this, and I thought
-my attempts were dead. There was simply no way to create a problem that could handle wrapping more
-than one C++ library because of the innate complexity and special cases needed to support even one
-moderate size library.
-
-The revival came while realizing not to solve it for all libraries, instead solve it part of the
-way for all, and use well-tooled manual intervention for the last mile of special cases. This
-involved switching to a 3-stage system, parse, resolve, and generate, which allows for easy
-customization at the resolve stage. This customization is indended to be as light weight as
-possible and easy to do from the build system.
+For a complete example of usage, see the [example](example) which wraps and calls into v8 code.
 
 # Tools
 
@@ -126,16 +112,6 @@ that uses the output from krapper.
 
 # Usage
 
-The simplest usage of K++ is to include the gradle plugin and then configure it from a gradle file
-directly.
-
-```
-plugins {
-    ...
-    id("com.monkopedia.kplusplus.plugin")
-}
-```
-
 Then from kplusplus, the common config can be declared, this includes things like how to handle
 errors and where the compiler lives, etc.
 
@@ -188,8 +164,6 @@ kplusplus {
 }
 ```
 
-For a complete example of usage, see the [example](example) which wraps and calls into v8 code.
-
 # Limitations / Problems
 
 ## User intervention
@@ -215,3 +189,50 @@ and causes problems in calling methods.
 
 Currently there is no support for extending classes, let alone the case where methods need to be
 implemented.
+
+# Background
+
+This is a bit of pointless story about K++ becoming what it is, skip it if you find it boring.
+
+This all started because I wanted some kotlin/native code I was writing to call into v8. I thought
+no problem, kotlin/native has C interop, so it shouldn't be a big deal. However it turns out that
+v8 does not have a C API, and kotlin/native does not interop with C++, only C and Objective-C.
+
+I did countless hours of research thinking this must be a mistake. Someone out there must be
+using C++ with Kotlin/Native, I could have sworn I had even heard of it. However, I found nothing
+generalizable, just instructions on how to write a couple of wrapping methods to call from C.
+I thought this must be an oversight, it can't be that hard, I'll just go do it myself.
+
+Well I created this repository over a year before writing this README, and now finally have
+something which, might work, in just a few cases, sometimes, and that was not easy.
+
+At first, I thought that I simply needed to create typeless wrappers that manually casted to the
+correct things, and it would magically work. The hardest thing about that would be tying into
+MemScoped and make sure that allocations/frees happened in the right places. Then I realized I
+had to parse out the type information so I could handle constants, pointers, references, etc.
+After this I realized all of the special handling required for native types and strings.
+
+After several layers of finding new complexities to make the project even harder, I finally ran
+into templates. At the beginning I thought templates were something I could shelve until later
+on, however I hadn't accounted for how much STL is used throughout C++ code (I have never really
+used C++ in a professional setting, and have a lot of gaps in knowledge with it). I also had not
+considered the fact that C++ templates and kotlin templates were so fundamentally different,
+because C++ generates the specializations of templates at compile time.
+
+My early attempts at templates were as silly as hardcoding pieces of STL into my wrapper program,
+and then to generate them for any referenced types. This quickly became clear that this was not
+nearly sufficient, hard coding still couldn't handle the complexity required when a template class
+has a method that returns a template type. That method would return something that could be native,
+or a pointer, or a const, or some other combination of thengs that affect how the code should
+be wrapped.
+
+At this point I realized why no one more familiar with C++ had done this, and I thought
+my attempts were dead. There was simply no way to create a problem that could handle wrapping more
+than one C++ library because of the innate complexity and special cases needed to support even one
+moderate size library.
+
+The revival came while realizing not to solve it for all libraries, instead solve it part of the
+way for all, and use well-tooled manual intervention for the last mile of special cases. This
+involved switching to a 3-stage system, parse, resolve, and generate, which allows for easy
+customization at the resolve stage. This customization is indended to be as light weight as
+possible and easy to do from the build system.
