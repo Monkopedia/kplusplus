@@ -29,7 +29,7 @@ repositories {
     mavenLocal()
 }
 
-description = "Tool to link kotlin/native binaries with clang or other linkers"
+description = "Generates C interop wrappers for calling C++ libraries from Kotlin/Native"
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:${libs.versions.kotlin.get()}")
