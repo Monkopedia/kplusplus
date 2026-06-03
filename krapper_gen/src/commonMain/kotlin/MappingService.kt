@@ -19,6 +19,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
+import com.monkopedia.ksrpc.RpcBidiService
 import com.monkopedia.ksrpc.RpcService
 import com.monkopedia.ksrpc.annotation.KsMethod
 import com.monkopedia.ksrpc.annotation.KsService
@@ -55,7 +56,7 @@ data class MapRequest(val parent: ResolvedElement, val childIndex: Int) {
 }
 
 @KsService
-interface MappingService : RpcService {
+interface MappingService : RpcBidiService {
 
     @KsMethod("/get_filter")
     suspend fun getFilter(resolver: ResolverService): FilterDefinition

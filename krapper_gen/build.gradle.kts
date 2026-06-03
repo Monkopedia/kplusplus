@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi
+
 plugins {
     kotlin("multiplatform")
     alias(libs.plugins.kotlin.serialization)
@@ -52,6 +55,13 @@ kotlin {
     hostTarget.apply {
         binaries {
             executable()
+            all {
+                @OptIn(KotlinNativeCacheApi::class)
+                disableNativeCache(
+                    version = DisableCacheInKotlinVersion.`2_4_0`,
+                    reason = "clikt 5.1.0 duplicate-symbol with cached native libs",
+                )
+            }
         }
         compilations.all {
             compileTaskProvider.configure {
