@@ -27,6 +27,7 @@ import clang.CXTypeKind.CXType_RValueReference
 import clang.CXTypeKind.CXType_Unexposed
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
+import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.fullyQualified
 import com.monkopedia.krapper.generator.getTemplateArgumentType
 import com.monkopedia.krapper.generator.isConstQualifiedType
@@ -34,7 +35,6 @@ import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.typeToKotlinType
-import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.numTemplateArguments
 import com.monkopedia.krapper.generator.pointeeType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement

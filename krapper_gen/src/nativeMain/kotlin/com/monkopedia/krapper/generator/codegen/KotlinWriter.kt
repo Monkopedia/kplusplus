@@ -68,10 +68,10 @@ import com.monkopedia.krapper.generator.builders.type
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.CONSTRUCTOR
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.DESTRUCTOR
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC_OP
@@ -358,7 +358,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod, size: LocalVar?, align: LocalVar?) {
+    fun KotlinCodeBuilder.onGenerate(
+        cls: ResolvedClass,
+        method: ResolvedMethod,
+        size: LocalVar? = null,
+        align: LocalVar? = size
+    ) {
         val uniqueCName =
             extensionMethod(pkg, method.uniqueCName ?: error("Unnamed method $method"))
         when (method.methodType) {

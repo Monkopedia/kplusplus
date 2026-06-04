@@ -15,7 +15,7 @@
  */
 package com.monkopedia.krapper
 
-import com.monkopedia.ksrpc.RpcService
+import com.monkopedia.ksrpc.RpcBidiService
 import com.monkopedia.ksrpc.annotation.KsMethod
 import com.monkopedia.ksrpc.annotation.KsService
 import kotlinx.serialization.Serializable
@@ -30,7 +30,7 @@ data class IndexRequest(
 )
 
 @KsService
-interface KrapperService : RpcService {
+interface KrapperService : RpcBidiService {
     @KsMethod("/ping")
     suspend fun ping(message: String): String
 
@@ -51,7 +51,7 @@ interface KrapperService : RpcService {
 }
 
 @KsService
-interface IndexedService : RpcService {
+interface IndexedService : RpcBidiService {
     @KsMethod("/filter")
     suspend fun filterAndResolve(filter: FilterDefinition)
 

@@ -78,6 +78,7 @@ class KotlinCodeTests {
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
+            |import test.pkg.TestLib_EmptyClass_align_of
             |import test.pkg.TestLib_EmptyClass_size_of
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
@@ -92,8 +93,13 @@ class KotlinCodeTests {
             |                return TestLib_EmptyClass_size_of()
             |            }
             |
+            |        val align: Int
+            |            inline get() {
+            |                return TestLib_EmptyClass_align_of()
+            |            }
+            |
             |        fun MemScope.EmptyClass_Holder(): EmptyClass {
-            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
+            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, align).rawPtr) ?: error("Allocation failed"))
             |            return EmptyClass(memory, this)
             |        }
             |    }
@@ -584,6 +590,7 @@ class KotlinCodeTests {
             |import kotlinx.cinterop.COpaquePointer
             |import kotlinx.cinterop.MemScope
             |import kotlinx.cinterop.interpretCPointer
+            |import test.pkg.std_vector_std_string_iterator_align_of
             |import test.pkg.std_vector_std_string_iterator_size_of
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
@@ -598,8 +605,13 @@ class KotlinCodeTests {
             |                return std_vector_std_string_iterator_size_of()
             |            }
             |
+            |        val align: Int
+            |            inline get() {
+            |                return std_vector_std_string_iterator_align_of()
+            |            }
+            |
             |        fun MemScope.Iterator__String_Holder(): Iterator__String {
-            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
+            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, align).rawPtr) ?: error("Allocation failed"))
             |            return Iterator__String(memory, this)
             |        }
             |    }

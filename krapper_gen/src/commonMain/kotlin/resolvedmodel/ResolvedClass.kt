@@ -73,7 +73,7 @@ data class ResolvedClass(
 
     private fun calculateNotEmpty(): Boolean = baseClass != null || children.any {
         ((it as? ResolvedMethod)?.methodType != SIZE_OF) &&
-        ((it as? ResolvedMethod)?.methodType != ALIGN_OF) &&
+            ((it as? ResolvedMethod)?.methodType != ALIGN_OF) &&
             ((it as? ResolvedConstructor)?.children?.isNotEmpty() != false)
     }
 
