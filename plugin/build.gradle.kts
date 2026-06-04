@@ -171,7 +171,7 @@ mavenPublishing {
             url.set("http://github.com/Monkopedia/kplusplus/")
         }
     }
-    publishToMavenCentral()
+    publishToMavenCentral(automaticRelease = true)
     signAllPublications()
 }
 
