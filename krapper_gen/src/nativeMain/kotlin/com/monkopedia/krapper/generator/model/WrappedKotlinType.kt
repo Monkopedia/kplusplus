@@ -15,6 +15,8 @@
  */
 package com.monkopedia.krapper.generator.model
 
+import com.monkopedia.krapper.generator.DropLedger
+import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
@@ -231,6 +233,12 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 } + "__" + templateTypes.joinToString("__") { it.name }
             )
         }.getOrElse {
+            DropLedger.record(
+                name,
+                "Failed to parse qualified template spelling (${it.message}); " +
+                    "degraded to opaque leaf",
+                DropPhase.PARSE
+            )
             println(
                 "WARN skip-not-crash: failed to parse qualified template spelling " +
                     "'$name' (${it.message}); surfacing as opaque type"
@@ -277,6 +285,11 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
                 )
             )
         }.getOrElse {
+            DropLedger.record(
+                name,
+                "Failed to parse template spelling (${it.message}); degraded to opaque leaf",
+                DropPhase.PARSE
+            )
             println(
                 "WARN skip-not-crash: failed to parse template spelling '$name' " +
                     "(${it.message}); surfacing as opaque type"

@@ -22,6 +22,8 @@ import clang.CXCursorKind.CXCursor_ClassDecl
 import clang.CXCursorKind.CXCursor_ClassTemplate
 import clang.CXCursorKind.CXCursor_StructDecl
 import clang.CX_CXXAccessSpecifier
+import com.monkopedia.krapper.generator.DropLedger
+import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
@@ -212,6 +214,12 @@ abstract class WrappedElement(
                         // A nested class inside a NON-template class (`Outer::Inner`) IS
                         // nameable and is NOT dropped.
                         if (value.isNestedInClassTemplate) {
+                            DropLedger.record(
+                                value.spelling.toKString() ?: "<unnamed class>",
+                                "Class nested inside a class template " +
+                                    "(unnameable without template args)",
+                                DropPhase.PARSE
+                            )
                             println(
                                 "WARN skip-not-crash: dropping class " +
                                     "'${value.spelling.toKString()}' nested inside a class " +
@@ -401,6 +409,12 @@ abstract class WrappedElement(
                 // escape as a fatal crash. When parsing everything, a single
                 // unmodelable cursor must drop-and-log: if this reference is genuinely
                 // needed it resurfaces during resolution, where it fails gracefully.
+                DropLedger.record(
+                    value.spelling.toKString()?.takeIf { it.isNotEmpty() }
+                        ?: value.kind.toString(),
+                    "Unmodelable ${value.kind} cursor (${t.message})",
+                    DropPhase.PARSE
+                )
                 println(
                     "WARN skip-not-crash: dropping ${value.kind} cursor " +
                         "'${value.spelling.toKString()}' (${t.message})"

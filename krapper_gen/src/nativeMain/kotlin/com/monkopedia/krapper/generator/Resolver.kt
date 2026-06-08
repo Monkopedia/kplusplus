@@ -137,6 +137,11 @@ suspend fun List<WrappedElement>.resolveAll(
         .withPolicy(policy)
     classes.forEach {
         if (resolveContext.resolve(it.type) == null) {
+            DropLedger.record(
+                it.type.toString(),
+                "Filtered class did not resolve",
+                DropPhase.RESOLVE
+            )
             Log.w("Warning: can't resolve filtered class ${it.type}")
         }
     }
@@ -232,6 +237,11 @@ suspend fun List<WrappedElement>.resolveForcing(
     val pass1 = baseContext.withPolicyKeepingNamer(policy)
     boundClasses.forEach {
         if (pass1.resolve(it.type) == null) {
+            DropLedger.record(
+                it.type.toString(),
+                "Filtered class did not resolve",
+                DropPhase.RESOLVE
+            )
             Log.w("Warning: can't resolve filtered class ${it.type}")
         }
     }
@@ -247,6 +257,11 @@ suspend fun List<WrappedElement>.resolveForcing(
     val pass2 = baseContext.withPolicyKeepingNamer(ReferencePolicy.INCLUDE_MISSING)
     forcingStructs.forEach {
         if (pass2.resolve(it.type) == null) {
+            DropLedger.record(
+                it.type.toString(),
+                "Forcing struct did not resolve",
+                DropPhase.RESOLVE
+            )
             Log.w("Warning: can't resolve forcing struct ${it.type}")
         }
     }
@@ -465,6 +480,16 @@ data class ResolveContext(
         type: WrappedType?,
         message: String
     ): T? {
+        // Ledger every resolve-phase drop so the end-of-run report can diff it against
+        // the requested allowlist. This is the central choke point: every model element
+        // that fails to resolve returns through here, so recording once covers the
+        // method/field/class drop sites uniformly. The (debug-gated) log line stays for
+        // the live KRAPPER_DEBUG_RESOLVE trace.
+        DropLedger.record(
+            symbol = element?.toString() ?: type?.toString() ?: "<unknown>",
+            reason = message,
+            phase = DropPhase.RESOLVE
+        )
         if (debugFilter?.invoke(element, type, message) == true) {
             Log.w("$element failed resolving $type: $message")
         }

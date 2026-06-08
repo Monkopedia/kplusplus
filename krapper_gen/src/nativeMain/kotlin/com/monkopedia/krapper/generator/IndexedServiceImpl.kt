@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.AddToChild
 import com.monkopedia.krapper.AddToParent
+import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.FilterDefinition
 import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.IndexedService
@@ -72,10 +73,19 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     // writeTo references these so the generated wrapper #includes the needed std headers.
     private val syntheticHeaders = mutableListOf<String>()
 
+    // What the run was explicitly ASKED to bind: the --only allowlist entries plus each
+    // --instantiate target. The drop-ledger report diffs this against what actually
+    // bound so a coverage gap (requested-but-neither-bound-nor-dropped) is visible. Empty
+    // for an unrestricted DefaultFilter import (every non-std class is requested).
+    private val requested = mutableListOf<String>()
+
     init {
         scope.defer {
             index.dispose()
         }
+        // Start each generation run with a clean ledger so its report reflects only this
+        // run's drops (the collector is process-scoped, shared with any prior run).
+        DropLedger.reset()
         // Root the generated binding packages under config.rootPackage. Must be set
         // BEFORE any resolution (requestInstantiation / filterAndResolve) — a type's
         // Kotlin package is baked into its ResolvedKotlinType at resolve time, so
@@ -101,6 +111,11 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {
+        // Record the explicit allowlist as the requested set (DefaultFilter requests
+        // everything, so it contributes nothing to diff against).
+        if (filter is AllowListFilter) {
+            requested.addAll(filter.qualifiedNames)
+        }
         Log.i("Parsing headers: ${request.headers}")
         val resolver = scope.parseHeader(
             index,
@@ -128,6 +143,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun requestInstantiation(req: InstantiationRequest) {
         val target = "${req.base}<${req.args.joinToString(", ")}>"
+        requested.add(target)
         val forceName = "KrapperForce_" + target
             .replace("::", "_")
             .replace("<", "_")
@@ -330,7 +346,25 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             classes
         )
         writeCppBindingAnnotation(srcDir)
+        reportDrops()
         Log.i("Code generation complete")
+    }
+
+    /**
+     * Emit the drop-ledger report (requested / bound / dropped + the dropped list and any
+     * requested-but-uncovered entries) and, when [KrapperConfig.failOnDrop] is set, fail
+     * the run if anything was dropped. Default (failOnDrop=false) only logs, so existing
+     * green runs are unchanged: drops are surfaced but never fatal unless opted in.
+     */
+    private suspend fun reportDrops() {
+        val bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
+        Log.i(DropLedger.report(requested, bound))
+        if (config.failOnDrop && DropLedger.hasDrops()) {
+            error(
+                "--fail-on-drop: ${DropLedger.drops.size} symbol(s) were dropped " +
+                    "(see the drop ledger above)"
+            )
+        }
     }
 
     /**

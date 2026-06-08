@@ -141,6 +141,12 @@ class KrapperGen : CliktCommand() {
             "class name per line; blank lines and lines starting with # are ignored). " +
             "Merged with any --only entries."
     )
+    val failOnDrop by option(
+        "--fail-on-drop",
+        help = "Fail the run (non-zero exit) if the generator dropped any unmodelable " +
+            "symbol (skip-not-crash). Default: lenient — drops are logged + reported in " +
+            "the drop ledger, but the run still succeeds."
+    ).flag()
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -167,7 +173,8 @@ class KrapperGen : CliktCommand() {
                     referencePolicy = referencePolicy,
                     debug = debug,
                     cppStandard = cppStandard,
-                    rootPackage = rootPackage
+                    rootPackage = rootPackage,
+                    failOnDrop = failOnDrop
                 )
             )
             val indexService = service.index(IndexRequest(header, library))
