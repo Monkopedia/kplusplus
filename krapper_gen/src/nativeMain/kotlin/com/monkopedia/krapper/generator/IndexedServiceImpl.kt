@@ -122,7 +122,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             request.headers,
             includePaths + request.headerDirectories,
             args = parseArgs(request.headerDirectories),
-            debug = config.debug
+            debug = config.debug,
+            strictDiagnostics = config.strictDiagnostics
         )
         val initialClasses = resolver.findClasses(filter.wrapperFilter())
         Log.i("Found ${initialClasses.size} classes to resolve")
@@ -183,7 +184,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             listOf(tmpFile),
             includePaths + request.headerDirectories,
             args = parseArgs(request.headerDirectories),
-            debug = config.debug
+            debug = config.debug,
+            strictDiagnostics = config.strictDiagnostics
         )
         // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
         // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the

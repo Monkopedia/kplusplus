@@ -51,5 +51,14 @@ data class KrapperConfig(
     // after emitting the drop-ledger report, instead of completing leniently. Opt-in
     // (default false) so existing green runs keep succeeding: drops are always logged
     // and ledgered, but only this flag turns a drop into a non-zero exit.
-    val failOnDrop: Boolean = false
+    val failOnDrop: Boolean = false,
+    // When true, ANY `error:`-severity parse diagnostic aborts the whole run (the
+    // historical behavior — appropriate for curated, known-clean headers). Opt-in
+    // (default false): by default an error diagnostic that is attributable to a single
+    // declaration drops THAT symbol into the drop ledger and binding continues over the
+    // rest of the header, so one un-bindable symbol in a real-world library no longer
+    // takes the entire import down. Translation-unit-level / fatal diagnostics (a missing
+    // include, "too many errors", an error with no attributable cursor) abort regardless,
+    // since the recovered AST can't be trusted past them.
+    val strictDiagnostics: Boolean = false
 )

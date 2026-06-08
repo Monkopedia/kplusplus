@@ -88,6 +88,22 @@ abstract class WrappedElement(
     abstract suspend fun resolve(resolverContext: ResolveContext): ResolvedElement?
 
     companion object {
+        // USRs of declarations the diagnostic policy chose to drop at parse time (issue
+        // #9: an `error:` diagnostic attributable to a single declaration skips THAT
+        // declaration and lets the rest of the header bind). A dropped USR is excised here
+        // in [map] — returning null removes the declaration AND, via the
+        // `map(parentCursor) ?: return@forEachRecursive` guard in [mapAll], all of its
+        // members — so the broken declaration is never carried into resolution.
+        // Parse-scoped: [setDroppedUsrs] is called with each TU's set right before its
+        // [mapAll]. Mirrors the process-scoped [elementLookup] memo above.
+        private var droppedUsrs: Set<String> = emptySet()
+
+        /** Register the USRs of declarations dropped by the diagnostic policy for the next
+         * [mapAll]. */
+        fun setDroppedUsrs(usrs: Set<String>) {
+            droppedUsrs = usrs
+        }
+
         fun mapAll(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder): WrappedElement? {
             val element = map(value, null, null, resolverBuilder) ?: return null
             value.forEachRecursive { childCursor, parentCursor ->
@@ -140,9 +156,14 @@ abstract class WrappedElement(
             parentUsr: String?,
             resolverBuilder: ResolverBuilder
         ): WrappedElement? {
-            val strTag =
-                value.usr.toKString().orEmpty()
-                    .ifEmpty { "$parentUsr:${value.spelling.toKString()}" }
+            val usr = value.usr.toKString().orEmpty()
+            // Excise a declaration the diagnostic policy dropped at parse time (issue #9).
+            // Its members are excised transitively: when this cursor is a member's parent,
+            // mapAll's `map(parentCursor) ?: return@forEachRecursive` guard skips the member.
+            if (usr.isNotEmpty() && usr in droppedUsrs) {
+                return null
+            }
+            val strTag = usr.ifEmpty { "$parentUsr:${value.spelling.toKString()}" }
 
             elementLookup[strTag]?.let { return it }
 

@@ -15,16 +15,20 @@
  */
 package com.monkopedia.krapper.generator
 
+import clang.CXCursor
 import clang.CXCursorKind
 import clang.CXCursorKind.CXCursor_TypedefDecl
+import clang.CXDiagnosticSeverity
 import clang.CXIndex
 import clang.CXTranslationUnit
 import clang.CXType
 import clang.clang_defaultDiagnosticDisplayOptions
+import clang.clang_disposeDiagnostic
 import clang.clang_disposeString
 import clang.clang_formatDiagnostic
-import clang.clang_getCString
 import clang.clang_getDiagnostic
+import clang.clang_getDiagnosticLocation
+import clang.clang_getDiagnosticSeverity
 import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.AndFilter
@@ -527,10 +531,17 @@ suspend fun DeferScope.parseHeader(
     includePaths: Array<String>,
     args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
         .toTypedArray(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    // When true, any `error:` diagnostic aborts the whole run (historical behavior).
+    // When false (default), an error attributable to a single declaration drops that
+    // symbol into the drop ledger and binding continues; only fatal / unattributable
+    // diagnostics abort. See [handleDiagnostics].
+    strictDiagnostics: Boolean = false
 ): Resolver {
     val builder = ResolverBuilderImpl()
-    val tu = file.map { parseHeader(index, it, builder, includePaths, args, debug) }
+    val tu = file.map {
+        parseHeader(index, it, builder, includePaths, args, debug, strictDiagnostics)
+    }
         .reduceRight { tu1, tu2 ->
             tu1.also {
                 it.addAllChildren(
@@ -558,12 +569,11 @@ private fun DeferScope.parseHeader(
     includePaths: Array<String>,
     args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
         .toTypedArray(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    strictDiagnostics: Boolean = false
 ): WrappedTU {
     val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
-    tu.printDiagnostics()?.let {
-        throw RuntimeException("Parse failure: $it")
-    }
+    val droppedUsrs = tu.handleDiagnostics(file, strictDiagnostics)
     defer {
         tu.dispose()
     }
@@ -574,35 +584,154 @@ private fun DeferScope.parseHeader(
             "cursor_${File(file).name}.json"
         ).writeText(Json.encodeToString(Utils.CursorTreeInfo(cursor)))
     }
+    // Excise declarations the diagnostic policy dropped (issue #9) so the broken decl and
+    // its members are never carried into the model / resolution.
+    WrappedElement.setDroppedUsrs(droppedUsrs)
     val element = WrappedElement.mapAll(tu.cursor, resolverBuilder)
     return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
 }
 
-fun CXTranslationUnit.printDiagnostics(): String? {
-    val nbDiag = clang_getNumDiagnostics(this)
-    var foundError = false
-    val errorString = buildString {
-        append("There are $nbDiag diagnostics:")
-        append('\n')
+/**
+ * A single error-severity parse diagnostic, paired with the declaration it could be
+ * attributed to. [text] is the formatted diagnostic line; [symbol]/[usr] are the spelling
+ * and USR of the enclosing top-level declaration the error landed inside, or `null` when
+ * the error can't be tied to a single declaration (a translation-unit-level / fatal
+ * error — a missing include, "too many errors", an error at the TU root). [fatal] is true
+ * for `CXDiagnostic_Fatal`, which always aborts because the rest of the AST can't be
+ * trusted.
+ */
+private data class ErrorDiagnostic(
+    val text: String,
+    val symbol: String?,
+    val usr: String?,
+    val fatal: Boolean
+) {
+    /** Attributable to a single declaration -> droppable when not strict and not fatal. */
+    val isAttributable: Boolean get() = symbol != null && usr != null && !fatal
+}
 
-        for (currentDiag in 0 until nbDiag.toInt()) {
-            val diagnotic = clang_getDiagnostic(this@printDiagnostics, currentDiag.toUInt())
-            val errorString =
-                clang_formatDiagnostic(diagnotic, clang_defaultDiagnosticDisplayOptions())
-            val str = clang_getCString(errorString)?.toKString()
-            clang_disposeString(errorString)
-            if (str?.contains("error:") == true) {
-                foundError = true
+/**
+ * Inspect this translation unit's diagnostics and decide whether to abort the run.
+ *
+ * Historically (and still under [strictDiagnostics]) ANY `error:` diagnostic threw,
+ * taking the whole import down — fine for curated clean headers, fatal for pointing at a
+ * real library where one bad declaration would block everything else. The default policy
+ * now SKIPS the affected symbol instead: an error attributable to a single top-level
+ * declaration drops that declaration into the [DropLedger] (PARSE phase, the diagnostic
+ * text as the reason) and binding continues over the rest of the header. libclang still
+ * recovers a usable AST for the surviving declarations, and the downstream model build
+ * (`mapAll`) is already skip-not-crash, so dropping the named symbol here is safe.
+ *
+ * The boundary, by design:
+ *  - strict mode             -> abort on the first error/fatal (the old behavior).
+ *  - fatal severity          -> always abort (recovered AST is untrustworthy).
+ *  - unattributable error    -> always abort (an error at the TU root / with no enclosing
+ *                               declaration is translation-unit-level, e.g. a missing
+ *                               include; we can't surgically drop a single symbol).
+ *  - attributable error      -> drop that symbol into the ledger, continue.
+ */
+private fun CXTranslationUnit.handleDiagnostics(
+    file: String,
+    strictDiagnostics: Boolean
+): Set<String> {
+    val errors = collectErrorDiagnostics()
+    if (errors.isEmpty()) {
+        return emptySet()
+    }
+    val mustAbort = strictDiagnostics || errors.any { !it.isAttributable }
+    if (mustAbort) {
+        val reason = if (strictDiagnostics) {
+            "strict diagnostics"
+        } else {
+            "fatal / translation-unit-level diagnostic(s)"
+        }
+        throw RuntimeException(
+            "Parse failure ($reason) in $file:\n" + errors.joinToString("\n") { it.text }
+        )
+    }
+    // Lenient: every error is attributable -> drop each affected symbol and continue.
+    // Dedup by USR: one bad declaration can raise several diagnostics, but it's one drop.
+    val droppedUsrs = mutableSetOf<String>()
+    for (error in errors) {
+        val symbol = error.symbol ?: continue
+        val usr = error.usr ?: continue
+        if (!droppedUsrs.add(usr)) {
+            continue
+        }
+        DropLedger.record(symbol, error.text, DropPhase.PARSE)
+        println(
+            "WARN skip-not-crash: dropping declaration '$symbol' in $file on parse " +
+                "diagnostic: ${error.text}"
+        )
+    }
+    return droppedUsrs
+}
+
+/**
+ * Collect this TU's `error:`/fatal diagnostics, attributing each to the enclosing
+ * top-level declaration where one exists (via the diagnostic's source location ->
+ * [clang_getCursor] -> walk semantic parents up to the TU root).
+ */
+private fun CXTranslationUnit.collectErrorDiagnostics(): List<ErrorDiagnostic> {
+    val nbDiag = clang_getNumDiagnostics(this)
+    val errors = mutableListOf<ErrorDiagnostic>()
+    for (currentDiag in 0 until nbDiag.toInt()) {
+        val diagnostic = clang_getDiagnostic(this, currentDiag.toUInt())
+        try {
+            val severity = clang_getDiagnosticSeverity(diagnostic)
+            val isError = severity == CXDiagnosticSeverity.CXDiagnostic_Error ||
+                severity == CXDiagnosticSeverity.CXDiagnostic_Fatal
+            if (!isError) {
+                continue
             }
-            append("$str")
-            append('\n')
+            val formatted =
+                clang_formatDiagnostic(diagnostic, clang_defaultDiagnosticDisplayOptions())
+            val text = formatted.toKString().orEmpty()
+            clang_disposeString(formatted)
+            val location = clang_getDiagnosticLocation(diagnostic)
+            val topLevel = topLevelDecl(getCursor(location))
+            errors.add(
+                ErrorDiagnostic(
+                    text = text,
+                    symbol = topLevel?.spelling?.toKString()?.takeIf { it.isNotBlank() },
+                    usr = topLevel?.usr?.toKString()?.takeIf { it.isNotBlank() },
+                    fatal = severity == CXDiagnosticSeverity.CXDiagnostic_Fatal
+                )
+            )
+        } finally {
+            clang_disposeDiagnostic(diagnostic)
         }
     }
-    return if (foundError) {
-        errorString
-    } else {
-        null
+    return errors
+}
+
+/**
+ * Walk [cursor] up its semantic parents to the outermost named, non-namespace declaration
+ * — the one whose semantic parent is the TU or a namespace — and return that cursor, or
+ * `null` when the error can't be tied to a single declaration (a null/invalid cursor, the
+ * TU root itself, or no named non-namespace ancestor — i.e. a translation-unit-level
+ * error). That outermost decl is what the model binds as a top-level symbol, so excising
+ * it (by USR, in WrappedElement.map) cleanly drops the whole bad declaration and all of
+ * its members. Namespaces are skipped as drop targets: a namespace is a container, not a
+ * bindable symbol, and dropping it would take every sibling declaration with it.
+ */
+private fun CXTranslationUnit.topLevelDecl(cursor: CValue<CXCursor>): CValue<CXCursor>? {
+    val tuCursor = this.cursor
+    if (cursor.kind.isInvalid || cursor.equals(tuCursor)) {
+        return null
     }
+    var current = cursor
+    var named: CValue<CXCursor>? = null
+    while (!current.kind.isInvalid && !current.equals(tuCursor)) {
+        if (current.kind.isDeclaration &&
+            current.kind != CXCursorKind.CXCursor_Namespace &&
+            !current.spelling.toKString().isNullOrBlank()
+        ) {
+            named = current
+        }
+        current = current.semanticParent
+    }
+    return named
 }
 
 suspend fun WrappedTemplate.typedAs(

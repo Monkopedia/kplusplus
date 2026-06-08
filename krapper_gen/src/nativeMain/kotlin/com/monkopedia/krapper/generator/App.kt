@@ -147,6 +147,15 @@ class KrapperGen : CliktCommand() {
             "symbol (skip-not-crash). Default: lenient — drops are logged + reported in " +
             "the drop ledger, but the run still succeeds."
     ).flag()
+    val strictDiagnostics by option(
+        "--strict-diagnostics",
+        help = "Abort the whole run on ANY parse `error:` diagnostic (the historical " +
+            "behavior, for curated clean headers). Default: lenient — an error attributable " +
+            "to a single declaration drops THAT symbol into the drop ledger and binding " +
+            "continues, so one bad symbol in a real library doesn't take the import down. " +
+            "Fatal / translation-unit-level errors (missing include, unattributable) abort " +
+            "regardless."
+    ).flag()
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -174,7 +183,8 @@ class KrapperGen : CliktCommand() {
                     debug = debug,
                     cppStandard = cppStandard,
                     rootPackage = rootPackage,
-                    failOnDrop = failOnDrop
+                    failOnDrop = failOnDrop,
+                    strictDiagnostics = strictDiagnostics
                 )
             )
             val indexService = service.index(IndexRequest(header, library))
