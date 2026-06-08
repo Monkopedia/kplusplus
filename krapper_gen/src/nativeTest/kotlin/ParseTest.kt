@@ -413,6 +413,133 @@ class ParseTest {
         }
     }
 
+    // Issue #9 (diagnostics policy): a header with ONE un-bindable declaration (a struct
+    // member typed by an undeclared type -> an `error:` parse diagnostic attributed to that
+    // struct) must NOT abort the whole run. By default the bad declaration is dropped into
+    // the drop ledger as a PARSE drop (carrying the diagnostic text) and excised from the
+    // model, while the clean class beside it still parses + resolves. This is the
+    // acceptance criterion: one un-bindable symbol no longer takes the rest of the import
+    // down.
+    @Test
+    fun testParseErrorDropsBadSymbolAndBindsTheRest() = memScoped {
+        runBlocking {
+            DropLedger.reset()
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_diag_skip_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |// `Undeclared` is never defined -> an `error:` diagnostic attributed to Bad.
+                |struct Bad {
+                |    Undeclared broken;
+                |};
+                |struct Good {
+                |    int goodValue() const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            // Default (lenient) diagnostics: the run survives the error diagnostic.
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            // The bad declaration is a PARSE drop in the ledger, with the diagnostic text.
+            val badDrop = DropLedger.drops.firstOrNull {
+                it.symbol == "Bad" && it.phase == DropPhase.PARSE
+            }
+            assertTrue(
+                badDrop != null,
+                "the un-bindable struct must be a PARSE drop; got ${DropLedger.drops}"
+            )
+            assertTrue(
+                "error:" in badDrop.reason,
+                "the drop reason must carry the parse diagnostic text; got ${badDrop.reason}"
+            )
+            // The good class still parses + resolves; the bad one is gone from the model.
+            val resolved = resolver.findClasses { defaultFilter() }
+                .resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+            val resolvedNames = resolved.filterIsInstance<ResolvedClass>()
+                .map { it.type.type }
+                .toSet()
+            assertTrue(
+                "fixture::Good" in resolvedNames,
+                "the clean class must still bind; got $resolvedNames"
+            )
+            assertTrue(
+                "fixture::Bad" !in resolvedNames,
+                "the dropped class must NOT be bound; got $resolvedNames"
+            )
+        }
+    }
+
+    // Issue #9: --strict-diagnostics restores the historical abort-on-any-error behavior.
+    // The SAME header that binds-the-rest by default now aborts the run.
+    @Test
+    fun testStrictDiagnosticsAbortsOnAnyError() = memScoped {
+        runBlocking {
+            DropLedger.reset()
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_diag_strict_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |struct Bad {
+                |    Undeclared broken;
+                |};
+                |}
+                """.trimMargin()
+            )
+            var threw = false
+            try {
+                parseHeader(
+                    index,
+                    listOf(tmpFile),
+                    generateIncludes("clang++"),
+                    strictDiagnostics = true
+                )
+            } catch (t: Throwable) {
+                threw = true
+                assertTrue(
+                    "strict diagnostics" in (t.message ?: t.cause?.message ?: ""),
+                    "strict-mode failure must mention strict diagnostics: ${t.message}"
+                )
+            }
+            assertTrue(threw, "--strict-diagnostics must abort on an error diagnostic")
+        }
+    }
+
+    // Issue #9: a translation-unit-level / unattributable error (a missing include) aborts
+    // even in lenient mode — there's no single declaration to surgically drop and the rest
+    // of the AST can't be trusted past it. Draws the attributable-vs-fatal boundary.
+    @Test
+    fun testUnattributableErrorAbortsEvenWhenLenient() = memScoped {
+        runBlocking {
+            DropLedger.reset()
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_diag_fatal_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |#include <this_header_does_not_exist_krapper.h>
+                |namespace fixture {
+                |struct Good { int goodValue() const; };
+                |}
+                """.trimMargin()
+            )
+            var threw = false
+            try {
+                parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            } catch (t: Throwable) {
+                threw = true
+                assertTrue(
+                    "fatal / translation-unit-level" in (t.message ?: t.cause?.message ?: ""),
+                    "an unattributable error must abort with the TU-level reason: ${t.message}"
+                )
+            }
+            assertTrue(threw, "a missing include must abort even in lenient mode")
+        }
+    }
+
     @Test
     fun testResolveConstRef() = memScoped {
         runBlocking {
