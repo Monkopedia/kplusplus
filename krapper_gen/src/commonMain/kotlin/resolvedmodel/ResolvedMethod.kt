@@ -43,7 +43,12 @@ enum class ReturnStyle {
     STRING_POINTER,
     COPY_CONSTRUCTOR,
     RETURN,
-    RETURN_REFERENCE
+    RETURN_REFERENCE,
+
+    // Returns an enum value: the wrapper's C signature returns the underlying
+    // integer, so the call result (the real enum type) is cast back to it. Needed
+    // because a scoped enum does not implicitly convert to its integer.
+    ENUM_RETURN
 }
 
 enum class AllocationStyle {
@@ -160,6 +165,7 @@ class ResolvedDestructor : ResolvedMethod {
         args.map { it.copy() }
     ).also {
         it.parent = parent
+        it.isVirtual = isVirtual
     }
 }
 
@@ -176,6 +182,33 @@ open class ResolvedMethod(
     var argCastNeedsPointer: Boolean,
     var qualified: String
 ) : ResolvedElement() {
+
+    // Mirror of WrappedMethod.isVirtual: true for a C++ `virtual` method (incl.
+    // overrides). Used by the inheritance-flatten naming rule (decision A) to tell
+    // a virtual override (one logical method, bare name) from a non-virtual shadow
+    // (class-prefixed). A `var` so `resolve()`/`copy()` propagate it (it isn't a
+    // primary-constructor param); also serialized for the model round-trip.
+    var isVirtual: Boolean = false
+
+    // Mirror of WrappedMethod.returnsPairSecond: the underlying C++ method returns
+    // `std::pair<iterator, bool>` whose iterator half can't be wrapped, so the
+    // returnType has been rewritten to `bool` and CppWriter must emit the call's
+    // `.second` member. A `var` so resolve()/copy() propagate it; serialized for the
+    // model round-trip.
+    var returnsPairSecond: Boolean = false
+
+    // Mirror of WrappedMethod.returnViaMemberCall: a non-owning view return (e.g.
+    // llvm::StringRef) whose returnType was rewritten to an owned type (std::string);
+    // CppWriter emits this member call (e.g. `.str()`) on the result to materialize it.
+    // A `var` so resolve()/copy() propagate it; serialized for the model round-trip.
+    var returnViaMemberCall: String? = null
+
+    // Mirror of WrappedMethod.rangeElementType: an `llvm::iterator_range<It>` return
+    // materialized into a bound `std::vector<Elem*>` (T1.3); holds Elem's fully-qualified
+    // C++ spelling. When non-null, CppWriter emits a `r.begin()`/`r.end()` loop building
+    // the vector instead of a direct call. A `var` so resolve()/copy() propagate it;
+    // serialized for the model round-trip.
+    var rangeElementType: String? = null
 
     open fun copy(
         name: String = this.name,
@@ -199,6 +232,10 @@ open class ResolvedMethod(
         qualified
     ).also {
         it.parent = parent
+        it.isVirtual = isVirtual
+        it.returnsPairSecond = returnsPairSecond
+        it.returnViaMemberCall = returnViaMemberCall
+        it.rangeElementType = rangeElementType
     }
 
     override fun cloneWithoutChildren(): ResolvedMethod = copy()
@@ -211,6 +248,13 @@ open class ResolvedMethod(
 enum class ArgumentCastMode {
     NATIVE,
     STRING,
+
+    // T1.10p: an inbound non-owning string view (e.g. `llvm::StringRef`). The Kotlin side
+    // passes a `String`, the C boundary takes a `const char*`, and the wrapper constructs the
+    // view from it at the call site (`llvm::StringRef arg_cast = llvm::StringRef(arg)`). The
+    // inbound inverse of T1.10's outbound StringRef->std::string return marshalling. The view
+    // type's C++ spelling is carried on the argument's signatureType.typeString.
+    STRING_VIEW,
     REINT_CAST,
     RAW_CAST,
     STD_MOVE
@@ -224,7 +268,11 @@ data class ResolvedArgument(
     var usr: String = "",
     var castMode: ArgumentCastMode,
     var needsDereference: Boolean,
-    var hasDefault: Boolean
+    var hasDefault: Boolean,
+    // The C++ source text of the parameter's default-value expression (e.g. "10",
+    // "' '", "true", "nullptr"), or null when absent or for synthetic args (thiz,
+    // location, callback). KotlinWriter maps a renderable subset to a Kotlin default.
+    var defaultValue: String? = null
 ) {
 
     override fun toString(): String = "$name: $type"

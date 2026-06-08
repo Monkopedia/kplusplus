@@ -63,7 +63,9 @@ class ResolvedCppType(
     val kotlinType: ResolvedKotlinType,
     val cType: ResolvedCType,
     val castMethod: CastMethod,
-    val isVoid: Boolean = false
+    val isVoid: Boolean = false,
+    // Set when [type] names a C function-pointer typedef; see ResolvedFunctionPointer.
+    val funcPointer: ResolvedFunctionPointer? = null
 ) : ResolvedType(type) {
     override val typeString: String
         get() = type
@@ -73,16 +75,41 @@ class ResolvedCppType(
         kotlinType: ResolvedKotlinType = this.kotlinType,
         cType: ResolvedCType = this.cType,
         castMethod: CastMethod = this.castMethod,
-        isVoid: Boolean = this.isVoid
+        isVoid: Boolean = this.isVoid,
+        funcPointer: ResolvedFunctionPointer? = this.funcPointer
     ): ResolvedCppType = ResolvedCppType(
         typeString,
         kotlinType.copy(),
         cType.copy(),
         castMethod,
-        isVoid
+        isVoid,
+        funcPointer
     )
 
     override fun cloneWithoutChildren(): ResolvedCppType = copy()
+}
+
+/**
+ * The C declarator pieces of a function-pointer typedef, retained so the generated
+ * C interop header can re-declare the typedef (`typedef <returnCType> (*<cName>)(<argCTypes>);`)
+ * — the original typedef name lives only in the user's C++ header, which the C header
+ * does not include.
+ */
+@Serializable
+@SerialName("func_pointer")
+data class ResolvedFunctionPointer(
+    val cName: String,
+    val returnCType: String,
+    val argCTypes: List<String>,
+    // Fully-qualified C++ spelling of the typedef (`nn::handler_t`); equals [cName] for a
+    // global typedef. The generated C++ wrapper (.cc) names the type with this so a
+    // namespace-scoped typedef resolves; the extern-"C" header keeps the unqualified
+    // [cName]. See WrappedFunctionPointer / CppFactory.qualifyFunctionPointers.
+    val cppName: String = cName
+) {
+    /** `typedef <returnCType> (*<cName>)(<argCTypes>)` (no trailing semicolon). */
+    val typedefDeclaration: String
+        get() = "typedef $returnCType (*$cName)(${argCTypes.joinToString(", ")})"
 }
 
 @Serializable
@@ -90,7 +117,12 @@ class ResolvedCppType(
 data class ResolvedCType(
     @SerialName("cTypeString")
     val type: String,
-    val isVoid: Boolean = false
+    val isVoid: Boolean = false,
+    // Fully-qualified C++ spelling, set only for a namespace-scoped function-pointer
+    // typedef whose [type] (the extern-"C"/header spelling) is unqualified. The C++
+    // wrapper writer renders this instead so the typedef resolves in the .cc; null (and
+    // thus [type]) everywhere else. See ResolvedFunctionPointer / CppFactory.
+    val cppName: String? = null
 ) : ResolvedType(type) {
 
     override val typeString: String
@@ -101,15 +133,30 @@ data class ResolvedCType(
     override fun cloneWithoutChildren(): ResolvedCType = copy()
 }
 
+/** One entry of a generated Kotlin `enum class`: its Kotlin name and integer value. */
+@Serializable
+@SerialName("enum_entry")
+data class ResolvedEnumEntry(val name: String, val value: Long)
+
 @Serializable
 @SerialName("kotlin_type")
 data class ResolvedKotlinType(
     private val qualifyList: List<String>,
     val isWrapper: Boolean,
     val templates: List<ResolvedKotlinType> = emptyList(),
-    val isNullable: Boolean = false
+    val isNullable: Boolean = false,
+    // Non-empty when this Kotlin type is a generated `enum class` synthesized from
+    // a C/C++ enum. Drives both the enum-class declaration and the `.value` /
+    // `fromValue(...)` conversions emitted at the Kotlin/C boundary in KotlinWriter.
+    val enumEntries: List<ResolvedEnumEntry> = emptyList(),
+    // The Kotlin integer type the enum reduces to at the C boundary (e.g. Int for a
+    // scoped `enum class : int`, UInt for a plain unsigned enum). Backs the enum's
+    // `value` property and `fromValue` parameter. Null for non-enums.
+    val enumUnderlying: ResolvedKotlinType? = null
 ) : ResolvedType(qualifyList.last()),
     FqSymbol {
+    val isEnum: Boolean
+        get() = enumEntries.isNotEmpty()
     private val mappedName: String
         get() {
             return remap?.get(fullyQualified) ?: qualifyList.last()

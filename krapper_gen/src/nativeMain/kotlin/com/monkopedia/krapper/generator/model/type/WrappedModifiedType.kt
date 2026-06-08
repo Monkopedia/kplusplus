@@ -40,6 +40,11 @@ class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : Wra
 
     override val isNative: Boolean
         get() = baseType.isNative
+
+    // A reference to an enum is still an enum value at the boundary (the reference
+    // is stripped before resolution); a pointer/array to one is a real pointer.
+    override val isEnum: Boolean
+        get() = modifier == "&" && baseType.isEnum
     override val isString: Boolean
         get() = baseType.isString
 
@@ -82,6 +87,10 @@ class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : Wra
 
     override val isNative: Boolean
         get() = baseType.isNative
+
+    // A const enum (by value or reference) is still an enum at the boundary.
+    override val isEnum: Boolean
+        get() = baseType.isEnum
     override val isString: Boolean
         get() = baseType.isString
 

@@ -55,6 +55,7 @@ import clang.clang_Cursor_getTemplateArgumentKind
 import clang.clang_Cursor_getTemplateArgumentType
 import clang.clang_Cursor_getTemplateArgumentUnsignedValue
 import clang.clang_Cursor_getTemplateArgumentValue
+import clang.clang_Cursor_getTranslationUnit
 import clang.clang_Cursor_isAnonymous
 import clang.clang_Cursor_isBitField
 import clang.clang_EnumDecl_isScoped
@@ -142,16 +143,23 @@ import clang.clang_isUnexposed
 import clang.clang_isVirtualBase
 import clang.clang_isVolatileQualifiedType
 import clang.clang_parseTranslationUnit
+import clang.clang_tokenize
 import clang.clang_visitChildren
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.CPointerVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.CValuesRef
+import kotlinx.cinterop.UIntVar
+import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.readValue
 import kotlinx.cinterop.toCStringArray
 import kotlinx.cinterop.toKString
+import kotlinx.cinterop.value
 
 inline fun CXTranslationUnit.annotateTokens(
     token: CPointer<CXToken>,
@@ -452,6 +460,36 @@ inline fun CXIndex.parseTranslationUnit(
     num_unsaved_files,
     options
 )
+
+inline val CValue<CXCursor>.translationUnit: CXTranslationUnit?
+    get() = clang_Cursor_getTranslationUnit(this)
+
+/**
+ * Tokenizes this cursor's source extent and returns the spelling of each token.
+ * Used to recover the source text of a parameter's default-value expression,
+ * which libclang does not otherwise expose directly.
+ */
+fun CValue<CXCursor>.tokenSpellings(): List<String> {
+    val tu = translationUnit ?: return emptyList()
+    val range = clang_getCursorExtent(this)
+    return memScoped {
+        val tokensPtr = alloc<CPointerVar<CXToken>>()
+        val numTokens = alloc<UIntVar>()
+        clang_tokenize(tu, range, tokensPtr.ptr, numTokens.ptr)
+        val tokens = tokensPtr.value ?: return@memScoped emptyList()
+        try {
+            (0 until numTokens.value.toInt()).map { i ->
+                clang_getTokenSpelling(tu, tokens[i].readValue()).let { spelling ->
+                    val str = spelling.toKString().orEmpty()
+                    spelling.dispose()
+                    str
+                }
+            }
+        } finally {
+            clang_disposeTokens(tu, tokens, numTokens.value)
+        }
+    }
+}
 
 inline val CValue<CXCursor>.includedFile: CXFile?
     get() = clang_getIncludedFile(this)

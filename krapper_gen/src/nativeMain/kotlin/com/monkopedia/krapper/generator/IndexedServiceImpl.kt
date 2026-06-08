@@ -20,6 +20,7 @@ import com.monkopedia.krapper.AddToParent
 import com.monkopedia.krapper.FilterDefinition
 import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.IndexedService
+import com.monkopedia.krapper.InstantiationRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.MapRequest
 import com.monkopedia.krapper.MapResult
@@ -39,15 +40,26 @@ import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.rootPackageOverride
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlinx.cinterop.Arena
 import kotlinx.coroutines.runBlocking
+
+// A fuller identity for a resolved method than its (possibly-null, possibly-colliding)
+// uniqueCName: the C++ qualified name + simple name + full argument-type signature, plus
+// the mangled cName. Used to decide whether a free function pulled in by a forcing
+// re-parse was ALREADY main-bound (keep) or is incidental (drop). Two distinct functions
+// that happen to mangle to the same uniqueCName get different identities here, so a
+// collision can't false-keep an incidental function (which would emit non-compiling Kotlin).
+private val ResolvedMethod.forcingIdentity: String
+    get() = "$qualified::$name(${args.joinToString(",") { it.type.toString() }})#$uniqueCName"
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
     IndexedService {
@@ -56,20 +68,34 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     private var classes: List<ResolvedElement> = emptyList()
     private val mappings = mutableListOf<MappingService>()
 
+    // Headers synthesized by requestInstantiation to force template instantiations.
+    // writeTo references these so the generated wrapper #includes the needed std headers.
+    private val syntheticHeaders = mutableListOf<String>()
+
     init {
         scope.defer {
             index.dispose()
         }
+        // Root the generated binding packages under config.rootPackage. Must be set
+        // BEFORE any resolution (requestInstantiation / filterAndResolve) — a type's
+        // Kotlin package is baked into its ResolvedKotlinType at resolve time, so
+        // setting it later (e.g. in writeTo) would be too late.
+        rootPackageOverride = config.rootPackage
     }
 
     private val includePaths = generateIncludes(config.compiler)
-    private val args: Array<String> = arrayOf("-xc++", "--std=c++14") +
-        includePaths.map { "-I$it" }.toTypedArray()
+
+    // Clang parse args for libclang. Built per-call so the C++ standard
+    // (config.cppStandard) and any request-supplied header directories both flow
+    // through — previously a dead field defaulted to c++14, blocking C++17 types.
+    private fun parseArgs(extraIncludes: List<String>): Array<String> =
+        arrayOf("-xc++", "--std=${config.cppStandard}") +
+            (includePaths + extraIncludes).map { "-I$it" }.toTypedArray()
 
     init {
         if (config.debug) {
             runBlocking {
-                Log.i("Args: ${args.toList()}")
+                Log.i("Args: ${parseArgs(request.headerDirectories).toList()}")
             }
         }
     }
@@ -80,6 +106,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             index,
             request.headers,
             includePaths + request.headerDirectories,
+            args = parseArgs(request.headerDirectories),
             debug = config.debug
         )
         val initialClasses = resolver.findClasses(filter.wrapperFilter())
@@ -99,6 +126,139 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         mappings.add(mappingService)
     }
 
+    override suspend fun requestInstantiation(req: InstantiationRequest) {
+        val target = "${req.base}<${req.args.joinToString(", ")}>"
+        val forceName = "KrapperForce_" + target
+            .replace("::", "_")
+            .replace("<", "_")
+            .replace(">", "")
+            .replace(", ", "_")
+            .replace(" ", "")
+            // A pointer/reference template arg (e.g. std::vector<Thing*>, from the T1.3
+            // range materialization) would otherwise leak `*`/`&` into the struct's
+            // identifier and the temp filename — both illegal — crashing the parse with
+            // `expected unqualified-id`. Map them to a token instead. The forcing struct's
+            // `value` member still uses the real `$target` (Thing*), so the instantiation
+            // is unaffected.
+            .replace("*", "Ptr")
+            .replace("&", "Ref")
+        val tmpFile = "/tmp/krapper_inst_$forceName.h"
+        File(tmpFile).writeText(
+            buildString {
+                // Every type in the instantiation must be declared, not just the
+                // outer base — previously only stdHeaderFor(req.base) was included,
+                // so std::vector<std::string> failed (basic_string undeclared).
+                // Include std headers TARGETED to the types named in `target`
+                // (scanning, so nested element types are covered) plus the
+                // consumer's own headers (for user element types like a wrapped
+                // struct in std::vector<Point>). Targeted rather than a blanket
+                // bundle: a broad include drags unrelated system structs in under
+                // INCLUDE_MISSING (e.g. <sys/timex.h>'s `timex`), which then
+                // generate invalid wrappers.
+                for (stdHeader in stdHeadersFor(target)) appendLine("#include $stdHeader")
+                for (userHeader in request.headers) appendLine("#include \"$userHeader\"")
+                appendLine("struct $forceName { $target value; };")
+            }
+        )
+        syntheticHeaders.add(tmpFile)
+        Log.i("Forcing instantiation of $target via $tmpFile")
+        val resolver = scope.parseHeader(
+            index,
+            listOf(tmpFile),
+            includePaths + request.headerDirectories,
+            args = parseArgs(request.headerDirectories),
+            debug = config.debug
+        )
+        // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
+        // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the
+        // re-parsed TU — against a large library that is the whole transitive surface
+        // (~1269 classes for Clang), not just the specialization we forced. We drop ONLY
+        // the UNRELATED classes and otherwise leave the collection identical to before,
+        // so the only behavioral delta at scale is "don't re-resolve the world".
+        //
+        // A `findClasses` result is KEPT when it is:
+        //   (a) the `KrapperForce_*` forcing struct — its `value` member's type IS the
+        //       target specialization, so resolving it materializes the specialization;
+        //   (b) a class ALREADY bound by filterAndResolve — re-resolved here so a method
+        //       dropped the first time because it referenced the (then unbound) container
+        //       is recovered now that the container exists (e.g.
+        //       `RangeHolder::items() -> std::vector<Thing*>`); the writer's last-wins
+        //       dedup then adopts the improved version; or
+        //   (c) any non-class element (e.g. a namespace static method) — these are few
+        //       and namespace-scoped, and excluding them would diverge from the original
+        //       handling (it dropped UDL operators like `operator""s` from the C++ side
+        //       while the Kotlin side still emitted them).
+        // Excluded: a WrappedClass that is neither the forcing struct nor already bound —
+        // i.e. the ~1269 unrelated classes. Referenced by nothing in the kept set, they
+        // are not pulled back in under INCLUDE_MISSING either. Net: forcing adds ~1 class
+        // (the specialization), not the world.
+        val alreadyBoundKeys = classes.filterIsInstance<ResolvedClass>()
+            .mapTo(HashSet()) { it.type.toString() }
+        // The free functions ALREADY bound by the main resolve (by uniqueCName) — captured
+        // before forcing. resolveForcing keeps ALL non-class elements from the re-parsed TU
+        // (the rule that preserves an already-bound std::literals UDL operator's C++ side),
+        // but that TU's #includes also pull in UNRELATED namespace free functions the
+        // AllowListFilter excluded from the main resolve (e.g. llvm::sys::fs / llvm::driver,
+        // which then emit non-compiling Kotlin). Keep only the free functions that were
+        // already bound; drop the incidental ones. The UDL case is safe because its operator
+        // IS main-bound (the Kotlin side emits it), so its uniqueCName is in this set.
+        // Key on a FULLER identity than the bare `uniqueCName`: the C++ qualified name
+        // plus the full argument-type signature (and the mangled cName). Keying on
+        // `uniqueCName` alone let an incidental free function that mangles to the SAME
+        // cName as a main-bound one false-keep — and emit the non-compiling Kotlin this
+        // filter exists to prevent. A null `uniqueCName` is folded into the identity (not
+        // dropped, as `mapNotNullTo` did) so a null-cName collision can't slip through.
+        val boundMethodIds = classes.filterIsInstance<ResolvedMethod>()
+            .mapTo(HashSet()) { it.forcingIdentity }
+        val scopedFound = resolver.findClasses { defaultFilter() }.filter {
+            val cls = it as? WrappedClass
+                ?: return@filter true // keep non-class elements (static methods) as-is
+            val key = cls.type.toString()
+            // EXACT match on the forcing struct's type (was a substring `contains`, which
+            // wrongly kept any nested type whose spelling merely EMBEDDED forceName).
+            key == forceName || key in alreadyBoundKeys
+        }
+        Log.i("Scoped forcing to ${scopedFound.size} element(s) for $target")
+        val newClasses = scopedFound.resolveForcing(
+            resolver,
+            config.referencePolicy,
+            alreadyBoundKeys
+        )
+        classes = classes + newClasses.filter {
+            it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
+        }
+    }
+
+    // The std headers needed to declare the types named in an instantiation
+    // target string. Scans for type tokens so nested element types are covered
+    // (e.g. std::vector<std::string> -> <vector> + <string>). Targeted, not a
+    // blanket include, so unrelated system types aren't dragged in under
+    // INCLUDE_MISSING.
+    private fun stdHeadersFor(target: String): List<String> =
+        STD_TYPE_HEADERS.filter { (token, _) -> target.contains(token) }
+            .map { it.second }
+            .distinct()
+
+    private companion object {
+        // token (as it appears in a canonical type string) -> std header.
+        // "basic_string" matches std::__cxx11::basic_string (canonical std::string).
+        val STD_TYPE_HEADERS = listOf(
+            "basic_string" to "<string>",
+            "vector" to "<vector>",
+            "unordered_map" to "<unordered_map>",
+            "unordered_set" to "<unordered_set>",
+            "map" to "<map>",
+            "set" to "<set>",
+            "list" to "<list>",
+            "deque" to "<deque>",
+            "pair" to "<utility>",
+            "tuple" to "<tuple>",
+            "unique_ptr" to "<memory>",
+            "shared_ptr" to "<memory>",
+            "weak_ptr" to "<memory>"
+        )
+    }
+
     override suspend fun writeTo(output: String) {
         if (config.debug) {
             Log.i("Running mapping")
@@ -113,6 +273,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 .joinToString(",\n    ")
             Log.i("Generating for [\n    $resolvedClasses\n]")
         }
+        val headers = request.headers + syntheticHeaders
         val outputBase = File(output)
         outputBase.mkdirs()
         val namer = NameHandler()
@@ -122,16 +283,19 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 HeaderWriter(
                     it,
                     policy = config.errorPolicy.policy
-                ).generate(config.moduleName!!, request.headers, classes)
+                ).generate(config.moduleName!!, headers, classes)
             }.toString()
         )
         Log.i("Generating C++ wrapper")
         val cppFile = File(outputBase, "${config.moduleName}.cc")
         cppFile.writeText(
-            CppCodeBuilder().also {
+            // qualifyFunctionPointers: the .cc wrapper names namespace-scoped
+            // function-pointer typedefs with their fully-qualified spelling so they
+            // resolve in C++ (the .h header keeps the unqualified extern-"C" form).
+            CppCodeBuilder(qualifyFunctionPointers = true).also {
                 CppWriter(cppFile, it, policy = config.errorPolicy.policy).generate(
                     config.moduleName!!,
-                    request.headers,
+                    headers,
                     classes
                 )
             }.toString()
@@ -142,25 +306,60 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 outputBase,
                 "$pkg.internal",
                 config.moduleName!!,
-                request.headers,
+                headers,
                 request.libraries
             )
         )
         Log.i("Compiling native wrapper library")
-        CppCompiler(File(outputBase, "lib${config.moduleName}.a"), config.compiler).compile(
+        CppCompiler(
+            File(outputBase, "lib${config.moduleName}.a"),
+            config.compiler,
+            config.cppStandard
+        ).compile(
             cppFile,
-            request.headers,
+            headers,
             request.libraries
         )
         Log.i("Generating Kotlin bindings")
+        val srcDir = File(outputBase, "src")
         KotlinWriter(
             "$pkg.internal",
             policy = config.errorPolicy.policy
         ).generate(
-            File(outputBase, "src"),
+            srcDir,
             classes
         )
+        writeCppBindingAnnotation(srcDir)
         Log.i("Code generation complete")
+    }
+
+    /**
+     * Emit the `@krapper.CppBinding(val spec: String)` annotation alongside the
+     * generated bindings so consumer source (and the kplusplus compiler plugin)
+     * can resolve it without depending on a separate artifact. Each generated
+     * class gets `@krapper.CppBinding("<cppSpec>")` so the plugin can recover
+     * the C++ instantiation spec from a Kotlin element type.
+     */
+    private fun writeCppBindingAnnotation(srcDir: File) {
+        File(srcDir, "CppBinding.kt").writeText(
+            """
+            |package krapper
+            |
+            |annotation class CppBinding(val spec: String)
+            |
+            |// Marks a generated scoped template factory (`fun <T> MemScope.Box(): Box<T>`)
+            |// so the kplusplus compiler plugin can derive its container mapping (C++ base,
+            |// binding-name prefix, package) and refine `Box<Int>()` to the concrete
+            |// `Box__Int` binding — the generic generalization of the hardcoded cppVector
+            |// facade recognition. (Arity comes from the factory's own type params.)
+            |annotation class CppTemplate(
+            |    val base: String,
+            |    val prefix: String,
+            |    val pkg: String
+            |)
+            |
+            """.trimMargin()
+        )
     }
 
     private suspend fun executeMappings() {

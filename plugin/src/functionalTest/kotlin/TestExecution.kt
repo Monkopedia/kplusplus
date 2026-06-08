@@ -16,6 +16,7 @@
 package com.monkopedia.kplusplus.plugin
 
 import com.monkopedia.krapper.KrapperService
+import com.monkopedia.krapper.RemoteLogger
 import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.KsrpcEnvironment
 import com.monkopedia.ksrpc.ksrpcEnvironment
@@ -24,6 +25,7 @@ import com.monkopedia.ksrpc.toStub
 import java.io.File
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -52,6 +54,16 @@ class TestExecution {
                 val service = connection.defaultChannel().toStub<KrapperService, String>()
                 val ping = service.ping("A message")
                 println("Response: $ping")
+                assertTrue(ping.contains("A message"), "ping echoed message; got '$ping'")
+
+                val received = CopyOnWriteArrayList<String>()
+                service.setLogger(object : RemoteLogger {
+                    override suspend fun e(message: String) { received += "E:$message" }
+                    override suspend fun i(message: String) { received += "I:$message" }
+                    override suspend fun w(message: String) { received += "W:$message" }
+                })
+                println("setLogger ok; received=$received")
+
                 try {
                     connection.close()
                 } catch (t: CancellationException) {
@@ -59,6 +71,7 @@ class TestExecution {
             } catch (t: Throwable) {
                 println("Caught error $t")
                 t.printStackTrace()
+                throw t
             }
         }
     }

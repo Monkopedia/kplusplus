@@ -1,0 +1,6 @@
+headers = feature_tests.h
+compiler = clang
+linkerOpts = -lstdc++
+staticLibraries = libfeature_tests.a
+libraryPaths.linux_x64 = build/cpp/lib
+package = feature_tests

@@ -36,5 +36,15 @@ data class KrapperConfig(
     val moduleName: String,
     val errorPolicy: ErrorPolicy,
     val referencePolicy: ReferencePolicy,
-    val debug: Boolean
+    val debug: Boolean,
+    // C++ standard libclang parses headers under (e.g. "c++14", "c++17",
+    // "c++20"). Becomes the `--std=<value>` parse arg. Defaults to c++14 to
+    // preserve historical behavior; bump to reach C++17 types like
+    // std::string_view or C++20 char8_t.
+    val cppStandard: String = "c++14",
+    // Root package for generated bindings. Null (default) preserves historical
+    // behavior: top-level user types -> package `root`, C++ namespaces -> their
+    // bare path (`std`, `geo`). When set (e.g. "com.acme.app"), every generated
+    // binding's package becomes <rootPackage> + the C++ namespace path.
+    val rootPackage: String? = null
 )

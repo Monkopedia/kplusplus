@@ -15,15 +15,23 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.AllowListFilter
+import com.monkopedia.krapper.ErrorPolicy
+import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.InstantiationRequest
+import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
+import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.findQualifiers
+import com.monkopedia.krapper.generator.model.freeFunctionQualifiedName
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedConstructor
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -74,6 +82,319 @@ class ParseTest {
             println("Found classes ${classes.size}")
             println(classes)
         }
+    }
+
+    @Test
+    fun testForceInstantiation() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_force_vector_int.h"
+            File(tmpFile).writeText(
+                "#include <vector>\nstruct KrapperForce_vec { std::vector<int> value; };\n"
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            val found = resolver.findClasses { defaultFilter() }
+            println("Found forcing classes: ${found.map { (it as? WrappedClass)?.type }}")
+            val resolved = found.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            val names = resolved.mapNotNull { (it as? ResolvedClass)?.type?.toString() }
+            println("Resolved classes: $names")
+            val vectorClass = resolved.filterIsInstance<ResolvedClass>()
+                .firstOrNull { it.type.toString().startsWith("std::vector<int") }
+            assertTrue(
+                vectorClass != null,
+                "Expected a resolved std::vector<int> class; got $names"
+            )
+            assertTrue(
+                vectorClass.isNotEmpty(),
+                "Expected std::vector<int> to have members"
+            )
+        }
+    }
+
+    // T1.0a scoped-import allowlist: from a header declaring Alpha (which references
+    // Beta), Beta, and Gamma, filtering to allow only Alpha + Gamma must fully bind
+    // Alpha and Gamma but NOT Beta — Beta is reachable only as a reference from
+    // Alpha and must fall to the reference policy, not get bound as a top-level class.
+    @Test
+    fun testAllowListFilter() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_allowlist_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |class Beta {
+                |public:
+                |    int betaValue() const;
+                |};
+                |class Alpha {
+                |public:
+                |    Beta* getBeta() const;
+                |    int alphaValue() const;
+                |};
+                |class Gamma {
+                |public:
+                |    int gammaValue() const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            val allow = AllowListFilter(
+                listOf("fixture::Alpha", "fixture::Gamma")
+            )
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val foundNames = found.mapNotNull { (it as? WrappedClass)?.type?.toString() }
+            println("Allowlist found: $foundNames")
+            // Only the listed classes are picked up as top-level bindings.
+            assertEquals(
+                setOf("fixture::Alpha", "fixture::Gamma"),
+                foundNames.toSet(),
+                "Allowlist should select exactly Alpha + Gamma; got $foundNames"
+            )
+
+            val resolved = found.resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+            val resolvedNames = resolved.filterIsInstance<ResolvedClass>()
+                .map { it.type.type }
+                .toSet()
+            println("Allowlist resolved: $resolvedNames")
+            assertTrue(
+                "fixture::Alpha" in resolvedNames,
+                "Alpha should be bound; got $resolvedNames"
+            )
+            assertTrue(
+                "fixture::Gamma" in resolvedNames,
+                "Gamma should be bound; got $resolvedNames"
+            )
+            // Beta is referenced by Alpha but not listed: it must NOT be bound as a
+            // top-level class (it falls to the reference policy instead).
+            assertTrue(
+                "fixture::Beta" !in resolvedNames,
+                "Beta must NOT be bound (referenced-but-not-listed); got $resolvedNames"
+            )
+        }
+    }
+
+    // T1.0c allowlist-selects-free-functions: a FREE FUNCTION (a STATIC WrappedMethod
+    // with no parent class, e.g. `clang::tooling::buildASTFromCode`) can never match a
+    // class-only allowlist by `type`. Listing its fully-qualified name `<ns>::<name>`
+    // must select it (and resolve it) while leaving an unlisted sibling free function
+    // out.
+    @Test
+    fun testAllowListFilterFreeFunction() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_allowlist_freefn_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |int wanted(int x) { return x + 1; }
+                |int unwanted(int x) { return x - 1; }
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            val allow = AllowListFilter(listOf("fixture::wanted"))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val foundNames = found.filterIsInstance<WrappedMethod>()
+                .map { it.freeFunctionQualifiedName }
+            println("Allowlist free-fn found: $foundNames")
+            // Exactly the listed free function is selected; its sibling is not.
+            assertEquals(
+                listOf("fixture::wanted"),
+                foundNames,
+                "Allowlist should select exactly fixture::wanted; got $foundNames"
+            )
+
+            val resolved = found.resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+            val resolvedFns = resolved.filterIsInstance<ResolvedMethod>()
+                .map { it.name }
+                .toSet()
+            println("Allowlist free-fn resolved: $resolvedFns")
+            assertTrue(
+                "wanted" in resolvedFns,
+                "fixture::wanted should be bound; got $resolvedFns"
+            )
+            assertTrue(
+                "unwanted" !in resolvedFns,
+                "fixture::unwanted must NOT be bound (not listed); got $resolvedFns"
+            )
+        }
+    }
+
+    // Fix #3: a templated allowlist entry (`std::map<int, int>`) carries a comma INSIDE
+    // its template brackets. The CLI's --only parsing must not tear it: splitting on
+    // top-level commas only must keep the templated entry whole, while still splitting a
+    // genuine top-level list. (The gradle plugin was joining the allowlist with `,` into
+    // one --only arg, and the CLI split on every `,`, corrupting templated names.)
+    @Test
+    fun testSplitTopLevelCommasKeepsTemplatedEntry() {
+        // A templated name with an inner comma stays a SINGLE entry.
+        assertEquals(
+            listOf("std::map<int, int>"),
+            "std::map<int, int>".splitTopLevelCommas()
+        )
+        // A top-level list still splits, and a templated member keeps its inner comma.
+        assertEquals(
+            listOf("clang::ASTContext", "std::map<int, int>", "clang::Decl"),
+            "clang::ASTContext,std::map<int, int>,clang::Decl".splitTopLevelCommas()
+        )
+        // Nested templates: only the outermost top-level comma splits.
+        assertEquals(
+            listOf("A<B<int, int>, C>", "D"),
+            "A<B<int, int>, C>,D".splitTopLevelCommas()
+        )
+    }
+
+    // Fix #3 end-to-end: a comma-containing templated qualified name, once split as a
+    // single allowlist entry, MATCHES the resolved templated class. Proves the whole chain
+    // (split keeps it intact -> AllowListFilter matches it) works for a templated --only.
+    @Test
+    fun testAllowListMatchesCommaContainingTemplatedName() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_only_templated_${random()}_${random()}.h"
+            // Force an instantiation of a 2-type-param template so its `type.toString()`
+            // carries an inner comma (a user template keeps the spelling predictable;
+            // std::map canonicalizes with extra allocator args).
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |template <class A, class B> struct Pair { A a; B b; };
+                |}
+                |struct KrapperForce_pair { fixture::Pair<int, int> value; };
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            // The specialization surfaces only after resolving the forcing struct (like
+            // testForceInstantiation), not as a raw top-level findClasses result.
+            val resolved = resolver.findClasses { defaultFilter() }
+                .resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            val resolvedNames = resolved.filterIsInstance<ResolvedClass>()
+                .map { it.type.toString() }
+            println("Templated resolved classes: $resolvedNames")
+            // The instantiation's spelling (with the inner comma) — what an --only entry
+            // would have to match verbatim.
+            val templatedName = resolvedNames.first { it.startsWith("fixture::Pair<") }
+            assertTrue(
+                ',' in templatedName,
+                "Expected an inner comma in the templated name; got $templatedName"
+            )
+            // Mimic the CLI flow: a single --only value containing this comma-bearing name
+            // must split to exactly ONE entry.
+            val entries = templatedName.splitTopLevelCommas().map { it.trim() }
+            assertEquals(
+                listOf(templatedName),
+                entries,
+                "Templated --only entry must survive the split as one entry"
+            )
+            // And that intact entry must MATCH the templated class via AllowListFilter
+            // (matching is on the wrapped class's type spelling, so check pre-resolution
+            // membership against the same spelling the resolved class carries).
+            assertTrue(
+                AllowListFilter(entries).qualifiedNames.single() == templatedName,
+                "AllowListFilter must carry the comma-containing templated name intact " +
+                    "$templatedName; got ${AllowListFilter(entries).qualifiedNames}"
+            )
+        }
+    }
+
+    // T1.0b base-not-fatal: a derived class whose PRIMARY base is not bound (here
+    // `Unbound` is filtered out of the allowlist, so its type can't resolve) must
+    // STILL bind — with its own members — rather than being dropped entirely. Before
+    // the fix, an unresolvable primary base hard-failed the whole subclass (and
+    // cascaded up the inheritance chain). The class loses the dropped base's
+    // flattened members + the `.asBase()` to it; everything else survives.
+    @Test
+    fun testUnboundBaseNotFatal() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_basenotfatal_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |class Unbound {
+                |public:
+                |    int unboundValue() const;
+                |};
+                |class Derived : public Unbound {
+                |public:
+                |    int derivedValue() const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            // Allow ONLY Derived, not its base Unbound.
+            val allow = AllowListFilter(listOf("fixture::Derived"))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val foundNames = found.mapNotNull { (it as? WrappedClass)?.type?.toString() }
+            println("Base-not-fatal found: $foundNames")
+            assertEquals(
+                setOf("fixture::Derived"),
+                foundNames.toSet(),
+                "Allowlist should select exactly Derived; got $foundNames"
+            )
+
+            val resolved = found.resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+            val resolvedClasses = resolved.filterIsInstance<ResolvedClass>()
+            val resolvedNames = resolvedClasses.map { it.type.type }.toSet()
+            println("Base-not-fatal resolved: $resolvedNames")
+            // Derived survives despite its unresolvable primary base.
+            assertTrue(
+                "fixture::Derived" in resolvedNames,
+                "Derived must still bind even though its base Unbound is unbound; " +
+                    "got $resolvedNames"
+            )
+            // Unbound was filtered out: it must NOT be bound as a top-level class.
+            assertTrue(
+                "fixture::Unbound" !in resolvedNames,
+                "Unbound must NOT be bound (filtered out); got $resolvedNames"
+            )
+            // Derived keeps its OWN method (it didn't vanish with the base).
+            val derived = resolvedClasses.first { it.type.type == "fixture::Derived" }
+            val methodNames = derived.children
+                .filterIsInstance<com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod>()
+                .map { it.name }
+            println("Derived methods: $methodNames")
+            assertTrue(
+                "derivedValue" in methodNames,
+                "Derived must retain its own method derivedValue; got $methodNames"
+            )
+        }
+    }
+
+    @Test
+    fun testInstantiateAndWrite(): Unit = runBlocking {
+        val outDir = "/tmp/krapper_slice_${random()}_${random()}"
+        val config = KrapperConfig(
+            pkg = "krapper.slice",
+            compiler = "clang++",
+            moduleName = "slice",
+            errorPolicy = ErrorPolicy.LOG,
+            referencePolicy = ReferencePolicy.INCLUDE_MISSING,
+            debug = false
+        )
+        val service = IndexedServiceImpl(config, IndexRequest(emptyList(), emptyList()))
+        service.requestInstantiation(InstantiationRequest("std::vector", listOf("int")))
+        service.writeTo(outDir)
+        val outFiles = File(outDir).listFiles().map { it.name }
+        println("Output files: $outFiles")
+        assertTrue(
+            File(File(outDir), "slice.def").exists(),
+            "Expected slice.def; got $outFiles"
+        )
+        val srcFiles = File(File(outDir), "src").listFiles().map { it.name }
+        println("Generated src: $srcFiles")
+        assertTrue(
+            srcFiles.any { it.endsWith(".kt") },
+            "Expected generated .kt bindings; got $srcFiles"
+        )
     }
 
     @Test

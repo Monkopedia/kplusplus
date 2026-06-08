@@ -17,6 +17,7 @@ coroutines-debug = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-debug", 
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 ksrpc-core = { module = "com.monkopedia.ksrpc:ksrpc-core", version.ref = "ksrpc" }
 ksrpc-sockets = { module = "com.monkopedia.ksrpc:ksrpc-sockets", version.ref = "ksrpc" }
+ksrpc-jni = { module = "com.monkopedia.ksrpc:ksrpc-jni", version.ref = "ksrpc" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }

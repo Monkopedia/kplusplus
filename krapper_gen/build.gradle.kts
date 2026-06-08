@@ -55,6 +55,9 @@ kotlin {
     hostTarget.apply {
         binaries {
             executable()
+            sharedLib("krapper") {
+                export(libs.ksrpc.jni)
+            }
             all {
                 @OptIn(KotlinNativeCacheApi::class)
                 disableNativeCache(
@@ -92,6 +95,8 @@ kotlin {
         api(kotlin("reflect"))
         api(libs.ksrpc.core)
         implementation(libs.ksrpc.sockets)
+        // api so the sharedLib host binary can export it for JVM consumers.
+        api(libs.ksrpc.jni)
     }
 }
 

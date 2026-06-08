@@ -14,17 +14,6 @@
  * limitations under the License.
  */
 import com.monkopedia.klinker.klinkedExecutable
-import com.monkopedia.kplusplus.find
-import com.monkopedia.kplusplus.onEach
-import com.monkopedia.krapper.ReferencePolicy
-import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
-import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
-import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
-import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 
 buildscript {
     repositories {
@@ -33,9 +22,11 @@ buildscript {
     }
 }
 plugins {
-    kotlin("multiplatform") version "2.3.0"
-    kotlin("plugin.serialization") version "2.3.0"
-    id("com.monkopedia.kplusplus.plugin")
+    kotlin("multiplatform") version "2.4.0"
+    // v2: the compiler subplugin replaces the legacy mapping-DSL plugin.
+    // Headers / library / fixups live in the narrow `kplusplus { ... }`
+    // block at the bottom of this file; nothing else here changed.
+    id("com.monkopedia.kplusplus.compiler")
     id("com.monkopedia.klinker.plugin") version "0.2.0"
 }
 
@@ -83,127 +74,43 @@ kotlin {
     }
 }
 
+// v2: the entire kplusplus configuration. Compare with the v1 import { map { … } }
+// block (lines 86-208 of the pre-M12 build.gradle.kts) — that one enumerated
+// the v8 import and then re-implemented four semantic fixups as arbitrary
+// Kotlin closures running against the krapper IR model. Same four fixups
+// here, expressed declaratively. No Kotlin closures, no krapper-IR imports.
 kplusplus {
-    config {
-        referencePolicy = ReferencePolicy.INCLUDE_MISSING
-    }
-    import {
-        library.srcDir("../")
-        library.include("libv8_monolith.a")
-        headers.srcDir("../include/")
-        headers.include("v8-combined.h")
+    header("../include/v8-combined.h")
+    headerDirectory("../include/")
+    library("../libv8_monolith.a")
 
-        map(ResolvedMethod) {
-            find {
-                parent(qualified eq "v8::ScriptOrigin") and
-                    (methodName eq "options")
-            }
-            onEach { element ->
-                println("Setting return type on $element")
-                val retType =
-                    element.returnType.copy(
-                        typeString =
-                            element.returnType.typeString
-                                .removePrefix("const ")
-                                .trimEnd('*'),
-                    )
-                element.replaceWith(
-                    element.copy(
-                        returnStyle = ReturnStyle.COPY_CONSTRUCTOR,
-                        returnType = retType,
-                    ),
-                )
-            }
-        }
-        map(ResolvedMethod) {
-            find {
-                (methodReturnType startsWith "const v8::Local<") or
-                    (methodReturnType startsWith "const v8::Maybe<") or
-                    (methodReturnType startsWith "const v8::MaybeLocal<") or
-                    (methodReturnType startsWith "const v8::ScriptOrigin<") or
-                    (methodReturnType startsWith "const v8::Location<")
-            }
-            onEach { element ->
-                println("Clearing const return type on $element")
-                val nonConstReturn =
-                    element.returnType.copy(
-                        typeString = element.returnType.typeString.removePrefix("const "),
-                    )
-                element.replaceWith(element.copy(returnType = nonConstReturn))
-            }
-        }
-        map(ResolvedMethod) {
-            find {
-                parent(qualified eq "v8::Persistent<v8::Value>") or
-                    parent(qualified eq "v8::platform::tracing::TraceWriter")
-            }
-            onEach { element ->
-                if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
-                    element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
-                    element.uniqueCName ==
-                    "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
-                ) {
-                    println("Removing $element")
-                    element.remove()
-                }
-            }
-        }
-        map(ResolvedClass) {
-            find {
-                (thiz isType ResolvedClass) and
-                    (qualified startsWith "std::unique_ptr") and
-                    (className eq "unique_ptr")
-            }
-            onEach { parent ->
-                val baseType =
-                    parent.type.typeString
-                        .replace(
-                            "std::unique_ptr<",
-                            "",
-                        ).removeSuffix(">")
-                val thisPtrType =
-                    parent.type.copy(
-                        typeString = parent.type.type + "*",
-                        cType = ResolvedCType("void*", false),
-                    )
-                val thizArgument =
-                    ResolvedArgument(
-                        "thiz",
-                        thisPtrType,
-                        thisPtrType,
-                        "",
-                        REINT_CAST,
-                        needsDereference = true,
-                        hasDefault = false,
-                    )
-                val uniqueCName =
-                    "_custom_unique_ptr_get_" +
-                        parent.type.typeString
-                            .replace("<", "_")
-                            .replace(">", "_")
-                            .replace("::", "_")
-                val returnType =
-                    parent.type.copy(
-                        typeString = baseType,
-                        kotlinType = resolvedKotlinType(baseType),
-                        cType = resolvedCType(baseType),
-                    )
-                val getMethod =
-                    ResolvedMethod(
-                        name = "get",
-                        returnType = returnType,
-                        methodType = METHOD,
-                        uniqueCName = uniqueCName,
-                        operator = null,
-                        args = listOf(thizArgument),
-                        returnStyle = VOIDP,
-                        argCastNeedsPointer = false,
-                        qualified = parent.type.typeString,
-                    )
-                println("Adding $getMethod to $parent")
-                parent.add(getMethod)
-            }
-        }
+    fixup {
+        // v8::ScriptOrigin::options returns a stale `const ScriptOriginOptions*`
+        // in the generated binding; consumers use the value by-copy. Built-in
+        // because the rewrite (strip const + trim trailing * + flip return
+        // style to COPY_CONSTRUCTOR) is specific to this exact callee.
+        scriptOriginOptionsFix()
+
+        // The five v8 wrapper-type families return `const v8::Foo<...>` from
+        // many methods; the leading const breaks the generated Kotlin
+        // bindings because the underlying type is value-semantic.
+        stripConstFromReturnType("v8::Local<")
+        stripConstFromReturnType("v8::Maybe<")
+        stripConstFromReturnType("v8::MaybeLocal<")
+        stripConstFromReturnType("v8::ScriptOrigin<")
+        stripConstFromReturnType("v8::Location<")
+
+        // Three v8 methods generate uncompilable C++ wrappers for this
+        // particular instantiation; drop them by their uniqueCName.
+        removeMethod("_v8_Persistent_v8_Value_new")
+        removeMethod("v8_Persistent_v8_Value_op_assign")
+        removeMethod(
+            "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
+        )
+
+        // std::unique_ptr<>'s auto-generated `get()` doesn't model ownership
+        // properly; this fixup emits a custom one per instantiation.
+        addUniquePtrGet()
     }
 }
 

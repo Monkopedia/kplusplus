@@ -203,13 +203,13 @@ class CppHeaderTests {
     private val testlibTestclassNew = "void* TestLib_TestClass_new(void* location);\n\n"
 
     private val testlibTestclass2New =
-        "void* _TestLib_TestClass_new(void* location, void* other);\n\n"
+        "void* TestLib_TestClass_new__const_TestLib_TestClass_and(void* location, void* other);\n\n"
 
     private val testlibTestclass3New =
-        "void* __TestLib_TestClass_new(void* location, int a);\n\n"
+        "void* TestLib_TestClass_new__int(void* location, int a);\n\n"
 
     private val testlibTestclass4New =
-        "void* ___TestLib_TestClass_new(void* location, int a, double b);\n\n"
+        "void* TestLib_TestClass_new__int_double(void* location, int a, double b);\n\n"
 
     private val testlibTestclassDispose = "void TestLib_TestClass_dispose(void* thiz);\n\n"
 

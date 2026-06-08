@@ -21,6 +21,10 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 class ClassLookup(private val classes: List<ResolvedClass>) {
     private val quickLook = mutableMapOf<String, ResolvedClass?>()
 
+    // Every bound class, for whole-program passes like the down-cast inverse map
+    // (which must scan all derived classes to find those reaching a given base).
+    val allClasses: List<ResolvedClass> get() = classes
+
     operator fun get(type: ResolvedType): ResolvedClass? = this[type.toString()]
 
     operator fun get(str: String): ResolvedClass? = quickLook.getOrPut(str) {

@@ -27,31 +27,21 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.enum
-import com.monkopedia.krapper.AddToChild
+import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.DefaultFilter
 import com.monkopedia.krapper.ErrorPolicy.FAIL
 import com.monkopedia.krapper.ErrorPolicy.LOG
+import com.monkopedia.krapper.Fixup
 import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.InstantiationRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.KrapperService
-import com.monkopedia.krapper.ReplaceChild
-import com.monkopedia.krapper.addMapping
-import com.monkopedia.krapper.addTypedMapping
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.LogPolicy
 import com.monkopedia.krapper.generator.builders.ThrowPolicy
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.getcwd
-import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
-import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
-import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.COPY_CONSTRUCTOR
-import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolvedmodel.resolvedSerializerModule
-import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.ksrpc.ErrorListener
 import com.monkopedia.ksrpc.channels.registerDefault
 import com.monkopedia.ksrpc.ksrpcEnvironment
@@ -90,11 +80,22 @@ class KrapperGen : CliktCommand() {
         help = "Specify a library to that contains the header specified"
     ).multiple()
     val pkg by option("-p", "--package", help = "Desired package for wrappers to be placed")
+    val rootPackage by option(
+        "--root-package",
+        help = "Root package for generated bindings. When unset, top-level types go to " +
+            "package `root` and C++ namespaces map to their bare path (e.g. `std`). When set " +
+            "(e.g. com.acme.app), every binding's package becomes <root-package> + namespace path."
+    )
     val compiler by option(
         "-c",
         "--compiler",
         help = "Compiler to use for creating wrapper module"
     ).default("clang++")
+    val cppStandard by option(
+        "--std",
+        help = "C++ standard libclang parses headers under, e.g. c++14, c++17, " +
+            "c++20. Needed for C++17+ types like std::string_view. Defaults to c++14."
+    ).default("c++14")
     val moduleName by argument(help = "Name of the wrapper module created").optional()
     val output by option("-o", "--outdir", help = "Directory to place generated files")
     val errorPolicy by option("--policy", help = "How to handle errors")
@@ -117,6 +118,36 @@ class KrapperGen : CliktCommand() {
         "-s",
         help = "Tells Krapper to host a ksrpc service on std in/out, and ignores all other options"
     ).flag()
+    val instantiate by option(
+        "--instantiate",
+        help = "Generate bindings for a C++ template instantiation, e.g. std::vector<int>. " +
+            "May be repeated. May be combined with --header/--lib (v2 fixup flow): headers " +
+            "are parsed first, then each instantiation is synthesized on top of the resolved " +
+            "model. When --header is omitted, only the requested instantiations are emitted."
+    ).multiple()
+    val only by option(
+        "--only",
+        help = "Scoped-import allowlist: a fully-qualified (namespaced) class name to " +
+            "bind, e.g. clang::CXXRecordDecl. Repeatable. A single value may also be a " +
+            "comma-separated list (split on TOP-LEVEL commas only, so a templated entry " +
+            "like `std::map<int, int>` is kept whole). Only listed classes are fully " +
+            "bound; types they reference but that aren't listed fall to --referencePolicy " +
+            "(borrowed/opaque) rather than being recursively bound. May be combined with " +
+            "--only-file. When neither is set, DefaultFilter binds every non-std class."
+    ).multiple()
+    val onlyFile by option(
+        "--only-file",
+        help = "Like --only, but reads the allowlist from a file (one fully-qualified " +
+            "class name per line; blank lines and lines starting with # are ignored). " +
+            "Merged with any --only entries."
+    )
+    val fixupFile by option(
+        "--fixup-file",
+        help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
+            "Each directive registers a narrow per-binding-spec correction (remove a method " +
+            "by uniqueCName, strip a stale `const ` prefix from matching return types, etc.). " +
+            "Applied during writeTo()."
+    )
 
     override fun run() {
         if (serviceMode) {
@@ -124,18 +155,68 @@ class KrapperGen : CliktCommand() {
         }
         runBlocking {
             val service = KrapperServiceImpl()
+            val resolvedModule = moduleName
+                ?: header.firstOrNull()?.let { File(it).name }
+                ?: error("A module name argument is required")
             service.setConfig(
                 KrapperConfig(
-                    pkg = pkg ?: "krapper.$moduleName",
+                    pkg = pkg ?: "krapper.$resolvedModule",
                     compiler = compiler,
-                    moduleName = moduleName ?: File(header.first()).name,
+                    moduleName = resolvedModule,
                     errorPolicy = errorPolicy,
                     referencePolicy = referencePolicy,
-                    debug = debug
+                    debug = debug,
+                    cppStandard = cppStandard,
+                    rootPackage = rootPackage
                 )
             )
             val indexService = service.index(IndexRequest(header, library))
-            indexService.filterAndResolve(DefaultFilter)
+            // v2 flow: when both --header and --instantiate are present, parse
+            // the headers first (filterAndResolve) then layer the requested
+            // template instantiations on top. This is what the v8 example
+            // needs — a "wrap this whole header set" import combined with the
+            // narrow fixups passed via --fixup-file.
+            val hasHeaders = header.isNotEmpty()
+            val hasInstantiations = instantiate.isNotEmpty()
+            if (hasHeaders) {
+                // Scoped-import allowlist (T1.0a): when --only/--only-file name an
+                // explicit class set, bind ONLY those (referenced-but-unlisted types
+                // fall to --referencePolicy). Otherwise keep the DefaultFilter
+                // (bind-everything-non-std) behavior.
+                val allowList = loadAllowList()
+                val filter = if (allowList.isEmpty()) {
+                    DefaultFilter
+                } else {
+                    Log.i("Scoped import: binding only ${allowList.size} class(es): $allowList")
+                    AllowListFilter(allowList)
+                }
+                indexService.filterAndResolve(filter)
+            }
+            if (hasInstantiations) {
+                for (spec in instantiate) {
+                    indexService.requestInstantiation(parseInstantiation(spec))
+                }
+            }
+            // Apply declarative fixups from --fixup-file (v2 escape hatch).
+            // Empty / missing file is a no-op.
+            val fixups = loadFixups(fixupFile)
+            if (fixups.isNotEmpty()) {
+                Log.i("Loaded ${fixups.size} fixup(s) from $fixupFile")
+                FixupApplier.apply(indexService, fixups)
+            }
+            if (hasInstantiations && !hasHeaders) {
+                // Pure-instantiation path: matches the original M11 sync flow.
+                // Skip the legacy hardcoded v8 mappings entirely (they have
+                // been migrated to the user-supplied --fixup-file).
+                indexService.writeTo(output ?: getcwd())
+                return@runBlocking
+            }
+            // Legacy / headers-only / headers+instantiations path: previous
+            // releases also wired a hardcoded set of v8-specific mappings
+            // here. Those have been migrated to the declarative Fixup
+            // directives (see kplusplus { fixup { ... } } in the compiler
+            // gradle subplugin). The block remains so the same code path
+            // serves both the legacy CLI invocation and the new sync flow.
 //            for (file in header) {
 //                val tu =
 //                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
@@ -169,132 +250,50 @@ class KrapperGen : CliktCommand() {
 // //                    Log.i("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
 // //                }
 //            }
-            indexService.addTypedMapping(
-                ResolvedMethod,
-                filter = {
-                    parent(qualified eq "v8::ScriptOrigin") and
-                        (methodName eq "options")
-                },
-                handler = { element ->
-                    Log.i("Setting return type on $element")
-                    element.replaceWith(
-                        element.copy(
-                            returnStyle = COPY_CONSTRUCTOR,
-                            returnType = element.returnType.copy(
-                                typeString =
-                                    element.returnType.typeString.removePrefix("const ")
-                                        .trimEnd('*')
-                            )
-                        )
-                    )
-                }
-            )
-            indexService.addTypedMapping(
-                ResolvedMethod,
-                filter = {
-                    (methodReturnType startsWith "const v8::Local<") or
-                        (methodReturnType startsWith "const v8::Maybe<") or
-                        (methodReturnType startsWith "const v8::MaybeLocal<") or
-                        (methodReturnType startsWith "const v8::ScriptOrigin<") or
-                        (methodReturnType startsWith "const v8::Location<")
-                },
-                handler = { element ->
-                    Log.i("Clearing const return type on $element")
-                    listOf(
-                        ReplaceChild(
-                            element.copy(
-                                returnType = element.returnType.copy(
-                                    typeString = element.returnType.typeString.removePrefix(
-                                        "const "
-                                    )
-                                )
-                            )
-                        )
-                    )
-                }
-            )
-            indexService.addTypedMapping(
-                ResolvedMethod,
-                filter = {
-                    parent(qualified eq "v8::Persistent<v8::Value>")
-                },
-                handler = { element ->
-                    if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
-                        element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
-                        element.uniqueCName == "v8_platform_tracing_TraceWriter_create_" +
-                        "system_instrumentation_trace_writer"
-                    ) {
-                        Log.i("Removing $element")
-                        element.remove()
-                    }
-                }
-            )
-//            indexService.addTypedMapping(ResolvedClass)
-            indexService.addMapping(
-                filter = {
-                    (thiz isType ResolvedClass) and
-                        (qualified startsWith "std::unique_ptr") and
-                        (className eq "unique_ptr")
-                },
-                handler = { request ->
-                    val parent = request.child
-                    parent as ResolvedClass
-                    val wrappedType = WrappedType(
-                        parent.type.typeString.replace(
-                            "std::unique_ptr<",
-                            ""
-                        ).removeSuffix(">")
-                    )
-                    listOf(
-                        AddToChild(
-                            ResolvedMethod(
-                                "get",
-                                parent.type.copy(
-                                    typeString = wrappedType.toString(),
-                                    kotlinType = toResolvedKotlinType(
-                                        wrappedType.kotlinType
-                                    ),
-                                    cType = toResolvedCType(wrappedType.cType)
-                                ),
-                                METHOD,
-                                "_custom_unique_ptr_get_${
-                                    parent.type.typeString.replace("<", "_").replace(">", "_")
-                                        .replace("::", "_")
-                                }",
-                                null,
-                                listOf(
-                                    ResolvedArgument(
-                                        "thiz",
-                                        parent.type.copy(
-                                            typeString = parent.type.type + "*",
-                                            cType = ResolvedCType("void*", false)
-                                        ),
-                                        parent.type.copy(
-                                            typeString = parent.type.type + "*",
-                                            cType = ResolvedCType("void*", false)
-                                        ),
-                                        "",
-                                        REINT_CAST,
-                                        needsDereference = true,
-                                        hasDefault = false
-                                    )
-                                ),
-                                VOIDP,
-                                false,
-                                parent.type.typeString
-                            ).also {
-                                Log.i("Adding $it to $parent")
-                            }
-                        )
-                    )
-                }
-            )
-//            debug?.let {
-//                val clsStr = Json.encodeToString(resolver.tu)
-//                File(it).writeText(clsStr)
-//            }
             indexService.writeTo(output ?: getcwd())
         }
+    }
+
+    /**
+     * Build the scoped-import allowlist from --only (comma lists, repeatable) and
+     * --only-file (one name per line). Returns an empty list when neither is set,
+     * which the caller maps to DefaultFilter (bind-everything-non-std).
+     */
+    private fun loadAllowList(): List<String> {
+        val fromOption = only.flatMap { it.splitTopLevelCommas() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val fromFile = onlyFile?.let { path ->
+            val file = File(path)
+            if (!file.exists()) {
+                println("kplusplus warn: --only-file=$path does not exist; ignoring.")
+                emptyList()
+            } else {
+                file.readText().lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .toList()
+            }
+        } ?: emptyList()
+        return (fromOption + fromFile).distinct()
+    }
+
+    /** Read the --fixup-file JSON (if provided) into the declarative list. */
+    private fun loadFixups(path: String?): List<Fixup> {
+        if (path == null) return emptyList()
+        val file = File(path)
+        if (!file.exists()) {
+            // Not using Log.w because this helper is invoked synchronously
+            // from run() and Log.w is suspend. The miss is recoverable.
+            println("kplusplus warn: --fixup-file=$path does not exist; treating as no fixups.")
+            return emptyList()
+        }
+        val text = file.readText().trim()
+        if (text.isEmpty()) return emptyList()
+        return Json { ignoreUnknownKeys = true }.decodeFromString(
+            kotlinx.serialization.builtins.ListSerializer(Fixup.serializer()),
+            text
+        )
     }
 
     private fun runService() {
@@ -321,6 +320,52 @@ class KrapperGen : CliktCommand() {
             }
         }
     }
+}
+
+/**
+ * Split a `--only` value on TOP-LEVEL commas only, leaving commas inside template
+ * brackets intact. Supports the legacy convenience of a comma-joined list in one arg
+ * (`A,B,C`) while keeping a templated entry (`std::map<int, int>`) whole — the gradle
+ * plugin now passes each entry as its own `--only`, but a hand-written comma list (or a
+ * future re-join) must still not tear a templated name (`<int, int>` -> `<int` + ` int>`).
+ */
+internal fun String.splitTopLevelCommas(): List<String> {
+    val parts = mutableListOf<String>()
+    val current = StringBuilder()
+    var depth = 0
+    for (ch in this) {
+        when (ch) {
+            '<' -> {
+                depth++
+                current.append(ch)
+            }
+
+            '>' -> {
+                if (depth > 0) depth--
+                current.append(ch)
+            }
+
+            ',' -> if (depth == 0) {
+                parts += current.toString()
+                current.clear()
+            } else {
+                current.append(ch)
+            }
+
+            else -> current.append(ch)
+        }
+    }
+    parts += current.toString()
+    return parts
+}
+
+private fun parseInstantiation(spec: String): InstantiationRequest {
+    val lt = spec.indexOf('<')
+    if (lt < 0) return InstantiationRequest(spec.trim(), emptyList())
+    val base = spec.substring(0, lt).trim()
+    val argStr = spec.substring(lt + 1, spec.lastIndexOf('>'))
+    val args = argStr.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    return InstantiationRequest(base, args)
 }
 
 private val CValue<CXCursor>.templatedName: String

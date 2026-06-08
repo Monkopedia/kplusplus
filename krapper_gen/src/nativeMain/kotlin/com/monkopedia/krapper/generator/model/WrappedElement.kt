@@ -26,10 +26,14 @@ import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.accessSpecifier
 import com.monkopedia.krapper.generator.availability
+import com.monkopedia.krapper.generator.equals
 import com.monkopedia.krapper.generator.forEachRecursive
 import com.monkopedia.krapper.generator.getArgument
+import com.monkopedia.krapper.generator.isAnonymous
 import com.monkopedia.krapper.generator.isCopyConstructor
 import com.monkopedia.krapper.generator.isDefaultConstructor
+import com.monkopedia.krapper.generator.isVirtual
+import com.monkopedia.krapper.generator.isVirtualBase
 import com.monkopedia.krapper.generator.kind
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -147,6 +151,14 @@ abstract class WrappedElement(
                 if (value.kind == CXCursorKind.CXCursor_Constructor) {
                     (parent as? WrappedClass)?.metadata?.hasConstructor = true
                     (parent as? WrappedTemplate)?.metadata?.hasConstructor = true
+                    // A `= delete`d or non-public COPY constructor is filtered out here, but
+                    // its absence makes the type non-copyable for the C wrapper's by-value
+                    // Holder placement-new. Record it so canCopyConstruct can drop by-value
+                    // returns/fields of this type (T-skip).
+                    if (value.isCopyConstructor) {
+                        (parent as? WrappedClass)?.metadata?.hasDeletedCopyConstructor = true
+                        (parent as? WrappedTemplate)?.metadata?.hasDeletedCopyConstructor = true
+                    }
                 }
                 if (value.kind == CXCursorKind.CXCursor_CXXMethod) {
                     val opName = value.referenced.spelling.toKString()
@@ -156,6 +168,13 @@ abstract class WrappedElement(
                     } else if (opName == "operator delete") {
                         (parent as? WrappedClass)?.metadata?.hasHiddenDelete = true
                         (parent as? WrappedTemplate)?.metadata?.hasHiddenDelete = true
+                    } else if (opName == "operator=" &&
+                        value.isCopyAssignmentOf(parent, resolverBuilder)
+                    ) {
+                        // A `= delete`d/non-public COPY ASSIGNMENT is filtered out here; record
+                        // it so a field of this type drops its `field = *value` setter (T-skip).
+                        (parent as? WrappedClass)?.metadata?.hasDeletedCopyAssignment = true
+                        (parent as? WrappedTemplate)?.metadata?.hasDeletedCopyAssignment = true
                     }
                 }
                 if (value.kind == CXCursorKind.CXCursor_FieldDecl) {
@@ -166,133 +185,283 @@ abstract class WrappedElement(
                 }
                 return null
             }
-            val element = when (value.kind) {
+            val element = try {
+                when (value.kind) {
 //                CXCursorKind.CXCursor_UnexposedDecl -> TODO()
 //                CXCursorKind.CXCursor_UnionDecl -> TODO()
-                CXCursorKind.CXCursor_StructDecl,
-                CXCursorKind.CXCursor_ClassDecl -> WrappedClass(value, resolverBuilder)
+                    CXCursorKind.CXCursor_StructDecl,
+                    CXCursorKind.CXCursor_ClassDecl -> {
+                        // An anonymous record (the unnamed `struct { ... }` in
+                        // `struct { int a; } anon;`) has no addressable name — libclang
+                        // spells it `(unnamed struct at <file>:<line>)`, which is not a
+                        // valid C++ type to wrap. Binding it emits broken C
+                        // (`G2_(unnamed struct at ...)_new`). Skip-not-crash: drop the
+                        // anonymous record; its enclosing class still binds (the anon
+                        // member itself is skipped by the FieldDecl blank-spelling guard).
+                        if (value.isAnonymous) {
+                            return null
+                        }
+                        // A class/struct lexically NESTED inside a class TEMPLATE (e.g.
+                        // `template<class T> struct W { struct Inner { ... }; };`) has a
+                        // qualified name that can't be spelled standalone — naming
+                        // `W<...>::Inner` needs the enclosing template's arguments, which the
+                        // generator doesn't have. krapper flattens it to a bare
+                        // `clang::Inner` and emits `sizeof`/`reinterpret_cast`/field accessors
+                        // for a type the compiler can't find ("no type named 'Inner'"). Such a
+                        // type is unbindable; skip-not-crash: drop the whole class (and log).
+                        // A nested class inside a NON-template class (`Outer::Inner`) IS
+                        // nameable and is NOT dropped.
+                        if (value.isNestedInClassTemplate) {
+                            println(
+                                "WARN skip-not-crash: dropping class " +
+                                    "'${value.spelling.toKString()}' nested inside a class " +
+                                    "template (unnameable without template args)"
+                            )
+                            return null
+                        }
+                        WrappedClass(value, resolverBuilder)
+                    }
 
-                //                CXCursorKind.CXCursor_EnumDecl -> TODO()
+                    //                CXCursorKind.CXCursor_EnumDecl -> TODO()
 //                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
-                CXCursorKind.CXCursor_FieldDecl -> WrappedField(value, resolverBuilder)
-
-                CXCursorKind.CXCursor_ParmDecl -> return null
-
-                // WrappedArgument(value, resolverBuilder)
-                CXCursorKind.CXCursor_TypedefDecl ->
-                    try {
-                        WrappedTypedef(value, resolverBuilder)
-                    } catch (t: IllegalArgumentException) {
-                        // Don't mind when parsing everything, if this reference is needed,
-                        // it'll come up in resolution
-                        return null
+                    CXCursorKind.CXCursor_FieldDecl -> {
+                        // Anonymous data members (anon bitfield padding `int :3;`, anon
+                        // union/struct members) have a blank spelling. They have no name to
+                        // address, and emitting an accessor for one produces broken C
+                        // (`thiz_cast->;` + an empty accessor name). Skip-not-crash: drop the
+                        // member; the rest of the class still binds.
+                        if (value.referenced.spelling.toKString().isNullOrBlank()) {
+                            return null
+                        }
+                        // A (public) data member that is a REFERENCE or CONST makes the
+                        // enclosing class's implicit copy ASSIGNMENT deleted (you can't
+                        // rebind a reference or reassign a const), and a reference member
+                        // additionally deletes the implicit DEFAULT constructor (a reference
+                        // must be initialized). These special members are never emitted as
+                        // cursors (they're implicit), so the existing parse-time signal —
+                        // which only fires when an EXPLICIT `= delete`/non-public member is
+                        // filtered out — misses them. Record the structural facts here so a
+                        // field setter (`field = *value`) of this type is dropped (canAssign)
+                        // and no bogus default-construct (`new T()`) is synthesized for it
+                        // (T-skip residuals: implicitly-deleted copy-assign / default ctor).
+                        run {
+                            val fieldType = WrappedType(value.type, resolverBuilder)
+                            if (fieldType.isReference || fieldType.isConst) {
+                                (parent as? WrappedClass)?.metadata
+                                    ?.hasDeletedCopyAssignment = true
+                                (parent as? WrappedTemplate)?.metadata
+                                    ?.hasDeletedCopyAssignment = true
+                            }
+                            if (fieldType.isReference) {
+                                (parent as? WrappedClass)?.metadata
+                                    ?.hasDeletedDefaultConstructor = true
+                                (parent as? WrappedTemplate)?.metadata
+                                    ?.hasDeletedDefaultConstructor = true
+                            }
+                        }
+                        WrappedField(value, resolverBuilder)
                     }
 
-                CXCursorKind.CXCursor_FunctionDecl,
-                CXCursorKind.CXCursor_CXXMethod -> {
-                    if (value.referenced.spelling.toKString() in listOf(
-                            "operator new",
-                            "operator new[]",
-                            "operator delete",
-                            "operator delete[]"
-                        )
-                    ) {
-                        return null
-                    }
-                    WrappedMethod(value, resolverBuilder).also {
-                        for (i in 0 until value.numArguments) {
-                            it.addChild(
-                                WrappedArgument(
-                                    value.getArgument(i.toUInt()),
-                                    resolverBuilder,
-                                    i
-                                )
+                    CXCursorKind.CXCursor_ParmDecl -> return null
+
+                    // WrappedArgument(value, resolverBuilder)
+                    CXCursorKind.CXCursor_TypedefDecl ->
+                        try {
+                            WrappedTypedef(value, resolverBuilder)
+                        } catch (t: IllegalArgumentException) {
+                            // Don't mind when parsing everything, if this reference is needed,
+                            // it'll come up in resolution
+                            return null
+                        }
+
+                    // A user-defined conversion operator (`operator double() const`,
+                    // `operator bool()`, ...) is, at the C ABI, a zero-arg method whose
+                    // return is the conversion target. clang exposes it as its own cursor
+                    // kind; route it through the same WrappedMethod path as a plain method
+                    // (its `referenced.spelling` is `operator double`, `type.result` is the
+                    // target type). Operator.from then recognizes it via ConversionOperator
+                    // and CppWriter/KotlinWriter emit the `(target)*self` cast + a `toX()`.
+                    CXCursorKind.CXCursor_ConversionFunction,
+                    CXCursorKind.CXCursor_FunctionDecl,
+                    CXCursorKind.CXCursor_CXXMethod -> {
+                        if (value.referenced.spelling.toKString() in listOf(
+                                "operator new",
+                                "operator new[]",
+                                "operator delete",
+                                "operator delete[]"
                             )
+                        ) {
+                            return null
+                        }
+                        WrappedMethod(value, resolverBuilder).also {
+                            for (i in 0 until value.numArguments) {
+                                it.addChild(
+                                    WrappedArgument(
+                                        value.getArgument(i.toUInt()),
+                                        resolverBuilder,
+                                        i
+                                    )
+                                )
+                            }
                         }
                     }
-                }
 
-                CXCursorKind.CXCursor_Namespace -> WrappedNamespace(
-                    value.spelling.toKString() ?: error("Namespace without name")
-                )
-
-                CXCursorKind.CXCursor_Constructor ->
-                    WrappedConstructor(
-                        value.spelling.toKString() ?: "constructor",
-                        WrappedType.VOID,
-                        value.isCopyConstructor,
-                        value.isDefaultConstructor
-                    ).also {
-                        for (i in 0 until value.numArguments) {
-                            it.addChild(
-                                WrappedArgument(
-                                    value.getArgument(i.toUInt()),
-                                    resolverBuilder,
-                                    i
-                                )
-                            )
-                        }
+                    CXCursorKind.CXCursor_Namespace -> {
+                        val name = value.spelling.toKString() ?: error("Namespace without name")
+                        // Anonymous namespaces have an empty spelling. Their members have
+                        // TU-internal linkage and cannot be referenced across the C ABI, so
+                        // they aren't bindable. Skip them (and, transitively, everything they
+                        // contain) rather than emitting a binding with an empty package name.
+                        if (name.isEmpty()) return null
+                        WrappedNamespace(name)
                     }
 
-                CXCursorKind.CXCursor_Destructor ->
-                    WrappedDestructor(
-                        value.spelling.toKString() ?: "destructor",
-                        WrappedType.VOID
-                    ).also {
-                        for (i in 0 until value.numArguments) {
-                            it.addChild(
-                                WrappedArgument(
-                                    value.getArgument(i.toUInt()),
-                                    resolverBuilder,
-                                    i
+                    CXCursorKind.CXCursor_Constructor ->
+                        WrappedConstructor(
+                            value.spelling.toKString() ?: "constructor",
+                            WrappedType.VOID,
+                            value.isCopyConstructor,
+                            value.isDefaultConstructor
+                        ).also {
+                            for (i in 0 until value.numArguments) {
+                                it.addChild(
+                                    WrappedArgument(
+                                        value.getArgument(i.toUInt()),
+                                        resolverBuilder,
+                                        i
+                                    )
                                 )
-                            )
+                            }
                         }
-                    }
 
-                //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
-                CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
-                    value,
-                    resolverBuilder
-                )
+                    CXCursorKind.CXCursor_Destructor ->
+                        WrappedDestructor(
+                            value.spelling.toKString() ?: "destructor",
+                            WrappedType.VOID
+                        ).also {
+                            // Thread destructor virtuality (same plumbing as method
+                            // isVirtual) so the non-virtual-destructor diagnostic can fire.
+                            it.isVirtual = value.isVirtual
+                            for (i in 0 until value.numArguments) {
+                                it.addChild(
+                                    WrappedArgument(
+                                        value.getArgument(i.toUInt()),
+                                        resolverBuilder,
+                                        i
+                                    )
+                                )
+                            }
+                        }
 
-                //                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
+                    //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
+                    CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
+                        value,
+                        resolverBuilder
+                    )
+
+                    //                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
 //                CXCursorKind.CXCursor_TemplateTemplateParameter -> TODO()
-                CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
+                    CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
 
-                //                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
+                    //                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
 //                CXCursorKind.CXCursor_TypeAliasDecl -> TODO()
-                CXCursorKind.CXCursor_TypeRef -> WrappedTemplateRef(
-                    value.spelling.toKString() ?: error("TypeRef without a name")
+                    CXCursorKind.CXCursor_TypeRef -> WrappedTemplateRef(
+                        value.spelling.toKString() ?: error("TypeRef without a name")
+                    )
+
+                    CXCursorKind.CXCursor_CXXBaseSpecifier -> WrappedBase(
+                        try {
+                            WrappedType(value.type, resolverBuilder)
+                        } catch (t: IllegalArgumentException) {
+                            // Don't mind when parsing everything, if this reference is needed,
+                            // it'll come up in resolution
+                            return null
+                        },
+                        isPublic = value.accessSpecifier == CX_CXXAccessSpecifier.CX_CXXPublic,
+                        isVirtualBase = value.isVirtualBase
+                    )
+
+                    CXCursorKind.CXCursor_TemplateRef ->
+                        try {
+                            WrappedType(value.type, resolverBuilder)
+                        } catch (t: IllegalArgumentException) {
+                            // Don't mind when parsing everything, if this reference is needed,
+                            // it'll come up in resolution
+                            return null
+                        }
+
+                    CXCursorKind.CXCursor_TranslationUnit -> WrappedTU()
+
+                    else -> return null
+                }
+            } catch (t: RuntimeException) {
+                // Skip-not-crash: building an element reaches several error() calls
+                // (IllegalStateException) — a missing spelling/usr/name — that the
+                // narrower per-branch catches (IllegalArgumentException only) let
+                // escape as a fatal crash. When parsing everything, a single
+                // unmodelable cursor must drop-and-log: if this reference is genuinely
+                // needed it resurfaces during resolution, where it fails gracefully.
+                println(
+                    "WARN skip-not-crash: dropping ${value.kind} cursor " +
+                        "'${value.spelling.toKString()}' (${t.message})"
                 )
-
-                CXCursorKind.CXCursor_CXXBaseSpecifier -> WrappedBase(
-                    try {
-                        WrappedType(value.type, resolverBuilder)
-                    } catch (t: IllegalArgumentException) {
-                        // Don't mind when parsing everything, if this reference is needed,
-                        // it'll come up in resolution
-                        return null
-                    }
-                )
-
-                CXCursorKind.CXCursor_TemplateRef ->
-                    try {
-                        WrappedType(value.type, resolverBuilder)
-                    } catch (t: IllegalArgumentException) {
-                        // Don't mind when parsing everything, if this reference is needed,
-                        // it'll come up in resolution
-                        return null
-                    }
-
-                CXCursorKind.CXCursor_TranslationUnit -> WrappedTU()
-
-                else -> return null
+                return null
             }
             elementLookup[strTag] = element
             return element
         }
     }
+}
+
+// True when [this] class/struct cursor is lexically nested inside a class TEMPLATE: any
+// of its enclosing semantic-parent contexts is a `CXCursor_ClassTemplate` (or a partial
+// specialization of one). Walks up the semantic-parent chain until it reaches the
+// translation unit (or stops making progress). The enclosing template makes the nested
+// type's qualified name unspellable without template arguments, so it can't be bound.
+private val CValue<CXCursor>.isNestedInClassTemplate: Boolean
+    get() {
+        var current = semanticParent
+        while (true) {
+            val kind = current.kind
+            if (kind == CXCursorKind.CXCursor_ClassTemplate ||
+                kind == CXCursorKind.CXCursor_ClassTemplatePartialSpecialization
+            ) {
+                return true
+            }
+            if (kind == CXCursorKind.CXCursor_TranslationUnit ||
+                kind == CXCursorKind.CXCursor_InvalidFile ||
+                kind == CXCursorKind.CXCursor_NoDeclFound
+            ) {
+                return false
+            }
+            val next = current.semanticParent
+            if (next.equals(current)) return false
+            current = next
+        }
+    }
+
+// True when [this] `operator=` cursor is a COPY assignment of [parent]'s class — i.e. it
+// takes a single (const) LVALUE-reference parameter to the same class. Distinguishes copy
+// assignment (whose deletion blocks the generated `field = *value` setter) from a deleted
+// MOVE assignment (`operator=(T&&)`), which leaves copy assignment available, so the field
+// is still assignable.
+private fun CValue<CXCursor>.isCopyAssignmentOf(
+    parent: WrappedElement?,
+    resolverBuilder: ResolverBuilder
+): Boolean {
+    if (numArguments != 1) return false
+    val argType = WrappedType(getArgument(0u).type, resolverBuilder)
+    if (!argType.isReference) return false
+    // Exclude move assignment (`operator=(T&&)`): a deleted move leaves copy available.
+    if (argType.toString().contains("&&")) return false
+    val className = when (parent) {
+        is WrappedClass -> parent.type.toString()
+        is WrappedTemplate -> parent.name
+        else -> return false
+    }
+    val unref = argType.unreferenced
+    val bare = if (unref.isConst) unref.unconst else unref
+    return bare.toString() == className
 }
 
 fun WrappedElement.forEachRecursive(onEach: (WrappedElement) -> Unit) {

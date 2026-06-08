@@ -34,6 +34,19 @@ data class ResolvedClassMetadata(
     val hasCopyConstructor: Boolean = false
 )
 
+// One resolved DIRECT base of a class: the base's resolved type plus the access /
+// virtual-base attributes captured from the C++ base specifier. `isVirtualBase`
+// marks a `virtual` base (diamond inheritance), which multi-inheritance codegen
+// detects and skips (out of scope — no vbase offset tables).
+@Serializable
+data class ResolvedMultiBase(
+    val type: ResolvedType,
+    val isPublic: Boolean = true,
+    val isVirtualBase: Boolean = false
+) {
+    fun cloneWithoutChildren(): ResolvedMultiBase = copy(type = type.cloneWithoutChildren())
+}
+
 @Serializable
 @SerialName("clazz")
 data class ResolvedClass(
@@ -43,7 +56,12 @@ data class ResolvedClass(
     val metadata: ResolvedClassMetadata,
     val baseClass: ResolvedType?,
     @SerialName("cppType")
-    val type: ResolvedCppType
+    val type: ResolvedCppType,
+    // Every (resolvable) DIRECT base of this class, in declaration order. `baseClass`
+    // above is the first (offset-0) base, kept for the existing single-inheritance
+    // paths; this carries all of them so multi-inheritance codegen can flatten 2nd+
+    // bases with an offset-aware C wrapper. Empty list for a class with no bases.
+    val allBaseClasses: List<ResolvedMultiBase> = emptyList()
 ) : ResolvedElement() {
 
     override fun toString(): String = "cls($name)"
@@ -54,7 +72,8 @@ data class ResolvedClass(
         specifiedType = specifiedType?.cloneWithoutChildren(),
         type = type.copy(),
         baseClass = baseClass?.cloneWithoutChildren(),
-        metadata = metadata.copy()
+        metadata = metadata.copy(),
+        allBaseClasses = allBaseClasses.map { it.cloneWithoutChildren() }
     )
 
     override fun addAllChildren(list: List<ResolvedElement>) {

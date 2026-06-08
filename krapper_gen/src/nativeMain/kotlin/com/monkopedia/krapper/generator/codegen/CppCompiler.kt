@@ -18,12 +18,18 @@ package com.monkopedia.krapper.generator.codegen
 import platform.posix.remove
 import platform.posix.system
 
-class CppCompiler(private val outputFile: File, private val compiler: String) {
+class CppCompiler(
+    private val outputFile: File,
+    private val compiler: String,
+    private val cppStandard: String = "c++14"
+) {
 
     fun compile(cppFile: File, header: List<String>, library: List<String>) {
         val flags = CompileFlags(header, library, linkStatics = true)
-        val command = "$compiler -c -fPIE -o ${outputFile.path} ${flags.includeDirs ?: ""} " +
-            "${flags.linkerOpts ?: ""} ${cppFile.path}"
+        // The wrapper compile must use the same standard as the libclang parse,
+        // or C++17/20 types (std::string_view, char8_t) parse but fail to compile.
+        val command = "$compiler -std=$cppStandard -c -fPIE -o ${outputFile.path} " +
+            "${flags.includeDirs ?: ""} ${flags.linkerOpts ?: ""} ${cppFile.path}"
         val logFile = "${outputFile.path}.compile.log"
         val wrappedCommand = "$command >$logFile 2>&1"
         val result = system(wrappedCommand)
