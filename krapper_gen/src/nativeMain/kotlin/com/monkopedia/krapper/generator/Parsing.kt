@@ -26,6 +26,7 @@ import clang.clang_formatDiagnostic
 import clang.clang_getCString
 import clang.clang_getDiagnostic
 import clang.clang_getNumDiagnostics
+import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.AndFilter
 import com.monkopedia.krapper.DefaultFilter
 import com.monkopedia.krapper.FilterDefinition
@@ -68,14 +69,17 @@ import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.baseParent
 import com.monkopedia.krapper.generator.model.cloneRecursive
 import com.monkopedia.krapper.generator.model.filterRecursive
 import com.monkopedia.krapper.generator.model.forEachRecursive
+import com.monkopedia.krapper.generator.model.freeFunctionQualifiedName
 import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.STATIC
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
@@ -130,6 +134,23 @@ fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
 
         DefaultFilter -> {
             return defaultFilter().wrapperFilter()
+        }
+
+        is AllowListFilter -> {
+            val allow = this.qualifiedNames.toSet()
+            return { element ->
+                (element is WrappedClass && element.type.toString() in allow) ||
+                    // T1.0c: a free function is a STATIC WrappedMethod with no parent
+                    // class — it can never match a class allowlist entry by `type`. Match
+                    // it by its fully-qualified spelling `<namespace>::<name>` (where
+                    // `qualified` yields only the enclosing namespace path, the function
+                    // name not being a named segment), so `--only foo::bar` selects it.
+                    (
+                        element is WrappedMethod && element.methodType == STATIC &&
+                            element.parentClass == null &&
+                            element.freeFunctionQualifiedName in allow
+                        )
+            }
         }
 
         is HierarchyFilter -> {
@@ -201,6 +222,23 @@ fun FilterDefinition.resolveFilter(): (ResolvedElement) -> Boolean {
 
         DefaultFilter -> {
             return defaultFilter().resolveFilter()
+        }
+
+        is AllowListFilter -> {
+            val allow = this.qualifiedNames.toSet()
+            return { element ->
+                (element is ResolvedClass && element.type.type in allow) ||
+                    // T1.0c (resolved side, mirror of wrapperFilter): match a free
+                    // function (STATIC method, no parent class) by `<qualified>::<name>`.
+                    // `qualified` carries only the enclosing namespace, so append `name`.
+                    (
+                        element is ResolvedMethod && element.methodType == STATIC &&
+                            element.parentClass == null &&
+                            element.qualified.let {
+                                if (it.isEmpty()) element.name else "$it::${element.name}"
+                            } in allow
+                        )
+            }
         }
 
         is HierarchyFilter -> {
@@ -503,6 +541,13 @@ suspend fun DeferScope.parseHeader(
             }
         }
     Log.i("Reduced ${tu.children.size}")
+    // T1.10: bake view-return rewrites (e.g. llvm::StringRef -> std::string via `.str()`)
+    // into the parsed tree BEFORE resolution. ParsedResolver.resolve re-reads classes from
+    // this TU (not the findClasses() result), so the rewrite must live on the tree itself.
+    rewriteViewReturns(tu)
+    // T1.7e: a by-value `std::unique_ptr<T>` return -> raw `T*` (ownership transferred via
+    // `.release()`). Same pre-resolution baking rationale as rewriteViewReturns.
+    rewriteUniquePtrReturns(tu)
     return ParsedResolver(tu)
 }
 
@@ -623,7 +668,200 @@ suspend fun WrappedTemplate.typedAs(
     outputClass.parent = parent
     outputClass.addAllChildren(children.map { it.cloneRecursive() })
     removeDuplicateMethods(outputClass)
+    dropMistypedInitializerListMembers(outputClass, fullyQualified)
+    rewritePairSecondReturns(outputClass, fullyQualified)
+    rewriteViewReturns(outputClass)
     return outputClass.resolve(localContext)?.let { it to outputClass }
+}
+
+/**
+ * Drop methods/constructors taking a `std::initializer_list<E>` whose element type
+ * `E` libclang mis-resolved to a bare template parameter on a key→value map.
+ *
+ * For `std::unordered_map<K, V>`, libstdc++ defines `value_type` through a chain
+ * of `_Hashtable`/`__detail` trait expressions that libclang collapses to the
+ * bare mapped parameter `_Tp` instead of `std::pair<const _Key, _Tp>`. Every
+ * member taking `initializer_list<value_type>` (the `initializer_list` constructor,
+ * `insert`, `operator=`) then inherits that wrong element, so the generated wrapper
+ * calls e.g. `unordered_map(initializer_list<int>, ...)` / `insert(initializer_list<int>)`,
+ * which fail to compile (the real signatures want `initializer_list<pair<const int,int>>`).
+ * `std::map` doesn't hit this — libclang reports ITS value_type correctly as the
+ * pair, so the same members drop on their own during resolution.
+ *
+ * Reconstructing the correct pair element would require modelling the dependent
+ * trait chain; instead we drop just these unconstructable members (the Kotlin facade
+ * can't build a C++ initializer_list anyway). For `std::map` this is invisible —
+ * libclang resolves its value_type correctly, so these members already dropped on
+ * their own. For `std::unordered_map` the at/operator[]/count accessors are
+ * ADDITIONALLY dropped by the resolver (the _Hashtable base-class trait chain) — a
+ * separate follow-up; this fix only stops the init-list ctor from crashing the sync.
+ *
+ * Scoped to key→value maps (classes exposing both `key_type` and `mapped_type`
+ * typedefs) so sequence/set containers — where `value_type` genuinely IS the bare
+ * element (`std::vector<T>`, `std::unordered_set<T>`) — keep their valid
+ * initializer_list members.
+ */
+private suspend fun dropMistypedInitializerListMembers(
+    element: WrappedElement,
+    fullyQualified: String
+) {
+    if (element is WrappedClass) {
+        val typedefNames = element.children
+            .filterIsInstance<WrappedTypedef>()
+            .map { it.name }
+            .toSet()
+        val isKeyValueMap = "key_type" in typedefNames && "mapped_type" in typedefNames
+        if (isKeyValueMap) {
+            for (method in element.children.filterIsInstance<WrappedMethod>()) {
+                val hasBareTemplateInitializerList = method.args.any { arg ->
+                    val type = arg.type.maybeUnconst.maybeUnreferenced
+                    type is WrappedTemplateType &&
+                        type.baseType.toString() == "std::initializer_list" &&
+                        type.templateArgs.singleOrNull() is WrappedTemplateRef
+                }
+                if (hasBareTemplateInitializerList) {
+                    Log.i(
+                        "Dropping mistyped initializer_list member ${method.name} on " +
+                            "$fullyQualified (libclang collapsed value_type to a bare " +
+                            "template parameter)"
+                    )
+                    element.removeChild(method)
+                }
+            }
+        }
+    }
+    for (child in element.children) {
+        dropMistypedInitializerListMembers(child, fullyQualified)
+    }
+}
+
+/**
+ * Rewrite methods returning `std::pair<UNRESOLVABLE_ITERATOR, bool>` (notably
+ * `std::set`/`std::multiset`/`std::unordered_set` `insert(const value_type&)`) to plain
+ * `bool`. (Map `insert` is also rewritten but still drops on its `pair` value_type arg.)
+ *
+ * `insert` returns `std::pair<iterator, bool>` where the `bool` reports whether the
+ * element was newly inserted and the iterator points at it. The iterator half is a real
+ * nested class (`std::_Rb_tree_iterator<...>`) that we don't wrap, so the whole method
+ * would otherwise fail return-type resolution and silently drop — taking the useful
+ * was-inserted bool with it.
+ *
+ * We rewrite the return type to bare `bool` and set [WrappedMethod.returnsPairSecond];
+ * CppWriter then emits `(thiz->insert(x)).second` so the wrapper hands back just the
+ * bool. Scoped narrowly: the return must be a bare `std::pair<_, bool>` template type
+ * (no const/ref) whose second arg is `bool` — hint/range/initializer_list `insert`
+ * overloads (which return an iterator or void) are untouched and stay dropped.
+ */
+private suspend fun rewritePairSecondReturns(element: WrappedElement, fullyQualified: String) {
+    if (element is WrappedClass) {
+        for (method in element.children.filterIsInstance<WrappedMethod>()) {
+            val ret = method.returnType
+            val isPairBool = ret is WrappedTemplateType &&
+                ret.baseType.toString() == "std::pair" &&
+                ret.templateArgs.size == 2 &&
+                ret.templateArgs[1].toString() == "bool"
+            if (!isPairBool) continue
+            val rewritten = method.copy(returnType = WrappedType("bool")).also {
+                it.returnsPairSecond = true
+            }
+            Log.i(
+                "Rewriting ${method.name} on $fullyQualified: " +
+                    "$ret -> bool (returning the pair's .second; iterator half unwrappable)"
+            )
+            element.removeChild(method)
+            element.addChild(rewritten)
+        }
+    }
+    for (child in element.children) {
+        rewritePairSecondReturns(child, fullyQualified)
+    }
+}
+
+/**
+ * T1.10 view-type marshalling. A method returning a non-owning string view
+ * (`llvm::StringRef` — a `(const char*, size_t)` borrow) can't hand the view across
+ * the boundary safely (the pointee may outlive nothing). Rewrite the return to an
+ * owned `std::string` and set [WrappedMethod.returnViaMemberCall] = "str"; CppWriter
+ * then emits `(thiz->getName()).str()`, materializing an owned copy that flows through
+ * the existing std::string return machinery (STRING style → Kotlin `String`).
+ *
+ * Matched by qualified type name (with/without a leading const, by value or const&),
+ * so it applies whether the view is returned bare or as `const StringRef&`. Generic in
+ * that ANY recognized view name routes the same way; today only `llvm::StringRef` is
+ * listed (it's the view the Clang AST surface forces). Add sibling views here as needed.
+ */
+internal suspend fun rewriteViewReturns(element: WrappedElement) {
+    if (element is WrappedClass) {
+        for (method in element.children.filterIsInstance<WrappedMethod>()) {
+            val ret = method.returnType
+            // The view's underlying class name, with any const/reference peeled off.
+            val baseName = ret.let { if (it.isReference) it.unreferenced else it }
+                .let { if (it.isConst) it.unconst else it }
+                .toString()
+            if (baseName !in STRING_VIEW_TYPES) continue
+            val rewritten = method.copy(returnType = WrappedType("std::string")).also {
+                it.returnViaMemberCall = "str"
+            }
+            Log.i(
+                "Rewriting ${method.name} on ${element.type}: " +
+                    "$ret -> std::string (materializing the view via .str())"
+            )
+            element.removeChild(method)
+            element.addChild(rewritten)
+        }
+    }
+    for (child in element.children) {
+        rewriteViewReturns(child)
+    }
+}
+
+// Non-owning string-view types. As a RETURN they are materialized to an owned std::string
+// via `.str()` (T1.10, rewriteViewReturns); as a PARAM they are constructed from an inbound
+// `const char*` at the C boundary (T1.10p, determineArgumentCastMode -> STRING_VIEW).
+internal val STRING_VIEW_TYPES = setOf("llvm::StringRef")
+
+/**
+ * T1.7e unique_ptr-return marshalling. A by-value `std::unique_ptr<T>` return is
+ * move-only, so the by-value Holder placement-new path can't copy-construct it and the
+ * method silently DROPS. Rewrite the return to a raw `T*` and set
+ * [WrappedMethod.returnViaMemberCall] = "release"; CppWriter then emits
+ * `(thiz->factory()).release()`, transferring ownership of the heap object to the caller
+ * as a raw pointer. The pointer flows through the normal pointer-return (VOIDP) machinery,
+ * so the Kotlin side gets the usual non-owning wrapper with `.owned()`/`dispose()` — the
+ * caller decides lifetime (the pointee must have an accessible destructor).
+ *
+ * Generic over any `std::unique_ptr<T>` whose single template arg `T` is a concrete type
+ * (so `T*` resolves to a bound wrapper). The custom-deleter form
+ * `unique_ptr<T, Deleter>` is left untouched — `.release()` still hands back `T*`, but the
+ * caller-side dispose path can't honor a non-default deleter, so we don't pretend to.
+ */
+internal suspend fun rewriteUniquePtrReturns(element: WrappedElement) {
+    // Apply to a class's methods AND to namespace-level FREE FUNCTIONS — a free function
+    // returning std::unique_ptr<T> (e.g. clang::tooling::buildASTFromCode -> unique_ptr<ASTUnit>,
+    // the AST-walk entry point) needs the same release()-rewrite or its move-only return drops.
+    if (element is WrappedClass || element is WrappedNamespace) {
+        val container = (element as? WrappedClass)?.type?.toString()
+            ?: (element as? WrappedNamespace)?.namespace ?: "?"
+        for (method in element.children.filterIsInstance<WrappedMethod>()) {
+            val ret = method.returnType
+            // Match a bare by-value `std::unique_ptr<T>` (no const/reference, single arg).
+            if (ret !is WrappedTemplateType) continue
+            if (ret.baseType.toString() != "std::unique_ptr") continue
+            val elementType = ret.templateArgs.singleOrNull() ?: continue
+            val rewritten = method.copy(returnType = pointerTo(elementType)).also {
+                it.returnViaMemberCall = "release"
+            }
+            Log.i(
+                "Rewriting ${method.name} on $container: " +
+                    "$ret -> ${pointerTo(elementType)} (transferring ownership via .release())"
+            )
+            element.removeChild(method)
+            element.addChild(rewritten)
+        }
+    }
+    for (child in element.children) {
+        rewriteUniquePtrReturns(child)
+    }
 }
 
 fun removeDuplicateMethods(element: WrappedElement) {

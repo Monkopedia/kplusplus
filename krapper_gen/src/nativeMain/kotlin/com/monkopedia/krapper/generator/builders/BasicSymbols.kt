@@ -233,6 +233,22 @@ class Raw(val content: String) : Symbol {
     }
 }
 
+// Renders a sequence of symbols back-to-back with no separator. Unlike a bare
+// concatenation of `Raw`s, this is a SymbolContainer, so any FqSymbol children
+// (e.g. an extensionMethod Call) are still discovered by import scanning.
+class Concat(private val parts: List<Symbol>) :
+    Symbol,
+    SymbolContainer {
+    constructor(vararg parts: Symbol) : this(parts.toList())
+
+    override val symbols: List<Symbol>
+        get() = parts
+
+    override fun build(builder: CodeStringBuilder) {
+        parts.forEach { it.build(builder) }
+    }
+}
+
 class RawCast(val content: String, val target: Symbol) :
     Symbol,
     SymbolContainer {

@@ -20,6 +20,7 @@ import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.Namer
 import com.monkopedia.krapper.generator.codegen.Operator
+import com.monkopedia.krapper.generator.model.EnumKotlinType
 import com.monkopedia.krapper.generator.model.NullableKotlinType
 import com.monkopedia.krapper.generator.model.TemplatedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -29,7 +30,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTemplate
-import com.monkopedia.krapper.generator.model.parentClass
+import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
@@ -47,6 +48,8 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.POINTED_ST
 import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.STRING_CAST
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedEnumEntry
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedFunctionPointer
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
 import kotlinx.cinterop.CValue
@@ -70,7 +73,12 @@ class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
         if (type is WrappedModifiedType) {
             return canResolve(type.baseType, context)
         }
+        // Covers function-pointer typedefs too (WrappedFunctionPointer.isNative == true):
+        // they cross the boundary as an opaque native pointer named by their typedef.
         if (type.isNative || type.isVoid || type == LONG_DOUBLE) return true
+        // Enums reduce to their underlying integer at the boundary, so they always
+        // resolve (no model element / tracker entry needed).
+        if (type.isEnum) return true
         if (type !is WrappedTypeReference) {
             return canResolve(type.toString(), context)
         }
@@ -117,9 +125,12 @@ suspend fun List<WrappedElement>.resolveAll(
     val resolveContext = ResolveContext.Empty
         .copy(
             resolver = resolver,
-            debugFilter = { element, type, message ->
-                element?.parentClass?.toString()?.contains("CreateParams") ?: false ||
-                    (element == null && message.contains("CreateParams"))
+            // Surface dropped/failed resolutions when KRAPPER_DEBUG_RESOLVE is set.
+            // Previously this filter was hardcoded to a single ("CreateParams") case,
+            // which silently hid all other resolution failures (e.g. dropped member
+            // methods whose return type couldn't be resolved).
+            debugFilter = { _, _, _ ->
+                platform.posix.getenv("KRAPPER_DEBUG_RESOLVE") != null
             }
         )
         .withClasses(classes)
@@ -137,6 +148,189 @@ suspend fun List<WrappedElement>.resolveAll(
     return resolveContext.tracker.resolvedClasses.values.toList() + methods
 }
 
+/**
+ * Scoped resolution for a forced template instantiation (`--instantiate "Base<Args>"`).
+ *
+ * The forcing path re-parses a synthetic header that `#include`s the consumer's own
+ * headers, so a blanket `findClasses { defaultFilter() }.resolveAll(...)` resolves EVERY
+ * class in that TU — against a large library (e.g. Clang) that is the whole transitive
+ * surface (~1269 classes), not just the container specialization we asked for. [this]
+ * is therefore scoped by the caller to the `KrapperForce_*` forcing struct (whose `value`
+ * member's type IS the specialization — resolving it materializes it as a side effect)
+ * PLUS the classes that were ALREADY bound by `filterAndResolve` (re-parsed here so they
+ * can be re-resolved now that the specialization exists: a method whose return type is the
+ * just-forced container — e.g. `RangeHolder::items() -> std::vector<Thing*>` — was dropped
+ * the first time round because the container wasn't bound yet, and is recovered here). The
+ * UNRELATED TU classes (the ~1269) are NOT in [this], so they are neither re-resolved nor,
+ * being referenced by nothing in the scoped set, pulled in under INCLUDE_MISSING.
+ *
+ * Resolution runs in THREE passes over ONE shared tracker (see the inline comments at
+ * each pass for the full reasoning). In short: pass 1 binds the already-bound classes
+ * under the main policy; pass 2 forces the container under INCLUDE_MISSING (the std spec
+ * is excluded by `defaultFilter` and so is never in the tracker's class map — only
+ * INCLUDE materializes it on-demand from the parsed TU); pass 3 re-resolves the bound
+ * classes (fresh `mappingCache`) to recover methods that were dropped in pass 1 because
+ * their return type was the then-unbound container. The shared tracker is what keeps
+ * pass 2 bounded: classes resolved in pass 1 are already in `resolvedClasses`, so
+ * INCLUDE will not re-expand them (re-expanding them is exactly the ~1269 explosion).
+ *
+ * [alreadyBoundKeys] is the type-string set of the pre-existing bindings, used only to
+ * report the genuinely-NEW class count (the forcing struct and re-resolved-but-unchanged
+ * bound classes are excluded from the count; the writer's last-wins dedup still picks up
+ * the re-resolved bound classes, which is how `items()` is restored). The full
+ * resolved set (minus the transient forcing struct) is returned for appending.
+ */
+suspend fun List<WrappedElement>.resolveForcing(
+    resolver: Resolver,
+    policy: ReferencePolicy,
+    alreadyBoundKeys: Set<String>
+): List<ResolvedElement> {
+    val classes = filterIsInstance<WrappedClass>()
+    // The `KrapperForce_*` struct's `value` member type IS the forced container
+    // specialization (e.g. `std::vector<clang::Decl*>`); resolving it is what
+    // materializes the container. Everything else in the scoped set is a class that
+    // was ALREADY bound by filterAndResolve, re-parsed here so it can be re-resolved
+    // once the container exists.
+    val forcingStructs = classes.filter { it.type.toString().contains("KrapperForce_") }
+    val boundClasses = classes.filter { it.type.toString().contains("KrapperForce_").not() }
+
+    // ONE context, ONE tracker, shared across all passes. `withClasses` seeds the
+    // tracker's class map with every scoped class (incl. the forcing struct) and is
+    // called EXACTLY ONCE so the namer (reset by both withClasses and withPolicy) is
+    // established once and stays stable — re-running withClasses/withPolicy would
+    // reset the NameHandler mid-stream and risk inconsistent generated names. We then
+    // only swap `typeMapping` (the policy) between passes via `withPolicyKeepingNamer`,
+    // which preserves the namer + tracker and changes nothing else but the policy.
+    //
+    // The SHARED tracker is the load-bearing invariant: once pass 1 puts `clang::Decl`
+    // (etc.) into `tracker.resolvedClasses`, every later pass — including the
+    // INCLUDE_MISSING pass — sees `canResolve == true` for it and will NOT re-expand
+    // it. Re-expanding already-bound library classes under INCLUDE_MISSING is exactly
+    // what produced the ~1269-class explosion; sharing the tracker prevents it.
+    val baseContext = ResolveContext.Empty
+        .copy(
+            resolver = resolver,
+            debugFilter = { _, _, _ ->
+                platform.posix.getenv("KRAPPER_DEBUG_RESOLVE") != null
+            }
+        )
+        .withClasses(classes)
+
+    // ---- Pass 1: incoming `policy` — bind the already-bound library classes. ----
+    // Uses the MAIN policy (NOT a hardcoded one) so this pass reproduces exactly what
+    // the original single-pass forcing did to the bound set:
+    //   * Under the real-Clang IGNORE_MISSING run: no on-demand expansion, so no
+    //     ~1269-class explosion. Methods whose return type is the (still unbound)
+    //     container are DROPPED here and recovered in pass 3.
+    //   * Under featuregen's INCLUDE_MISSING run: types referenced by a bound class but
+    //     bound by a DIFFERENT instantiation request (e.g. `StringFeature::produce()`
+    //     returning `std::string`, where `std::string` is bound by a separate
+    //     std::vector<string> request, not present in THIS forcing tracker) are
+    //     materialized on-demand and survive — matching baseline. Hardcoding IGNORE
+    //     here instead would silently drop those cross-instantiation methods.
+    // The shared-tracker invariant still prevents the explosion: see pass 2.
+    val pass1 = baseContext.withPolicyKeepingNamer(policy)
+    boundClasses.forEach {
+        if (pass1.resolve(it.type) == null) {
+            Log.w("Warning: can't resolve filtered class ${it.type}")
+        }
+    }
+
+    // ---- Pass 2: INCLUDE_MISSING — bind the forcing struct (the container). ----
+    // Same tracker. The struct's `value` member (`std::vector<clang::Decl*>`) is
+    // materialized ON-DEMAND from the parsed TU (this is the semantics IGNORE_MISSING
+    // lacks: under IGNORE the std spec, which is excluded by defaultFilter and so
+    // never collected into tracker.classes, would simply be dropped). Because
+    // `clang::Decl` is ALREADY in tracker.resolvedClasses from pass 1, INCLUDE sees it
+    // as resolved and does NOT re-expand it — only the std container machinery is
+    // pulled in. Result: the container specialization is now bound, bounded.
+    val pass2 = baseContext.withPolicyKeepingNamer(ReferencePolicy.INCLUDE_MISSING)
+    forcingStructs.forEach {
+        if (pass2.resolve(it.type) == null) {
+            Log.w("Warning: can't resolve forcing struct ${it.type}")
+        }
+    }
+
+    // ---- Pass 3: incoming `policy` (FRESH mappingCache) — recover dropped methods. ----
+    // Re-resolve the already-bound classes now that the container exists. A method
+    // dropped in pass 1 because its return type was the then-unbound container (e.g.
+    // `RangeHolder::items() -> std::vector<Thing*>`, the featuregen analog of
+    // `TranslationUnitDecl::decls()`) is recovered here. A FRESH mappingCache is
+    // mandatory: `ResolveContext.map` memoizes per-type results in mappingCache, so a
+    // type that mapped to RemoveElement in pass 1 (container then unbound) would return
+    // that STALE drop from the cache and the method would stay dropped. Wiping the cache
+    // forces re-evaluation against the now-populated tracker. Uses the incoming `policy`
+    // (same reasoning as pass 1: preserve cross-instantiation methods under
+    // INCLUDE_MISSING; don't expand the world under IGNORE_MISSING — the container is
+    // already in the tracker from pass 2, so it resolves regardless of policy here). The
+    // writer's last-wins dedup adopts these improved versions.
+    // EVICT the bound classes from the tracker's resolved cache first. Without this,
+    // `resolve(it.type)` sees the class is already in `tracker.resolvedClasses` (from
+    // pass 1) and short-circuits to that STALE version — the one whose container-returning
+    // method (e.g. `DeclContext::decls() -> std::vector<clang::Decl*>`) was dropped because
+    // the container wasn't bound yet. Removing the cache entry forces a genuine rebuild
+    // against the now-populated tracker, so the dropped range method is recovered. (Under
+    // INCLUDE_MISSING the method never dropped in pass 1 — it materialized on-demand — so
+    // this path is exercised mainly by the IGNORE_MISSING real-Clang run; the fresh
+    // mappingCache alone is not enough because the per-CLASS resolvedClasses cache also
+    // memoizes.) The container spec resolved in pass 2 is NOT a bound class, so it stays.
+    // Evict the bound classes from `resolvedClasses` so pass-3's `resolve(it.type)` rebuilds
+    // them (against the now-bound container) instead of short-circuiting to the stale pass-1
+    // version whose container-returning range method was dropped.
+    //
+    // The eviction BREADTH is policy-gated, because the two runs need different things:
+    //
+    //  * IGNORE_MISSING (real-Clang): a method WAS dropped in pass 1, and at a large header
+    //    set the bound class can sit in `resolvedClasses` under a DIFFERENT spelling than its
+    //    forcing-parse key (the forcing re-parses into a fresh TU; canonical/include-order
+    //    drift makes the MAIN-parse resolved key — in `alreadyBoundKeys` — diverge from the
+    //    forcing key). So evict the UNION of both key forms or pass-3 finds the stale entry
+    //    under the un-evicted spelling and never recovers (the entry-point-header harness
+    //    exposed this; small slices key-matched and worked with the forcing key alone).
+    //    Library std types (`std::string`) are filtered out under IGNORE, so evicting them is
+    //    harmless — they are never re-pulled or emitted.
+    //
+    //  * INCLUDE_MISSING (featuregen): NOTHING dropped in pass 1 (methods materialized
+    //    on-demand), so the wide union-evict buys no recovery — but it DOES evict still-needed
+    //    library classes like `std::string` that a sibling instantiation request bound. Pass-3's
+    //    boundClass re-resolution then re-pulls the evicted `std::string` as a fresh
+    //    INCLUDE_MISSING reference the tracker no longer recognizes, emitting a DUPLICATE,
+    //    degraded copy (param casts lose their `<char>` template arg → uncompilable C++). Evict
+    //    only the forcing keys here; leaving the sibling-bound std types in place keeps them
+    //    recognized, so they are neither re-pulled nor degraded. (This is what featuregen ran
+    //    green on before the union-evict landed.)
+    val evictKeys = if (policy == ReferencePolicy.IGNORE_MISSING) {
+        alreadyBoundKeys + boundClasses.map { it.type.toString() }
+    } else {
+        boundClasses.map { it.type.toString() }.toSet()
+    }
+    evictKeys.forEach { baseContext.tracker.resolvedClasses.remove(it) }
+    val pass3 = baseContext
+        .withPolicyKeepingNamer(policy)
+        .copy(mappingCache = mutableMapOf())
+    boundClasses.forEach {
+        pass3.resolve(it.type)
+    }
+
+    // Re-resolve any namespace-scoped static methods in the scoped set (parity with
+    // resolveAll, which resolves these after the classes). Use the fresh-cache pass.
+    val methods = filterIsInstance<WrappedMethod>().mapNotNull { method ->
+        (method.parent as? WrappedNamespace)?.let { nm ->
+            method.resolve(pass3 + nm)
+        }
+    }
+
+    // The tracker accumulated every resolved class across all three passes. Drop the
+    // transient forcing struct (it's scaffolding, never emitted) and return the rest.
+    val resolved = baseContext.tracker.resolvedClasses.values.toList()
+        .filter { it.type.toString().contains("KrapperForce_").not() } + methods
+    val newCount = resolved.count { element ->
+        (element as? ResolvedClass)?.type?.toString()?.let { it !in alreadyBoundKeys } == true
+    }
+    Log.i("Forcing introduced $newCount new class(es) (re-resolved ${resolved.size} total)")
+    return resolved
+}
+
 data class ResolveContext(
     val tracker: ResolveTracker,
     val resolver: Resolver,
@@ -144,7 +338,16 @@ data class ResolveContext(
     val namer: NameHandler,
     val currentNamer: Namer,
     val mappingCache: MutableMap<WrappedType, MapResult> = mutableMapOf(),
-    var debugFilter: ((WrappedElement?, WrappedType?, String) -> Boolean)? = null
+    var debugFilter: ((WrappedElement?, WrappedType?, String) -> Boolean)? = null,
+    // T1.0b: when a class's PRIMARY base can't resolve, a top-level (listed/found)
+    // class drops it to a borrowed/non-modeled base and still binds (don't require
+    // the full base-closure in every allowlist). But a class pulled ONLY as an
+    // INCLUDE_MISSING *reference* keeps the legacy hard-fail: resurrecting such a
+    // transitively-referenced subclass would also drag in its incomplete-at-emit
+    // bases/members (e.g. `std::ctype<char>` → `std::ctype_base`), emitting broken
+    // C++. False only while expanding an INCLUDE_MISSING reference. See
+    // `WrappedClass.resolve`.
+    val dropUnresolvablePrimaryBase: Boolean = true
 ) {
 
     suspend fun map(type: WrappedType): WrappedType? {
@@ -171,12 +374,19 @@ data class ResolveContext(
     }
 
     suspend fun findBases(cls: WrappedClass): List<WrappedClass> {
-        cls.baseClass?.let { resolve(it) }
-        var baseCls = tracker.classes[cls.baseClass?.toString()]
+        // Walk EVERY direct base (primary + secondary), each up its own primary chain,
+        // so callers (e.g. constructor synthesis) account for ALL inherited members.
+        // For a single-inheritance class this is exactly the old single chain.
         val list = mutableListOf<WrappedClass>()
-        while (baseCls != null) {
-            list.add(baseCls)
-            baseCls = tracker.classes[baseCls.baseClass?.toString()]
+        val seen = mutableSetOf<String>()
+        for (base in cls.baseClasses) {
+            val baseType = base.type ?: continue
+            resolve(baseType)
+            var baseCls = tracker.classes[baseType.toString()]
+            while (baseCls != null && seen.add(baseCls.type.toString())) {
+                list.add(baseCls)
+                baseCls = tracker.classes[baseCls.baseClass?.toString()]
+            }
         }
         return list
     }
@@ -195,6 +405,16 @@ data class ResolveContext(
     fun withPolicy(policy: ReferencePolicy) =
         copy(typeMapping = typeMapper(policy), namer = NameHandler())
 
+    // Swap ONLY the policy (typeMapping), preserving the namer, tracker and
+    // mappingCache. Used by the multi-pass forcing resolve, which switches policy
+    // across passes (main policy -> INCLUDE_MISSING for the container -> main policy)
+    // while accumulating into a single shared tracker. Unlike `withPolicy`, it must
+    // NOT reset the NameHandler:
+    // resetting it mid-stream (as withPolicy does, since it normally pairs with a
+    // fresh withClasses) would re-number already-established classes and risk
+    // inconsistent generated names across the passes.
+    fun withPolicyKeepingNamer(policy: ReferencePolicy) = copy(typeMapping = typeMapper(policy))
+
     suspend fun canAssign(type: WrappedType): Boolean {
         resolve(type) ?: return true
         if (type.isConst) {
@@ -207,6 +427,12 @@ data class ResolveContext(
         if (resolvedClass.metadata.hasPrivateConstField) {
             return false
         }
+        // A `= delete`d/non-public copy assignment is filtered out before it becomes a
+        // child, but it was recorded in metadata at parse time: the field's `field = *value`
+        // setter won't compile, so the type is unassignable (T-skip drops the setter).
+        if (resolvedClass.metadata.hasDeletedCopyAssignment) {
+            return false
+        }
         resolvedClass.children.filterIsInstance<WrappedMethod>()
             .find { Operator.from(it) == BasicAssignmentOperator.ASSIGN }
             ?.let {
@@ -215,6 +441,23 @@ data class ResolveContext(
         return resolvedClass.children.filterIsInstance<WrappedField>().all { f ->
             canAssign(f.type)
         }
+    }
+
+    // True unless [type] resolves to a class whose copy constructor is `= delete`d or
+    // non-public. A by-value return/field is materialized by copy-constructing into a
+    // Holder buffer (placement-new), so a non-copy-constructible element type is
+    // unmodelable and the method/field must be dropped (T-skip). Reads the metadata flag
+    // recorded at parse time: the offending constructor cursor is filtered out (non-public/
+    // NotAvailable) before it ever becomes a resolved child, so it can't be re-derived from
+    // children here. Conservative: any type we can't find, or one with no deleted-copy
+    // record, is treated as copyable so ordinary implicitly-copyable classes (which declare
+    // no copy ctor at all) are unaffected.
+    suspend fun canCopyConstruct(type: WrappedType): Boolean {
+        resolve(type) ?: return true
+        val key = if (type.isConst) type.unconst else type
+        val resolvedClass = tracker.classes[key.toString()]
+            ?: tracker.classes[type.toString()] ?: return true
+        return !resolvedClass.metadata.hasDeletedCopyConstructor
     }
 
     suspend fun <T> notifyFailed(
@@ -295,8 +538,16 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                         }
                         context.tracker.otherResolved.add(t.toString())
                         try {
-                            val (resolved, wrapper) = context.resolver.resolve(it, context)
-                                ?: error("Couldn't include $it, resolve failed")
+                            // Reference expansion: keep the legacy hard-fail when a
+                            // pulled class's primary base can't resolve (don't
+                            // resurrect transitively-referenced subclasses + their
+                            // incomplete-at-emit bases). Listed/found classes still
+                            // drop-to-borrowed via their own resolve context.
+                            val (resolved, wrapper) =
+                                context.resolver.resolve(
+                                    it,
+                                    context.copy(dropUnresolvablePrimaryBase = false)
+                                ) ?: error("Couldn't include $it, resolve failed")
                             if (!resolved.isNotEmpty()) {
                                 return@operateOn RemoveElement
                             }
@@ -393,12 +644,40 @@ fun toResolvedCppType(type: WrappedType) = ResolvedCppType(
         type.isPointer && type.pointed.isString -> POINTED_STRING_CAST
         type.isNative || (type.isPointer && type.pointed.isNative) -> NATIVE
         else -> CAST
+    },
+    funcPointer = (type as? WrappedFunctionPointer)?.let {
+        // Use the original C++ element types (not their reduced cType forms) so the
+        // re-declared typedef is identical to the one in the user's header. A
+        // typedef redefinition with the same type is legal C++; a reduced form
+        // (e.g. an enum arg collapsed to `unsigned int`, or a reference to `void*`)
+        // would instead be a conflicting redefinition and fail to compile.
+        ResolvedFunctionPointer(
+            it.cName,
+            it.returnType.toString(),
+            it.argTypes.map { arg -> arg.toString() },
+            it.cppName
+        )
     }
 )
 
-fun toResolvedCType(type: WrappedType) = ResolvedCType(type.toString(), type.isVoid)
+fun toResolvedCType(type: WrappedType) = ResolvedCType(
+    type.toString(),
+    type.isVoid,
+    cppName = (type as? WrappedFunctionPointer)?.cppName?.takeIf { it != type.cName }
+)
 
 fun toResolvedKotlinType(kotlinType: WrappedKotlinType): ResolvedKotlinType {
+    if (kotlinType is EnumKotlinType) {
+        // A generated `enum class`: not a `.ptr`-backed wrapper, so isWrapper=false.
+        // The entries drive the enum-class declaration + boundary conversions; see
+        // KotlinWriter.
+        return ResolvedKotlinType(
+            qualifyList = kotlinType.fullyQualified.first().trimEnd('?').split('.'),
+            isWrapper = false,
+            enumEntries = kotlinType.constants.map { ResolvedEnumEntry(it.name, it.value) },
+            enumUnderlying = toResolvedKotlinType(kotlinType.underlying)
+        )
+    }
     if (kotlinType is NullableKotlinType) {
         return toResolvedKotlinType(kotlinType.base).copy(
             isWrapper = kotlinType.isWrapper,

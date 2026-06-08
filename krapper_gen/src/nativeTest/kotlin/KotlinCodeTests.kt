@@ -83,6 +83,7 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for TestLib::EmptyClass
             |
+            |@krapper.CppBinding("TestLib::EmptyClass")
             |class EmptyClass(
             |    val ptr: COpaquePointer,
             |    val memScope: MemScope,
@@ -145,17 +146,19 @@ class KotlinCodeTests {
             ctx.resolve(cls.type)
             val rcls =
                 ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val sizeVar = object : LocalVar {
+                override val name: String
+                    get() = "size"
+
+                override fun build(builder: CodeStringBuilder) {
+                    builder.append("size")
+                }
+            }
             builder.onGenerate(
                 rcls,
                 rcls.children.first() as ResolvedMethod,
-                object : LocalVar {
-                    override val name: String
-                        get() = "size"
-
-                    override fun build(builder: CodeStringBuilder) {
-                        builder.append("size")
-                    }
-                }
+                sizeVar,
+                sizeVar
             )
         }
         assertCode(
@@ -207,17 +210,19 @@ class KotlinCodeTests {
             ctx.resolve(cls.type)
             val rcls =
                 ctx.tracker.resolvedClasses[cls.type.toString()] ?: error("Resolve failed for $cls")
+            val sizeVar = object : LocalVar {
+                override val name: String
+                    get() = "size"
+
+                override fun build(builder: CodeStringBuilder) {
+                    builder.append("size")
+                }
+            }
             builder.onGenerate(
                 rcls,
                 rcls.children.first() as ResolvedMethod,
-                object : LocalVar {
-                    override val name: String
-                        get() = "size"
-
-                    override fun build(builder: CodeStringBuilder) {
-                        builder.append("size")
-                    }
-                }
+                sizeVar,
+                sizeVar
             )
         }
         assertCode(
@@ -425,7 +430,7 @@ class KotlinCodeTests {
         }
         assertCode(
             """
-            |inline fun at(pos: Size_t): String? {
+            |inline fun at(pos: size_t): String? {
             |    val str: CPointer<ByteVar>? = std_vector_std_string_at(ptr, pos)
             |    val ret: String? = str?.toKString()
             |    free(str)
@@ -595,6 +600,7 @@ class KotlinCodeTests {
             |
             |// BEGIN KRAPPER GEN for std::vector<std::string>::iterator
             |
+            |@krapper.CppBinding("std::vector<std::string>::iterator")
             |class Iterator__String(
             |    val ptr: COpaquePointer,
             |    val memScope: MemScope,

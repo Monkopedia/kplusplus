@@ -15,24 +15,30 @@
  */
 package com.monkopedia.krapper.generator.builders
 
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 
 typealias CppCodeBuilder = CodeBuilder<CppFactory>
 
-fun CppCodeBuilder(): CppCodeBuilder = CodeBuilderBase(CppFactory(), addSemis = true)
+// qualifyFunctionPointers: the C++ WRAPPER (.cc) sets this so a namespace-scoped
+// function-pointer typedef is spelled with its fully-qualified name (`nn::handler_t`,
+// from ResolvedCType.cppName). The C interop HEADER (.h) leaves it false to keep the
+// extern-"C" declaration unqualified (`handler_t`). See WrappedFunctionPointer.
+fun CppCodeBuilder(qualifyFunctionPointers: Boolean = false): CppCodeBuilder =
+    CodeBuilderBase(CppFactory(qualifyFunctionPointers), addSemis = true)
 
-class CppFactory : LangFactory {
+class CppFactory(private val qualifyFunctionPointers: Boolean = false) : LangFactory {
     override fun define(
         name: String,
         type: ResolvedType,
         initializer: Symbol?,
         constructorArgs: List<Symbol>?
-    ): LocalVar = CppLocalVar(name, type, initializer, constructorArgs)
+    ): LocalVar = CppLocalVar(name, type, initializer, constructorArgs, qualifyFunctionPointers)
 
     override fun funSig(name: String, retType: Symbol?, args: List<LocalVar>): Symbol =
         CppFunctionSig(name, retType ?: CppType("void"), args)
 
-    override fun createType(type: ResolvedType): Symbol = CppType(type)
+    override fun createType(type: ResolvedType): Symbol = CppType(type, qualifyFunctionPointers)
 }
 
 class CppFunctionSig(
@@ -60,10 +66,11 @@ class CppLocalVar(
     override val name: String,
     val type: ResolvedType,
     private val initializer: Symbol?,
-    private val constructorArgs: List<Symbol>?
+    private val constructorArgs: List<Symbol>?,
+    qualifyFunctionPointers: Boolean = false
 ) : LocalVar,
     SymbolContainer {
-    private val typeSymbol = CppType(type)
+    private val typeSymbol = CppType(type, qualifyFunctionPointers)
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
 
@@ -89,7 +96,12 @@ class CppLocalVar(
 }
 
 class CppType(private val typeStr: String) : Symbol {
-    constructor(type: ResolvedType) : this(type.toString())
+    constructor(type: ResolvedType, qualifyFunctionPointers: Boolean = false) : this(
+        // A namespace-scoped function-pointer typedef carries its qualified C++ spelling
+        // in ResolvedCType.cppName; the .cc wrapper (qualifyFunctionPointers = true) emits
+        // that so the typedef resolves, while the C header keeps the unqualified type.
+        (type as? ResolvedCType)?.cppName?.takeIf { qualifyFunctionPointers } ?: type.toString()
+    )
 
     override fun build(builder: CodeStringBuilder) {
         builder.append(typeStr)

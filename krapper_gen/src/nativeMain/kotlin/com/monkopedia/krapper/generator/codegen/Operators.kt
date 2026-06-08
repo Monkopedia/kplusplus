@@ -57,7 +57,9 @@ sealed class Operator {
             BasicUnaryOperator.REFERENCE,
             BasicUnaryOperator.POINTER_REFERENCE,
             BasicAssignmentOperator.ASSIGN,
-            BasicAssignmentOperator.PLUS_EQUALS
+            BasicAssignmentOperator.PLUS_EQUALS,
+            BasicCallOperator.CALL,
+            ConversionOperator.CONVERSION
         )
 
         fun from(method: WrappedMethod): Operator? {
@@ -137,6 +139,71 @@ data class BasicAssignmentOperator private constructor(
     companion object {
         val ASSIGN = BasicAssignmentOperator("=", "Assign", ResolvedOperator.ASSIGN)
         val PLUS_EQUALS = BasicAssignmentOperator("+=", "PlusEquals", ResolvedOperator.PLUS_EQUALS)
+    }
+}
+
+data class BasicCallOperator private constructor(
+    private val cppOp: String,
+    private val cOp: String,
+    override val resolvedOperator: ResolvedOperator
+) : Operator() {
+
+    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
+    }
+
+    // operator() can have any arity; match on name alone.
+    override fun matches(method: WrappedMethod): Boolean =
+        method.name.substring("operator".length) == cppOp
+
+    override fun toString(): String = "call($cppOp, $cOp, $resolvedOperator)"
+
+    companion object {
+        val CALL = BasicCallOperator("()", "Call", ResolvedOperator.CALL)
+    }
+}
+
+// A user-defined conversion operator to a primitive scalar, e.g. `explicit
+// operator double() const`. It has no parameters and its clang spelling is
+// `operator <target>` (the target being the C++ destination type). Only the
+// scalar targets that map to an idiomatic Kotlin `toX()` are handled; conversions
+// to class/pointer/reference types are intentionally left unmatched (and so are
+// dropped, as before) — those would need wrapper/placement-new handling.
+data class ConversionOperator private constructor(override val resolvedOperator: ResolvedOperator) :
+    Operator() {
+
+    // The C wrapper name encodes the destination so multiple conversions on one
+    // class (e.g. `operator double` + `operator int`) don't collide.
+    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+        return cName + "_op_to_" + targetOf(method)!!
+    }
+
+    override fun matches(method: WrappedMethod): Boolean =
+        method.args.isEmpty() && targetOf(method) != null
+
+    override fun toString(): String = "conversion($resolvedOperator)"
+
+    companion object {
+        val CONVERSION = ConversionOperator(ResolvedOperator.CONVERSION)
+
+        // C++ conversion-target spelling -> C-identifier suffix. Restricted to the
+        // primitive scalars with a clean Kotlin `toX()`. `bool` maps to `boolean`
+        // (the Kotlin idiom `toBoolean()`), the rest to their Kotlin lowercase name.
+        private val SCALAR_TARGETS = mapOf(
+            "double" to "double",
+            "float" to "float",
+            "int" to "int",
+            "long" to "long",
+            "bool" to "boolean"
+        )
+
+        // The C-identifier suffix for a method's conversion target, or null if the
+        // method isn't an `operator <known-scalar>`.
+        fun targetOf(method: WrappedMethod): String? {
+            if (!method.name.startsWith("operator ")) return null
+            val target = method.name.substring("operator ".length).trim()
+            return SCALAR_TARGETS[target]
+        }
     }
 }
 

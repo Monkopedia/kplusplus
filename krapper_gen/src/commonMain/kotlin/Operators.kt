@@ -26,7 +26,8 @@ enum class OperatorType {
     BINARY,
     ASSIGN,
     UNARY,
-    REFERENCE
+    REFERENCE,
+    CALL
 }
 
 enum class ResolvedOperator(
@@ -43,7 +44,9 @@ enum class ResolvedOperator(
     MOD("%", "Mod", KotlinOperator("rem"), OperatorType.BINARY, supportsDirectCall = true),
     EQ("==", "Eq", InfixMethod("eq"), OperatorType.BINARY, supportsDirectCall = true),
     NEQ("!=", "Neq", InfixMethod("neq"), OperatorType.BINARY, supportsDirectCall = true),
-    LT("<", "Lt", InfixMethod("lt"), OperatorType.BINARY, supportsDirectCall = true),
+
+    // operator< → a real Kotlin compareTo (+ Comparable<Self> supertype); see generateCompareTo.
+    LT("<", "Lt", KotlinOperator("compareTo"), OperatorType.BINARY, supportsDirectCall = true),
     GT(">", "Gt", InfixMethod("gt"), OperatorType.BINARY, supportsDirectCall = true),
     LTEQ("<=", "Lteq", InfixMethod("lteq"), OperatorType.BINARY, supportsDirectCall = true),
     GTEQ(">=", "Gteq", InfixMethod("gteq"), OperatorType.BINARY, supportsDirectCall = true),
@@ -93,5 +96,14 @@ enum class ResolvedOperator(
         "PointerReference",
         BasicMethod("pointer_reference"),
         OperatorType.UNARY
-    )
+    ),
+    CALL("()", "Call", KotlinOperator("invoke"), OperatorType.CALL),
+
+    // A user-defined conversion operator (`operator double`, `operator bool`, ...).
+    // Unlike the other entries the concrete target (and thus both the Kotlin method
+    // name `toDouble`/`toBoolean`/... and the C++ cast type) is carried by the
+    // method's return type, not by this enum — so cppOp/cOp/kotlinOperatorType here
+    // are only nominal. KotlinWriter (generateConversion) and CppWriter special-case
+    // it off the return type.
+    CONVERSION("", "Conversion", BasicMethod("toConversion_UNUSED"), OperatorType.UNARY)
 }

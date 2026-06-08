@@ -27,6 +27,19 @@ typealias KotlinCodeBuilder = CodeBuilder<KotlinFactory>
 fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuilder =
     CodeBuilderBase(KotlinFactory(), rootScope, addSemis = false)
 
+// Kotlin HARD keywords — illegal as a bare identifier, so a C++ name that collides with one
+// (e.g. a parameter literally named `val`, as on clang::ASTUnit::setOwnsRemappedFileBuffers)
+// must be back-tick-escaped or the generated Kotlin won't parse. Soft/modifier keywords
+// (value, data, in-other-positions) are fine bare and are left alone.
+private val KOTLIN_HARD_KEYWORDS = setOf(
+    "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
+    "interface", "is", "null", "object", "package", "return", "super", "this", "throw",
+    "true", "try", "typealias", "typeof", "val", "var", "when", "while"
+)
+
+internal fun String.escapeKotlinKeyword(): String =
+    if (this in KOTLIN_HARD_KEYWORDS) "`$this`" else this
+
 class KotlinFactory : LangFactory {
     override fun define(
         name: String,
@@ -38,7 +51,7 @@ class KotlinFactory : LangFactory {
             "Constructor args not supported for kotlin"
         }
         return KotlinLocalVar(
-            name,
+            name.escapeKotlinKeyword(),
             (type as? ResolvedKotlinType) ?: (type as? ResolvedCppType)?.kotlinType
                 ?: error("Cannot define $type in kotlin"),
             initializer
@@ -51,9 +64,10 @@ class KotlinFactory : LangFactory {
     override fun createType(type: ResolvedType): Symbol = KotlinType(type)
 
     fun define(name: String, type: ResolvedKotlinType, initializer: Symbol?): LocalVar =
-        KotlinLocalVar(name, type, initializer)
+        KotlinLocalVar(name.escapeKotlinKeyword(), type, initializer)
 
     companion object {
+        const val C_FUNCTION = "kotlinx.cinterop.CFunction"
         const val C_OPAQUE_POINTER = "kotlinx.cinterop.COpaquePointer"
         const val C_POINTER = "kotlinx.cinterop.CPointer"
         const val C_POINTER_VAR = "kotlinx.cinterop.CPointerVar"
@@ -177,20 +191,27 @@ fun KotlinCodeBuilder.define(
 inline fun KotlinCodeBuilder.cls(
     name: Symbol,
     constructorArgs: List<Symbol>,
+    superType: Symbol? = null,
     builder: KotlinCodeBuilder.() -> Unit
 ) {
     functionScope {
-        block(ClassStartSymbol(name, constructorArgs), EndClass) {
+        block(ClassStartSymbol(name, constructorArgs, superType), EndClass) {
             builder()
         }
     }
 }
 
-class ClassStartSymbol(val clsName: Symbol, val constructorArgs: List<Symbol>) :
-    Symbol,
+class ClassStartSymbol(
+    val clsName: Symbol,
+    val constructorArgs: List<Symbol>,
+    // Optional single supertype rendered as `class Name(...) : Super {`. Used to make
+    // a generated template-instantiation binding implement its generic interface
+    // (e.g. `class Box__Int(...) : Box<Int>`).
+    val superType: Symbol? = null
+) : Symbol,
     SymbolContainer {
     override val symbols: List<Symbol>
-        get() = listOf(clsName) + constructorArgs
+        get() = listOf(clsName) + constructorArgs + listOfNotNull(superType)
 
     override fun build(builder: CodeStringBuilder) {
         builder.append("class ")
@@ -203,7 +224,12 @@ class ClassStartSymbol(val clsName: Symbol, val constructorArgs: List<Symbol>) :
             builder.append(",\n")
         }
         builder.endBlock()
-        builder.append(") {\n")
+        builder.append(")")
+        superType?.let {
+            builder.append(" : ")
+            it.build(builder)
+        }
+        builder.append(" {\n")
     }
 
     override fun toString(): String = buildString {
@@ -275,11 +301,18 @@ class KotlinLocalVar(
 ) : LocalVar,
     SymbolContainer {
     var isVal: Boolean? = false
+
+    // When this var is a function parameter of a lambda/function type that the body
+    // stores (rather than inline-invokes), it must be `noinline` in an inline function.
+    var noinline: Boolean = false
     private val typeSymbol = type?.let { KotlinType(it) }
     override val symbols: List<Symbol>
         get() = listOfNotNull(typeSymbol, initializer)
 
     override fun build(builder: CodeStringBuilder) {
+        if (noinline) {
+            builder.append("noinline ")
+        }
         isVal?.let { isVal ->
             builder.append(if (isVal) "val " else "var ")
         }
@@ -386,6 +419,27 @@ inline fun KotlinCodeBuilder.infix(build: KotlinCodeBuilder.() -> Unit) {
 }
 
 inline fun infix(target: Symbol): Symbol = Infix(target)
+
+inline fun KotlinCodeBuilder.override(build: KotlinCodeBuilder.() -> Unit) {
+    val builder = KotlinCodeBuilder(scope).also(build)
+    (builder as? CodeBuilderBase<KotlinFactory>)?.symbols?.forEach {
+        +override(it)
+    }
+}
+
+inline fun override(target: Symbol): Symbol = Override(target)
+
+class Override(private val target: Symbol) :
+    Symbol,
+    SymbolContainer {
+    override val symbols: List<Symbol>
+        get() = listOf(target)
+
+    override fun build(builder: CodeStringBuilder) {
+        builder.append("override ")
+        target.build(builder)
+    }
+}
 
 class Infix(private val target: Symbol) :
     Symbol,

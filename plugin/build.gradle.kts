@@ -71,11 +71,20 @@ val functionalTestSourceSet =
 
 configurations["functionalTestImplementation"].extendsFrom(configurations["testImplementation"])
 
+dependencies {
+    // JNI-host smoke test: load libkrapper.so + connect to KrapperService over ksrpc-jni.
+    "functionalTestImplementation"(libs.ksrpc.jni)
+}
+
 // Add a task to run the functional tests
 val functionalTest by tasks.registering(Test::class) {
     testClassesDirs = functionalTestSourceSet.output.classesDirs
     classpath = functionalTestSourceSet.runtimeClasspath
     rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugExecutableNative")?.let {
+        dependsOn(it)
+    }
+    // JNI-host smoke test needs the krapper sharedLib (libkrapper.so) built.
+    rootProject.findProject(":krapper_gen")?.tasks?.findByName("linkDebugSharedNative")?.let {
         dependsOn(it)
     }
 }

@@ -24,6 +24,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldGetter
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldSetter
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
 import com.monkopedia.krapper.generator.spelling
 import com.monkopedia.krapper.generator.toKString
 import com.monkopedia.krapper.generator.type
@@ -63,7 +64,31 @@ data class WrappedField(val name: String, val type: WrappedType) : WrappedElemen
                     mappedType
                 }
             val needsDereference =
-                !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE
+                !type.isPointer && !type.isNative && type != WrappedType.LONG_DOUBLE &&
+                    // An enum crosses the boundary as its underlying integer (by value), not a
+                    // dereferenced pointer — matching the method-return path. Without this an
+                    // enum FIELD getter resolved `pointerTo(enum)`, losing the enum identity +
+                    // package, so its `fromValue` call rendered as a mashed reference
+                    // (`TranslationUnitKindCompanionfromValue`) and the type emitted as a wrapper.
+                    !type.isEnum
+            val getterStyle = determineReturnStyle(type, resolverContext)
+            // T-skip: a by-value (ARG_CAST/Holder) field getter copy-constructs the member
+            // into a Holder buffer (`new (buf) T(thiz->field)`). If T `= delete`s its copy
+            // constructor that call won't compile, so the getter is unmodelable. A field
+            // with no usable getter is useless, so DROP the whole field (skip-not-crash);
+            // sibling fields/methods still bind.
+            if (getterStyle == ReturnStyle.ARG_CAST && !resolverContext.canCopyConstruct(type)) {
+                return resolverContext.notifyFailed(
+                    this@WrappedField,
+                    type,
+                    "By-value field getter of a non-copy-constructible type (deleted copy ctor)"
+                )
+            }
+            // T-skip: a field whose type `= delete`s its copy assignment can't be written
+            // through the generated `field = *value` setter. Mark it unassignable (drop the
+            // setter); the getter is unaffected. canAssign returns true for pointer/native/
+            // implicitly-assignable types, so only genuinely non-assignable members drop.
+            val setterUnassignable = !resolverContext.canAssign(type)
             val wrappedArgType = if (needsDereference) WrappedType.pointerTo(type) else type
             val argType = resolverContext.resolve(wrappedArgType)
                 ?: return resolverContext.notifyFailed(
@@ -73,10 +98,16 @@ data class WrappedField(val name: String, val type: WrappedType) : WrappedElemen
                 )
             return ResolvedField(
                 name,
-                type.isConst,
+                // Mark the field unassignable (no `_set`) when it is const OR a
+                // reference member: a reference can't be rebound, so assigning through
+                // it would be a compile error just like a const member. `type` here has
+                // already been unreferenced, so test the original field type for the
+                // reference case. Also drop the setter when the field's type can't be
+                // copy-assigned (deleted copy assignment — T-skip).
+                type.isConst || this@WrappedField.type.isReference || setterUnassignable,
                 ResolvedFieldGetter(
                     uniqueCGetter,
-                    determineReturnStyle(type, resolverContext),
+                    getterStyle,
                     argType,
                     listOf(
                         createThisArg(resolverContext) ?: return null

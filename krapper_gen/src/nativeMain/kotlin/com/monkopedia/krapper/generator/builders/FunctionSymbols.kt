@@ -41,6 +41,19 @@ sealed class FunctionBuilder<T : LangFactory>(
     ).also(args::add).also {
         (it as? KotlinLocalVar)?.isVal = null
     }
+
+    // Defines a parameter carrying a default value [initializer] (rendered as
+    // `name: Type = <initializer>`). Used to surface a C++ default argument as a
+    // Kotlin default parameter value.
+    fun define(name: String, type: ResolvedType, initializer: Symbol): LocalVar =
+        functionBuilder.define(
+            name,
+            type,
+            initializer,
+            null
+        ).also(args::add).also {
+            (it as? KotlinLocalVar)?.isVal = null
+        }
 }
 
 private object EndFunction : Symbol {

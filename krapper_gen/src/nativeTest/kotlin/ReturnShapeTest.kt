@@ -1,0 +1,403 @@
+/*
+ * Copyright 2022 Jason Monk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.monkopedia.krapper.generator
+
+import com.monkopedia.krapper.AllowListFilter
+import com.monkopedia.krapper.ReferencePolicy
+import com.monkopedia.krapper.generator.builders.CppCodeBuilder
+import com.monkopedia.krapper.generator.codegen.CppWriter
+import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import kotlin.test.Test
+import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import kotlinx.coroutines.runBlocking
+import platform.posix.random
+
+// Wave-B return shapes (clang-bootstrap T1.10 / T1.6 / G8). Each parses a tiny
+// header, binds a single probe class, and asserts the probe method SURVIVES
+// resolution (recon-2: these return shapes silently dropped with "Couldn't
+// resolve return").
+class ReturnShapeTest {
+
+    private fun methodsOf(header: String, className: String): List<ResolvedMethod> =
+        classOf(header, className).children.filterIsInstance<ResolvedMethod>()
+
+    private fun classOf(header: String, className: String): ResolvedClass = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_retshape_${random()}_${random()}.h"
+            File(tmpFile).writeText(header)
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            val allow = AllowListFilter(listOf(className))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val resolved = found.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            resolved.filterIsInstance<ResolvedClass>().first { it.type.type == className }
+        }
+    }
+
+    // Emit the C++ wrapper body for one method of a resolved class (the same CppWriter path
+    // the real generator runs) so a test can assert the emitted C boundary code.
+    private fun emittedCpp(cls: ResolvedClass, method: ResolvedMethod): String = runBlocking {
+        val code = CppCodeBuilder()
+        with(CppWriter(File("/tmp/krapper_retshape_out.cpp"), code)) {
+            code.onGenerate(cls, method)
+        }
+        code.toString()
+    }
+
+    // T1.10: `std::string name() const { return "x"; }` — std::string returned by
+    // value (the existing featuregen StringFeature.produce path).
+    @Test
+    fun stringByValueReturnBinds() {
+        val methods = methodsOf(
+            """
+            |#include <string>
+            |struct StrProbe {
+            |    std::string name() const { return "x"; }
+            |};
+            """.trimMargin(),
+            "StrProbe"
+        )
+        assertTrue(
+            methods.any { it.name == "name" },
+            "std::string-by-value method `name` must bind; got ${methods.map { it.name }}"
+        )
+    }
+
+    // T1.10 / G8: `const std::string name() const` — the SAME by-value return but
+    // with a (meaningless) top-level const on the returned temporary. recon-2:
+    // this dropped on Clang's getNameAsString()/QualType::getAsString().
+    @Test
+    fun constStringByValueReturnBinds() {
+        val methods = methodsOf(
+            """
+            |#include <string>
+            |struct ConstStrProbe {
+            |    const std::string name() const { return "x"; }
+            |};
+            """.trimMargin(),
+            "ConstStrProbe"
+        )
+        assertTrue(
+            methods.any { it.name == "name" },
+            "const std::string-by-value method `name` must bind; got ${methods.map { it.name }}"
+        )
+    }
+
+    // T1.6 / G8: a trivially-copyable value type returned by value, AND with a
+    // top-level const. Both must bind (the const-by-value one must not get a
+    // spurious `const T` in its emitted C type).
+    @Test
+    fun constValueByValueReturnBinds() {
+        val methods = methodsOf(
+            """
+            |struct Val { int x; };
+            |struct ValProbe {
+            |    Val make() const { return Val{1}; }
+            |    const Val makeConst() const { return Val{2}; }
+            |};
+            """.trimMargin(),
+            "ValProbe"
+        )
+        assertTrue(
+            methods.any { it.name == "make" },
+            "value-by-value method `make` must bind; got ${methods.map { it.name }}"
+        )
+        assertTrue(
+            methods.any { it.name == "makeConst" },
+            "const-value-by-value method `makeConst` must bind; got ${methods.map { it.name }}"
+        )
+    }
+
+    // T1.10: a non-owning string view (`llvm::StringRef`-shaped, matched by qualified
+    // name) returned by a method must bind — the return is rewritten to std::string and
+    // CppWriter emits `.str()`. The method surfaces (not dropped) and its Kotlin type is
+    // String. (Mirrors the real llvm::StringRef shape; LLVM-header validation is the
+    // separate real-Clang compile check.)
+    @Test
+    fun stringRefViewReturnBindsAsString() {
+        val methods = methodsOf(
+            """
+            |#include <string>
+            |#include <cstddef>
+            |namespace llvm {
+            |class StringRef {
+            |    const char* data_;
+            |    size_t size_;
+            |public:
+            |    StringRef() : data_(nullptr), size_(0) {}
+            |    StringRef(const char* d, size_t s) : data_(d), size_(s) {}
+            |    std::string str() const { return std::string(data_, size_); }
+            |};
+            |}
+            |struct ViewProbe {
+            |    llvm::StringRef getName() const { return llvm::StringRef("x", 1); }
+            |};
+            """.trimMargin(),
+            "ViewProbe"
+        )
+        val getName = methods.firstOrNull { it.name == "getName" }
+        assertTrue(
+            getName != null,
+            "StringRef-returning method `getName` must bind; got ${methods.map { it.name }}"
+        )
+        assertTrue(
+            getName.returnType.kotlinType.fullyQualified.startsWith("kotlin.String"),
+            "getName must surface as Kotlin String; got ${getName.returnType.kotlinType.fullyQualified}"
+        )
+    }
+
+    // T1.10p: an inbound `llvm::StringRef` PARAMETER (the inverse of T1.10's StringRef
+    // RETURN). It must marshal a Kotlin `String` -> `const char*` at the C boundary, then
+    // construct the view from it (`llvm::StringRef arg_cast = llvm::StringRef(arg)`) before
+    // calling through — NOT REINT_CAST the String as an opaque pointer. Asserts the arg
+    // surfaces as Kotlin String with STRING_VIEW cast mode, and the emitted C++ constructs
+    // the StringRef from the char* argument.
+    @Test
+    fun stringRefParamMarshalsFromString() {
+        val cls = classOf(
+            """
+            |#include <string>
+            |#include <cstddef>
+            |namespace llvm {
+            |class StringRef {
+            |    const char* data_;
+            |    size_t size_;
+            |public:
+            |    StringRef() : data_(nullptr), size_(0) {}
+            |    StringRef(const char* d) : data_(d), size_(0) {}
+            |    StringRef(const char* d, size_t s) : data_(d), size_(s) {}
+            |    size_t size() const { return size_; }
+            |};
+            |}
+            |struct SinkProbe {
+            |    int take(llvm::StringRef s) const { return (int) s.size(); }
+            |};
+            """.trimMargin(),
+            "SinkProbe"
+        )
+        val take = cls.children.filterIsInstance<ResolvedMethod>().firstOrNull { it.name == "take" }
+        assertTrue(take != null, "StringRef-param method `take` must bind")
+        val arg = take.args.first { it.name != "thiz" }
+        assertTrue(
+            arg.castMode == ArgumentCastMode.STRING_VIEW,
+            "the StringRef param must use STRING_VIEW cast mode; got ${arg.castMode}"
+        )
+        assertTrue(
+            arg.signatureType.kotlinType.fullyQualified.startsWith("kotlin.String"),
+            "the param must surface as Kotlin String; got " +
+                arg.signatureType.kotlinType.fullyQualified
+        )
+        assertTrue(
+            arg.signatureType.cType.typeString.contains("char"),
+            "the C boundary param must be a char*; got ${arg.signatureType.cType.typeString}"
+        )
+        val cpp = emittedCpp(cls, take)
+        assertTrue(
+            cpp.contains("llvm::StringRef(s)") || cpp.contains("llvm::StringRef( s )"),
+            "emitted wrapper must construct the view from the char* arg; got:\n$cpp"
+        )
+    }
+
+    // T1.7e: a by-value `std::unique_ptr<T>` return is move-only, so the by-value Holder
+    // placement-new path can't carry it and the method would silently drop. The return is
+    // rewritten to a raw `T*` and CppWriter emits `.release()`. The method must bind and
+    // surface a (nullable) pointer wrapper to T — the same shape as a raw `T*` factory.
+    @Test
+    fun uniquePtrReturnBindsAsRawPointer() {
+        val methods = methodsOf(
+            """
+            |#include <memory>
+            |struct Owned { int id; int getId() const { return id; } };
+            |struct UpProbe {
+            |    std::unique_ptr<Owned> make() const {
+            |        return std::unique_ptr<Owned>(new Owned{5});
+            |    }
+            |};
+            """.trimMargin(),
+            "UpProbe"
+        )
+        val make = methods.firstOrNull { it.name == "make" }
+        assertTrue(
+            make != null,
+            "unique_ptr<Owned>-returning method `make` must bind; got ${methods.map { it.name }}"
+        )
+        assertTrue(
+            make.returnViaMemberCall == "release",
+            "make must release ownership via .release(); got ${make.returnViaMemberCall}"
+        )
+        assertTrue(
+            make.returnType.typeString.trimEnd('*').endsWith("Owned") &&
+                make.returnType.typeString.endsWith("*"),
+            "make must return a raw `Owned*`; got ${make.returnType.typeString}"
+        )
+    }
+
+    // T1.3: a method returning `llvm::iterator_range<It>` (here mimicking the real Clang
+    // shape: a class iterator whose `*it` is a `Thing*`) must bind — the return is
+    // materialized into a `std::vector<Thing*>` and `rangeElementType` records the element
+    // class. recon-2: decls()/methods()/fields()/bases() all dropped with "Couldn't
+    // resolve return"; this is the generic reproduction.
+    @Test
+    fun iteratorRangeReturnMaterializesVector() {
+        val methods = methodsOf(
+            """
+            |#include <vector>
+            |namespace llvm {
+            |template <class It> class iterator_range {
+            |    It b_, e_;
+            |public:
+            |    iterator_range(It b, It e) : b_(b), e_(e) {}
+            |    It begin() const { return b_; }
+            |    It end() const { return e_; }
+            |};
+            |}
+            |struct Thing { int x; };
+            |struct ThingIter {
+            |    typedef Thing* value_type;
+            |    Thing** p_;
+            |    Thing* operator*() const { return *p_; }
+            |    ThingIter& operator++() { ++p_; return *this; }
+            |    bool operator!=(const ThingIter& o) const { return p_ != o.p_; }
+            |};
+            |struct RangeHolder {
+            |    Thing** data_;
+            |    unsigned n_;
+            |    llvm::iterator_range<ThingIter> items() const {
+            |        return llvm::iterator_range<ThingIter>(ThingIter{data_}, ThingIter{data_ + n_});
+            |    }
+            |};
+            """.trimMargin(),
+            "RangeHolder"
+        )
+        val items = methods.firstOrNull { it.name == "items" }
+        assertTrue(
+            items != null,
+            "iterator_range-returning method `items` must bind; got ${methods.map { it.name }}"
+        )
+        assertTrue(
+            items.rangeElementType == "Thing",
+            "items must record element type Thing; got ${items.rangeElementType}"
+        )
+        assertTrue(
+            items.returnType.typeString.contains("Vector") ||
+                items.returnType.typeString.contains("vector"),
+            "items must return a materialized vector; got ${items.returnType.typeString}"
+        )
+    }
+
+    // A `const value_type&` arg where value_type is a POINTER (the std::vector<Thing*>
+    // push_back/assign/fill-ctor shape the range materialization needs) must resolve to a
+    // plain `Thing*`, NOT `const Thing*`. The top-level const on a by-value pointer is
+    // meaningless and was rendering as pointer-to-const (`const Thing*`), which fails to
+    // match the real `Thing* const&` signature.
+    @Test
+    fun constRefToPointerArgDropsSpuriousConst() {
+        val methods = methodsOf(
+            """
+            |struct Thing { int id; };
+            |struct PtrArgProbe {
+            |    typedef Thing* value_type;
+            |    void take(const value_type& x) { (void)x; }
+            |};
+            """.trimMargin(),
+            "PtrArgProbe"
+        )
+        val take = methods.firstOrNull { it.name == "take" }
+        assertTrue(take != null, "take must bind; got ${methods.map { it.name }}")
+        val arg = take.args.first { it.name != "thiz" }
+        assertTrue(
+            arg.type.typeString == "Thing*",
+            "const value_type& (value_type=Thing*) must resolve to `Thing*`, not " +
+                "`${arg.type.typeString}`"
+        )
+    }
+
+    // T-forcing-scope-2: a forced container instantiation (`--instantiate
+    // "std::vector<Thing*>"`) must BIND even when the MAIN reference policy is
+    // IGNORE_MISSING. This is the real-Clang demo path: INCLUDE_MISSING explodes the
+    // whole library, so the main resolve runs under IGNORE_MISSING — but under IGNORE a
+    // `std::` container specialization is dropped (defaultFilter excludes std:: classes,
+    // so the spec is never in tracker.classes, and IGNORE only keeps already-tracked
+    // types). `resolveForcing` fixes this with a 3-pass shared-tracker resolve: pass 2
+    // forces the container under INCLUDE_MISSING semantics regardless of the main policy.
+    // This test reproduces the IndexedServiceImpl.requestInstantiation flow at unit scale
+    // and asserts the container binds (BEFORE the fix: "Forcing introduced 0 new").
+    @Test
+    fun forcedContainerBindsUnderIgnoreMissing() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val header =
+                """
+                |struct Thing { int id; };
+                |struct RangeHolder { Thing* p_; };
+                """.trimMargin()
+            val headerFile = "/tmp/krapper_force2_${random()}_${random()}.h"
+            File(headerFile).writeText(header)
+
+            // Main resolve under IGNORE_MISSING (the real-Clang policy that hides the bug).
+            val mainResolver =
+                parseHeader(index, listOf(headerFile), generateIncludes("clang++"))
+            val bound = mainResolver.findClasses(
+                AllowListFilter(listOf("RangeHolder")).wrapperFilter()
+            )
+                .resolveAll(mainResolver, ReferencePolicy.IGNORE_MISSING)
+            val alreadyBoundKeys =
+                bound.filterIsInstance<ResolvedClass>().mapTo(HashSet()) { it.type.toString() }
+
+            // Synthesize the forcing struct exactly as requestInstantiation does and
+            // re-parse it (it #includes the consumer header + <vector>).
+            val target = "std::vector<Thing*>"
+            val forceName = "KrapperForce_std_vector_ThingPtr"
+            val forceFile = "/tmp/krapper_force2_inst_${random()}.h"
+            File(forceFile).writeText(
+                """
+                |#include <vector>
+                |#include "$headerFile"
+                |struct $forceName { $target value; };
+                """.trimMargin()
+            )
+            val forceResolver =
+                parseHeader(index, listOf(forceFile), generateIncludes("clang++"))
+            // Scope to the forcing struct + already-bound classes (the requestInstantiation
+            // scoping that kills the explosion).
+            val scoped = forceResolver.findClasses { defaultFilter() }.filter {
+                val cls = it as? WrappedClass ?: return@filter true
+                val key = cls.type.toString()
+                key.contains(forceName) || key in alreadyBoundKeys
+            }
+            val forced = scoped.resolveForcing(
+                forceResolver,
+                ReferencePolicy.IGNORE_MISSING,
+                alreadyBoundKeys
+            )
+            val newSpecs = forced.filterIsInstance<ResolvedClass>()
+                .map { it.type.toString() }
+                .filter { it !in alreadyBoundKeys }
+            assertTrue(
+                newSpecs.any { it.contains("vector", ignoreCase = true) },
+                "Forcing std::vector<Thing*> under IGNORE_MISSING must bind the container " +
+                    "specialization; new specs were $newSpecs"
+            )
+        }
+    }
+}

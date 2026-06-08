@@ -77,3 +77,18 @@ enum class StringSelector {
 
 @Serializable
 class StringFilter(val selector: StringSelector, val matcher: StringMatcher) : FilterDefinition()
+
+/**
+ * Scoped-import allowlist: includes a class iff its fully-qualified (namespaced)
+ * name is one of [qualifiedNames] (e.g. `clang::CXXRecordDecl`). Unlike
+ * [DefaultFilter] — which binds every non-`std::`/`__` class and therefore drags
+ * in every transitively-reachable type — this binds ONLY the named set. Classes
+ * those listed classes reference but that aren't themselves listed fall to the
+ * existing reference policy (borrowed/opaque), they are not recursively bound.
+ *
+ * Names match by exact equality against a class's fully-qualified type string,
+ * so `clang::CXXRecordDecl` matches the class `clang::CXXRecordDecl` and nothing
+ * else.
+ */
+@Serializable
+class AllowListFilter(val qualifiedNames: List<String>) : FilterDefinition()

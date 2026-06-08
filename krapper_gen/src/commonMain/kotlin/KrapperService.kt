@@ -29,6 +29,9 @@ data class IndexRequest(
     }.distinct()
 )
 
+@Serializable
+data class InstantiationRequest(val base: String, val args: List<String>)
+
 @KsService
 interface KrapperService : RpcBidiService {
     @KsMethod("/ping")
@@ -57,6 +60,9 @@ interface IndexedService : RpcBidiService {
 
     @KsMethod("/execute")
     suspend fun addMapping(mappingService: MappingService)
+
+    @KsMethod("/instantiate")
+    suspend fun requestInstantiation(request: InstantiationRequest)
 
     @KsMethod("/output")
     suspend fun writeTo(output: String)

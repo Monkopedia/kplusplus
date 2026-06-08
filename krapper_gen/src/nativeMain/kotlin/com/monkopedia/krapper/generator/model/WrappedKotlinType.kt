@@ -15,9 +15,14 @@
  */
 package com.monkopedia.krapper.generator.model
 
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
+import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER_VAR
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUES_REF
+import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
+import com.monkopedia.krapper.generator.model.type.WrappedEnumType
+import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -29,8 +34,25 @@ interface WrappedKotlinType {
     val pkg: String
 }
 
+/**
+ * The Kotlin type of a C/C++ enum surfaced as a generated `enum class`. It
+ * delegates its qualification (name/pkg/fullyQualified) to the [base] type
+ * derived from the enum's C++ spelling, but additionally carries the enum
+ * [constants] so the resolver can emit the enum-class declaration and the
+ * boundary conversions.
+ */
+class EnumKotlinType(
+    private val base: WrappedKotlinType,
+    val constants: List<WrappedEnumConstant>,
+    val underlying: WrappedKotlinType
+) : WrappedKotlinType by base
+
 private val typeMap = mapOf(
     "size_t" to "platform.posix.size_t",
+    "ssize_t" to "platform.posix.ssize_t",
+    "ptrdiff_t" to "platform.posix.ptrdiff_t",
+    "intptr_t" to "platform.posix.intptr_t",
+    "wchar_t" to "platform.posix.wchar_t",
     "void" to "kotlin.Unit",
     "bool" to "kotlin.Boolean",
     "char" to "kotlin.Byte",
@@ -80,12 +102,37 @@ private val pointerTypeMap = mapOf(
     "signed long long" to "kotlinx.cinterop.LongVar",
     "unsigned long long" to "kotlinx.cinterop.ULongVar",
     "float" to "kotlinx.cinterop.FloatVar",
-    "double" to "kotlinx.cinterop.DoubleVar"
+    "double" to "kotlinx.cinterop.DoubleVar",
+    // C posix-alias typedefs added to NATIVE — pointers to them need the matching
+    // cinterop *Var (else a `wchar_t*` etc. collapses to the bare scalar).
+    "wchar_t" to "kotlinx.cinterop.IntVar",
+    "ptrdiff_t" to "kotlinx.cinterop.LongVar",
+    "ssize_t" to "kotlinx.cinterop.LongVar",
+    "intptr_t" to "kotlinx.cinterop.LongVar"
 )
 
 fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(type)
 
 fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
+    // A C function-pointer typedef crosses the boundary as a raw cinterop function
+    // pointer: `CPointer<CFunction<(<args>) -> <ret>>>?`. The arg/return types are
+    // rendered through the normal per-type Kotlin mapping (so `int` -> `kotlin.Int`,
+    // etc.). The inner `(<args>) -> <ret>` Kotlin function type is emitted as a single
+    // literal leaf (it has no fully-qualified form to import); CPointer/CFunction import
+    // normally. No lambda/trampoline bridge is built here — this is type mapping only.
+    if (type is WrappedFunctionPointer) {
+        val args = type.argTypes.joinToString(", ") { WrappedKotlinType(it).name }
+        val ret = WrappedKotlinType(type.returnType).name
+        return nullable(
+            fullyQualifiedType(C_POINTER).typedWith(
+                listOf(
+                    fullyQualifiedType(C_FUNCTION).typedWith(
+                        listOf(fullyQualifiedType("($args) -> $ret"))
+                    )
+                )
+            )
+        )
+    }
     if (type is WrappedTemplateType) {
         return WrappedKotlinType(
             WrappedKotlinType(type.baseType).pkg + "." +
@@ -101,6 +148,18 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
         )
     }
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
+    // An enum with recoverable constants surfaces as a generated Kotlin `enum
+    // class` (named after the enum's C++ spelling, in the same package a wrapper
+    // class of that name would get). Without constants it falls back to exposing
+    // its underlying integer (e.g. Int/UInt), the legacy behaviour.
+    if (type is WrappedEnumType) {
+        if (type.constants.isEmpty()) return WrappedKotlinType(type.underlying)
+        return EnumKotlinType(
+            WrappedKotlinType(type.cppName),
+            type.constants,
+            WrappedKotlinType(type.underlying)
+        )
+    }
     if (type.isString) return fullyQualifiedType("kotlin.String?")
     if (type.toString() == "const char*") return fullyQualifiedType("kotlin.String?")
     if (type.isConst) {
@@ -148,25 +207,36 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     }
     val name = type.toString()
     if (name.contains("<")) {
-        var templateTypes = mutableListOf<WrappedKotlinType>()
-        return WrappedKotlinType(
-            findQualifiers(name).joinToString("::") {
-                val section = name.substring(it).trimStart(':')
-                val start = section.indexOf('<')
-                if (start < 0) {
-                    section
-                } else {
-                    val base = section.substring(0, start)
-                    templateTypes += parseTypes(
-                        section.substring(
-                            start + 1,
-                            section.length - 1
+        // findQualifiers/parseTypes do the same hand-rolled index math as the
+        // String overload and can overflow on gnarly nested spellings; skip-not-crash
+        // by surfacing the whole spelling as one opaque leaf on any failure.
+        return runCatching {
+            val templateTypes = mutableListOf<WrappedKotlinType>()
+            WrappedKotlinType(
+                findQualifiers(name).joinToString("::") {
+                    val section = name.substring(it).trimStart(':')
+                    val start = section.indexOf('<')
+                    if (start < 0) {
+                        section
+                    } else {
+                        val base = section.substring(0, start)
+                        templateTypes += parseTypes(
+                            section.substring(
+                                start + 1,
+                                section.length - 1
+                            )
                         )
-                    )
-                    base
-                }
-            } + "__" + templateTypes.joinToString("__") { it.name }
-        )
+                        base
+                    }
+                } + "__" + templateTypes.joinToString("__") { it.name }
+            )
+        }.getOrElse {
+            println(
+                "WARN skip-not-crash: failed to parse qualified template spelling " +
+                    "'$name' (${it.message}); surfacing as opaque type"
+            )
+            opaqueLeaf(name)
+        }
     }
     return WrappedKotlinType(name)
 }
@@ -189,19 +259,48 @@ fun nullable(base: WrappedKotlinType): WrappedKotlinType = NullableKotlinType(ba
 fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
     val name = nameIn.trim()
     if (name.contains("<")) {
-        val start = name.indexOf('<')
-        val base = name.substring(0, start)
-        return WrappedKotlinType(base).typedWith(
-            parseTypes(
-                name.substring(
-                    start + 1,
-                    name.length - 1
+        // The hand-rolled index math below (parseTypes/findTemplates/findEnd) can
+        // overflow or fail on a deeply-nested or malformed template spelling (e.g.
+        // an unbalanced `<`/`>`, or a spelling clang reports in an unexpected shape).
+        // Skip-not-crash: on any parse failure, drop the structured parse and surface
+        // the whole spelling as a single opaque leaf name so the one element degrades
+        // gracefully instead of aborting the entire generation run.
+        return runCatching {
+            val start = name.indexOf('<')
+            val base = name.substring(0, start)
+            WrappedKotlinType(base).typedWith(
+                parseTypes(
+                    name.substring(
+                        start + 1,
+                        name.length - 1
+                    )
                 )
             )
-        )
+        }.getOrElse {
+            println(
+                "WARN skip-not-crash: failed to parse template spelling '$name' " +
+                    "(${it.message}); surfacing as opaque type"
+            )
+            opaqueLeaf(name)
+        }
     }
     return fullyQualifiedType(name.replace("::", ".").replace("*", "_P"), isWrapper = true)
 }
+
+// An opaque single-leaf Kotlin type built from an arbitrary (possibly malformed)
+// type spelling, with the template/qualifier characters that would re-trigger the
+// structured parser stripped to safe identifier characters. Used as the
+// skip-not-crash fallback when the structured template parse fails.
+private fun opaqueLeaf(spelling: String): WrappedKotlinType = fullyQualifiedType(
+    spelling
+        .replace("::", ".")
+        .replace("*", "_P")
+        .replace("<", "_")
+        .replace(">", "_")
+        .replace(",", "_")
+        .replace(" ", "_"),
+    isWrapper = true
+)
 
 internal class TemplatedKotlinType(
     internal val baseType: WrappedKotlinType,
@@ -273,24 +372,57 @@ private fun String.findEnd(start: Int): Int {
     return end
 }
 
+// When set (via config.rootPackage at the start of a generation pass), every
+// generated wrapper binding's package is rooted under these segments instead of
+// the historical top-level `root` package. Null = back-compat: top-level user
+// types live in `root` and C++ namespaces map to their bare path (`std`, `geo`).
+// Set once in IndexedServiceImpl.init; persists for the process (one generation pass).
+internal var rootPackageOverride: String? = null
+
 fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinType {
-    val capitalizedNameList = name.split(".").toMutableList().apply {
-        val last = removeLast()
-        add(last.capitalize())
+    val parts = name.split(".")
+    // Only wrapper class names are force-capitalized to Kotlin convention
+    // (e.g. `max_align_t` -> `Max_align_t`). Non-wrapper names are already correctly
+    // cased fully-qualified types — capitalizing their last segment would corrupt
+    // lowercase platform typealiases (`platform.posix.size_t` -> undefined `Size_t`).
+    val cased = if (isWrapper) parts.dropLast(1) + parts.last().capitalize() else parts
+    // Root-package handling (wrapper types only — never platform/native names):
+    //   - override null: top-level (size 1) wrappers get the legacy `root` prefix,
+    //     namespaced wrappers are left as-is. (Provably identical to historical.)
+    //   - override set: prepend the override's segments to every wrapper package,
+    //     replacing the legacy `root` for top-level and prefixing namespaced ones.
+    val rootSegments = rootPackageOverride?.split(".")
+    val nameList = when {
+        !isWrapper -> cased
+
+        // Override set: root every wrapper under the configured segments — but
+        // IDEMPOTENTLY. The template path derives a binding's package by re-wrapping
+        // `baseType.pkg + mangledName` (an already-rooted string) back through here, so
+        // skip the prefix when `cased` already starts with the root segments. Otherwise
+        // `std::vector<int>` would double to `<root>.<root>.std.Vector__Int`. Safe because
+        // first-pass inputs are raw C++ names (`std.Vector`), never dotted-package style,
+        // so "starts with root segments" reliably means "already rooted".
+        rootSegments != null ->
+            if (cased.take(rootSegments.size) == rootSegments) {
+                cased
+            } else {
+                rootSegments + cased
+            }
+
+        cased.size == 1 -> listOf("root") + cased
+
+        else -> cased
     }
-    if (capitalizedNameList.size == 1 && isWrapper) {
-        capitalizedNameList.add(0, "root")
-    }
-    val capitalizedName = capitalizedNameList.joinToString(".")
+    val capitalizedName = nameList.joinToString(".")
     return object : WrappedKotlinType {
         override val isWrapper: Boolean
             get() = isWrapper
         override val fullyQualified: List<String>
             get() = listOf(capitalizedName)
         override val name: String
-            get() = capitalizedNameList.last()
+            get() = nameList.last()
         override val pkg: String
-            get() = capitalizedNameList.toMutableList().also { it.removeLast() }.joinToString(".")
+            get() = nameList.dropLast(1).joinToString(".")
 
         override fun toString(): String = capitalizedName
     }

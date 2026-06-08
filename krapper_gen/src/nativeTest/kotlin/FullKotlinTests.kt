@@ -106,7 +106,7 @@ class FullKotlinTests {
             "    }"
 
     private val testlibTestclassSt =
-        "var st: Size_t\n" +
+        "var st: size_t\n" +
             "    inline get() {\n" +
             "        return TestLib_TestClass_st_get(ptr)\n" +
             "    }\n" +
@@ -381,10 +381,11 @@ class FullKotlinTests {
         "}"
 
     private val testlibTestclass2New =
-        "fun MemScope.TestClass(other: TestClass): TestClass {\n" +
+        "fun MemScope.TestClass__const_TestLib_TestClass(other: TestClass): TestClass {\n" +
             "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
             "?: error(\"Allocation failed\"))\n" +
-            "    val obj: COpaquePointer = (_TestLib_TestClass_new(memory, other.ptr) ?: " +
+            "    val obj: COpaquePointer = " +
+            "(TestLib_TestClass_new__const_TestLib_TestClass_and(memory, other.ptr) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -392,10 +393,10 @@ class FullKotlinTests {
             "    return TestClass(obj, this)\n" +
             "}"
 
-    private val testlibTestclass3New = "fun MemScope.TestClass(a: Int): TestClass {\n" +
+    private val testlibTestclass3New = "fun MemScope.TestClass__int(a: Int): TestClass {\n" +
         "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
         "?: error(\"Allocation failed\"))\n" +
-        "    val obj: COpaquePointer = (__TestLib_TestClass_new(memory, a) ?: " +
+        "    val obj: COpaquePointer = (TestLib_TestClass_new__int(memory, a) ?: " +
         "error(\"Creation failed\"))\n" +
         "    defer {\n" +
         "        TestLib_TestClass_dispose(obj)\n" +
@@ -404,10 +405,10 @@ class FullKotlinTests {
         "}"
 
     private val testlibTestclass4New =
-        "fun MemScope.TestClass(a: Int, b: Double): TestClass {\n" +
+        "fun MemScope.TestClass__int_double(a: Int, b: Double): TestClass {\n" +
             "    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) " +
             "?: error(\"Allocation failed\"))\n" +
-            "    val obj: COpaquePointer = (___TestLib_TestClass_new(memory, a, b) ?: " +
+            "    val obj: COpaquePointer = (TestLib_TestClass_new__int_double(memory, a, b) ?: " +
             "error(\"Creation failed\"))\n" +
             "    defer {\n" +
             "        TestLib_TestClass_dispose(obj)\n" +
@@ -528,11 +529,13 @@ class FullKotlinTests {
             "    return retValue\n" +
             "}"
 
+    // C++ operator== now maps to an idiomatic Kotlin `equals` override (so `a == b`
+    // works) rather than an `infix fun eq`. The body narrows `other` and delegates
+    // to the generated `_op_eq` C function over the two backing pointers.
     private val testlibTestclassEqCmp =
-        "inline infix fun eq(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
-            "    TestLib_TestClass_op_eq(ptr, c2.ptr, retValue.ptr)\n" +
-            "    return retValue\n" +
+        "override fun equals(other: Any?): Boolean {\n" +
+            "    return other is TestClass && " +
+            "TestLib_TestClass_op_eq(ptr, (other as TestClass).ptr)\n" +
             "}"
 
     private val testlibTestclassNeq =
@@ -542,11 +545,13 @@ class FullKotlinTests {
             "    return retValue\n" +
             "}"
 
+    // C++ operator< maps to an idiomatic Kotlin `operator fun compareTo` synthesized
+    // from the single `<` (the `_op_lt` C wrapper called twice with swapped operands),
+    // overriding Comparable, so `a < b`/`a > b`/`sorted()` all work.
     private val testlibTestclassLt =
-        "inline infix fun lt(c2: TestClass): TestClass {\n" +
-            "    val retValue: TestClass = memScope.TestClass_Holder()\n" +
-            "    TestLib_TestClass_op_lt(ptr, c2.ptr, retValue.ptr)\n" +
-            "    return retValue\n" +
+        "override operator fun compareTo(other: TestClass): Int {\n" +
+            "    return if (TestLib_TestClass_op_lt(ptr, other.ptr)) -1 else if " +
+            "(TestLib_TestClass_op_lt(other.ptr, ptr)) 1 else 0\n" +
             "}"
 
     private val testlibTestclassGt =
@@ -1251,17 +1256,19 @@ class FullKotlinTests {
         val (rcls, element) = resolveType(cls, target)
         val target = element as ResolvedMethod
         with(writer) {
+            val sizeVar = object : LocalVar {
+                override val name: String
+                    get() = "size"
+
+                override fun build(builder: CodeStringBuilder) {
+                    builder.append("size")
+                }
+            }
             code.onGenerate(
                 rcls,
                 target,
-                object : LocalVar {
-                    override val name: String
-                        get() = "size"
-
-                    override fun build(builder: CodeStringBuilder) {
-                        builder.append("size")
-                    }
-                }
+                sizeVar,
+                sizeVar
             )
         }
         return code
@@ -1305,17 +1312,19 @@ class FullKotlinTests {
         val rcls = cls.resolve(ctx) ?: error("Resolve failed for $cls")
         val target = target.resolve(ctx + cls) ?: error("Resolve failed for $target")
         with(writer) {
+            val sizeVar = object : LocalVar {
+                override val name: String
+                    get() = "size"
+
+                override fun build(builder: CodeStringBuilder) {
+                    builder.append("size")
+                }
+            }
             code.onGenerate(
                 rcls,
                 target,
-                object : LocalVar {
-                    override val name: String
-                        get() = "size"
-
-                    override fun build(builder: CodeStringBuilder) {
-                        builder.append("size")
-                    }
-                }
+                sizeVar,
+                sizeVar
             )
         }
         return code
