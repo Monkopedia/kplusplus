@@ -46,5 +46,10 @@ data class KrapperConfig(
     // behavior: top-level user types -> package `root`, C++ namespaces -> their
     // bare path (`std`, `geo`). When set (e.g. "com.acme.app"), every generated
     // binding's package becomes <rootPackage> + the C++ namespace path.
-    val rootPackage: String? = null
+    val rootPackage: String? = null,
+    // When true, a run that dropped ANY unmodelable symbol (skip-not-crash) fails
+    // after emitting the drop-ledger report, instead of completing leniently. Opt-in
+    // (default false) so existing green runs keep succeeding: drops are always logged
+    // and ledgered, but only this flag turns a drop into a non-zero exit.
+    val failOnDrop: Boolean = false
 )

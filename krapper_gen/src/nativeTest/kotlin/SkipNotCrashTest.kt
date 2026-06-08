@@ -21,6 +21,7 @@ import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -71,6 +72,43 @@ class SkipNotCrashTest {
         File(outDir).rmR()
         File(headerFile).delete()
         return cc
+    }
+
+    /**
+     * Run the full generator over [header] and return the drop-ledger records collected
+     * during the run. Mirrors [generate] but hands back the ledger instead of the emitted
+     * C++, so a test can assert WHAT was dropped and WHY (not just that the run survived).
+     * [failOnDrop] toggles the strict gate; [runBody] receives the snapshot taken right
+     * after writeTo (a successful run) — for the strict-failure case the caller inspects
+     * the throw separately.
+     */
+    private fun generateLedger(header: String, failOnDrop: Boolean = false): List<DropRecord> {
+        val tag = "${random()}_${random()}"
+        val headerFile = "/tmp/krapper_ledger_$tag.h"
+        File(headerFile).writeText(header)
+        val outDir = "/tmp/krapper_ledger_out_$tag"
+        val records = runBlocking {
+            val config = KrapperConfig(
+                pkg = "krapper.skip",
+                compiler = "clang++",
+                moduleName = "skip",
+                errorPolicy = ErrorPolicy.LOG,
+                referencePolicy = ReferencePolicy.INCLUDE_MISSING,
+                debug = false,
+                failOnDrop = failOnDrop
+            )
+            val service = IndexedServiceImpl(
+                config,
+                IndexRequest(listOf(headerFile), emptyList())
+            )
+            service.filterAndResolve(com.monkopedia.krapper.DefaultFilter)
+            service.writeTo(outDir)
+            // The ledger is process-scoped; snapshot it before any teardown runs.
+            DropLedger.drops.toList()
+        }
+        File(outDir).rmR()
+        File(headerFile).delete()
+        return records
     }
 
     // G1: a method whose param/return type has a deeply-nested template spelling
@@ -214,6 +252,89 @@ class SkipNotCrashTest {
             "deleted default ctor wrapper must be skipped:\n$cc"
         )
     }
+
+    // L1: the drop ledger records a dropped symbol WITH A REASON. G4's unbindable
+    // required-param method is the deliberately-unmodelable shape; after the run the
+    // ledger must contain a record naming it (so a consumer can tell "the generator
+    // dropped takesBad" from "C++ never had it"), while the bindable `fine` is NOT in
+    // the ledger.
+    @Test
+    fun l1_dropped_symbol_is_recorded_in_the_ledger_with_a_reason() {
+        val drops = generateLedger(
+            """
+            #pragma once
+            template <class T> struct Opaque { T x; };
+            struct L1 {
+                int fine(int a) const { return a; }
+                void takesBad(Opaque<int>&& bad) {}
+            };
+            """.trimIndent()
+        )
+        assertTrue(
+            drops.any { "takesBad" in it.symbol },
+            "the unbindable method must be recorded in the drop ledger:\n$drops"
+        )
+        val takesBad = drops.first { "takesBad" in it.symbol }
+        assertTrue(
+            takesBad.reason.isNotBlank(),
+            "every drop must carry a reason:\n$takesBad"
+        )
+        assertFalse(
+            drops.any { "fine" in it.symbol },
+            "a successfully-bound method must NOT be in the ledger:\n$drops"
+        )
+    }
+
+    // L2: a clean run (no unmodelable shapes) records ZERO drops — the ledger doesn't
+    // false-positive on ordinary bindable members.
+    @Test
+    fun l2_clean_run_records_no_drops() {
+        val drops = generateLedger(
+            """
+            #pragma once
+            struct L2 {
+                int value() const { return 7; }
+                int field = 0;
+            };
+            """.trimIndent()
+        )
+        assertEquals(
+            emptyList(),
+            drops,
+            "a fully-bindable header must drop nothing:\n$drops"
+        )
+    }
+
+    // L3: --fail-on-drop turns a drop into a hard failure (non-zero exit / thrown
+    // error), while the same header passes leniently by default. Locks the opt-in
+    // strict-mode contract.
+    @Test
+    fun l3_fail_on_drop_fails_when_something_is_dropped() {
+        val header =
+            """
+            #pragma once
+            template <class T> struct Opaque { T x; };
+            struct L3 {
+                int fine(int a) const { return a; }
+                void takesBad(Opaque<int>&& bad) {}
+            };
+            """.trimIndent()
+        // Lenient (default) completes.
+        assertTrue(generateLedger(header).isNotEmpty())
+        // Strict mode throws.
+        var threw = false
+        try {
+            generateLedger(header, failOnDrop = true)
+        } catch (t: Throwable) {
+            threw = true
+            assertTrue(
+                "fail-on-drop" in (t.message ?: t.cause?.message ?: ""),
+                "strict-mode failure must mention fail-on-drop: ${t.message}"
+            )
+        }
+        assertTrue(threw, "--fail-on-drop must fail the run when a symbol was dropped")
+    }
+
     // G6 (template-arg namespace qualification) is intentionally NOT covered here:
     // the standard nested-namespace shape (`std::vector<ns::Inner>`) already emits a
     // correctly-qualified arg via referencedDecl.fullyQualified, and a fixture that
