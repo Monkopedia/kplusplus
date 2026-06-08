@@ -16,7 +16,7 @@ java {
 dependencies {
     compileOnly("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
     // Spike #2: in-compiler JNI bridge to libkrapper.so for live libclang access.
-    implementation("com.monkopedia.ksrpc:ksrpc-jni:1.1.0")
+    implementation(libs.ksrpc.jni)
 }
 
 tasks.withType<KotlinCompile> {
