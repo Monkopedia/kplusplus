@@ -9,6 +9,15 @@ import kotlin.test.assertEquals
 // `for`-iterable `Iterable<Thing>`. RangeHolder::items() returns the range; the generator
 // rewrote it to `std::vector<Thing*>` + a begin()/end() loop (`kpp_to_elem_ptr<Thing>`).
 // This is the generic reproduction of Clang's decls()/methods()/fields()/bases().
+//
+// #18 (resolveForcing characterization) — PASS-3 RANGE-METHOD RECOVERY at the integration
+// level: `items()`'s return type is the std::vector<Thing*> container, which is NOT bound
+// when `RangeHolder` is first resolved (pass 1 drops `items()` with "Couldn't resolve
+// return"). It is RECOVERED only because `resolveForcing` pass 3 re-resolves the bound
+// classes against the now-forced container (evict-then-rebuild; see Resolver.kt ~L282).
+// So this test passing is the integration-level proof that pass-3 recovery works: if
+// pass-3 recovery regressed (e.g. the fresh `mappingCache`/`resolvedClasses` eviction were
+// dropped), `holder.items()` would not exist and this whole class would fail to compile.
 class RgRangeTest {
     @Test fun items_is_for_iterable() = memScoped {
         val ms = this
