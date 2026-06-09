@@ -164,6 +164,52 @@ class ReturnShapeTest {
         )
     }
 
+    // GAP B regression: the normalization must NOT reach a basic_string<char> behind a POINTER.
+    // A `std::string*` out-param (the real `clang::Decl::getAvailability(std::string*)` shape)
+    // can't ride the STRING -> `const char*` boundary: the cast-var is declared with the
+    // pointer-typed targetType, so normalizing it emitted `std::string* x = std::string(arg)`,
+    // which does NOT compile and aborted the whole clangwalk wrapper build. The pointer-carried
+    // method must DROP cleanly (the pre-GAP-B behavior), while a by-value and a `const&` string
+    // on the same class still survive (those marshal through a value-typed cast-var).
+    @Test
+    fun scopedStringPointerParamDropsNotCrashes() {
+        val methods = scopedMethodsOf(
+            """
+            |#include <string>
+            |struct PtrStrProbe {
+            |    std::string getName() const { return "x"; }
+            |    int byConstRef(const std::string& s) const { return (int) s.size(); }
+            |    bool isDeprecated(std::string* message) const { return message != nullptr; }
+            |    int id() const { return 1; }
+            |};
+            """.trimMargin(),
+            "PtrStrProbe"
+        )
+        // The std::string* out-param method must drop (it can't marshal a pointer-to-string).
+        assertTrue(
+            methods.none { it.name == "isDeprecated" },
+            "a std::string* out-param method must DROP, not bind with broken codegen; " +
+                "got ${methods.map { it.name }}"
+        )
+        // ...but a `const std::string&` IN param still marshals from Kotlin String.
+        assertTrue(
+            methods.any { it.name == "byConstRef" },
+            "a const std::string& in-param method must still bind; got ${methods.map { it.name }}"
+        )
+        // ...while the by-value std::string return and the sibling plain method still bind.
+        val getName = methods.firstOrNull { it.name == "getName" }
+        val getNameType = getName?.returnType?.kotlinType?.fullyQualified
+        assertTrue(
+            getNameType?.startsWith("kotlin.String") == true,
+            "by-value std::string return `getName` must still survive as Kotlin String; " +
+                "got ${methods.map { it.name }}"
+        )
+        assertTrue(
+            methods.any { it.name == "id" },
+            "sibling plain method `id` must bind; got ${methods.map { it.name }}"
+        )
+    }
+
     // T1.6 / G8: a trivially-copyable value type returned by value, AND with a
     // top-level const. Both must bind (the const-by-value one must not get a
     // spurious `const T` in its emitted C type).
