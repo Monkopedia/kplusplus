@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import kotlin.concurrent.AtomicInt
 import kotlin.native.internal.NativePtr
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.alloc
@@ -37,6 +38,8 @@ import platform.posix.fcntl
 import platform.posix.fopen
 import platform.posix.fputs
 import platform.posix.fread
+import platform.posix.getenv
+import platform.posix.getpid
 import platform.posix.mkdir
 import platform.posix.opendir
 import platform.posix.readdir
@@ -150,5 +153,24 @@ data class File(val pathSegments: List<String>) {
     companion object {
         val CWD: File
             get() = File(getcwd())
+
+        // Monotonic per-process counter so two temp dirs created in the same run never
+        // collide even when getpid() is identical.
+        private val tempCounter = AtomicInt(0)
+
+        /**
+         * Creates and returns a freshly-made, process-unique temporary directory under
+         * `$TMPDIR` (default `/tmp`). The name embeds the pid and a per-process counter so
+         * concurrent generator runs (distinct pids) and repeated calls within one run never
+         * clobber each other's intermediate files. Caller owns cleanup (e.g. [rmR]).
+         */
+        fun createTempDir(prefix: String): File {
+            val tmpRoot =
+                getenv("TMPDIR")?.toKString()?.trimEnd('/').takeUnless { it.isNullOrEmpty() }
+                    ?: "/tmp"
+            val dir = File("$tmpRoot/${prefix}_${getpid()}_${tempCounter.addAndGet(1)}")
+            dir.mkdirs()
+            return dir
+        }
     }
 }

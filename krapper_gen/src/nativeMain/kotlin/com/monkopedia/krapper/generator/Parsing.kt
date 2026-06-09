@@ -374,7 +374,11 @@ End of search list.
  */
 
 fun generateIncludes(compiler: String) = memScoped {
-    val emptyFile = File("/tmp/clang_includes.c")
+    // Per-run unique scratch dir (pid + counter) so concurrent generator runs never
+    // collide on a fixed /tmp path; removed before returning so it never accumulates.
+    val tmpDir = File.createTempDir("krapper_includes")
+    defer { tmpDir.rmR() }
+    val emptyFile = File(tmpDir, "clang_includes.c")
     emptyFile.writeText("")
     val process = Process {
         system("$compiler -E -x c++ -v ${emptyFile.path}")
