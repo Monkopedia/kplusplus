@@ -23,6 +23,7 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -573,6 +574,128 @@ class ReturnShapeTest {
                 newSpecs.any { it.contains("vector", ignoreCase = true) },
                 "Forcing std::vector<Thing*> under IGNORE_MISSING must bind the container " +
                     "specialization; new specs were $newSpecs"
+            )
+        }
+    }
+
+    // TRAVERSE gap: when SEVERAL element vectors are force-instantiated over the SAME owning
+    // class, ALL of that class's range accessors must survive — not just the last one. This is
+    // the analog of Clang's `CXXRecordDecl` with `methods() -> vector<CXXMethodDecl*>`,
+    // `bases() -> vector<CXXBaseSpecifier*>` and `decls() -> vector<Decl*>`: each request runs
+    // its OWN resolveForcing with a fresh tracker holding only THAT request's container, so
+    // pass 3 re-resolves the owning class against one container, recovers THAT range method and
+    // re-drops the others — and the writer's last-wins dedup (KotlinWriter `associateBy` by
+    // type) keeps whichever request ran last, silently losing the rest (`decls()` survived only
+    // by sorting last). The cumulative `forcedContainerKeys` makes every prior container visible
+    // to pass 3, so the recovery is COMPLETE and order-independent.
+    //
+    // Both containers are instantiated in a SINGLE forcing parse (two `KrapperForce_*` structs),
+    // then resolveForcing is driven once PER container — mirroring two requestInstantiation
+    // calls accumulating `classes` with the last-wins merge — to avoid a second `<vector>`
+    // forcing TU (see ForcingCharacterizationTest's note on repeated-forcing-TU fragility).
+    // PRE-FIX: only the last-forced accessor (`bitems`) survives; this asserts BOTH do.
+    @Test
+    fun multiContainerForcingRecoversAllRangeAccessorsUnderIgnoreMissing() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            // Owner has TWO iterator_range accessors over DIFFERENT element types; each
+            // materializes to a distinct std::vector<X*> (the recon-2 range shape), so each
+            // needs its own forced container.
+            val header =
+                """
+                |#include <vector>
+                |namespace llvm {
+                |template <class It> class iterator_range {
+                |    It b_, e_;
+                |public:
+                |    iterator_range(It b, It e) : b_(b), e_(e) {}
+                |    It begin() const { return b_; }
+                |    It end() const { return e_; }
+                |};
+                |}
+                |struct Alpha { int x; };
+                |struct Beta { int y; };
+                |struct AlphaIter {
+                |    typedef Alpha* value_type;
+                |    Alpha** p_;
+                |    Alpha* operator*() const { return *p_; }
+                |    AlphaIter& operator++() { ++p_; return *this; }
+                |    bool operator!=(const AlphaIter& o) const { return p_ != o.p_; }
+                |};
+                |struct BetaIter {
+                |    typedef Beta* value_type;
+                |    Beta** p_;
+                |    Beta* operator*() const { return *p_; }
+                |    BetaIter& operator++() { ++p_; return *this; }
+                |    bool operator!=(const BetaIter& o) const { return p_ != o.p_; }
+                |};
+                |struct Owner {
+                |    Alpha** adata_; unsigned an_;
+                |    Beta** bdata_; unsigned bn_;
+                |    llvm::iterator_range<AlphaIter> aitems() const {
+                |        return llvm::iterator_range<AlphaIter>(AlphaIter{adata_}, AlphaIter{adata_ + an_});
+                |    }
+                |    llvm::iterator_range<BetaIter> bitems() const {
+                |        return llvm::iterator_range<BetaIter>(BetaIter{bdata_}, BetaIter{bdata_ + bn_});
+                |    }
+                |};
+                """.trimMargin()
+            val headerFile = "/tmp/krapper_multiforce_${random()}_${random()}.h"
+            File(headerFile).writeText(header)
+
+            // Main resolve under IGNORE_MISSING (the real-Clang policy): both range accessors
+            // drop, their materialized vector<X*> containers being unbound.
+            val mainResolver =
+                parseHeader(index, listOf(headerFile), generateIncludes("clang++"))
+            var classes: List<ResolvedElement> =
+                mainResolver.findClasses(AllowListFilter(listOf("Owner")).wrapperFilter())
+                    .resolveAll(mainResolver, ReferencePolicy.IGNORE_MISSING)
+
+            // ONE forcing parse with BOTH KrapperForce structs (libclang instantiates both
+            // vector specs without a second <vector> TU).
+            val forceFile = "/tmp/krapper_multiforce_inst_${random()}.h"
+            File(forceFile).writeText(
+                """
+                |#include <vector>
+                |#include "$headerFile"
+                |struct KrapperForce_Alpha { std::vector<Alpha*> value; };
+                |struct KrapperForce_Beta { std::vector<Beta*> value; };
+                """.trimMargin()
+            )
+            val forceResolver =
+                parseHeader(index, listOf(forceFile), generateIncludes("clang++"))
+
+            // Drive resolveForcing once per container, accumulating `classes` (append +
+            // last-wins) and SHARING the cumulative forcedContainerKeys set across calls —
+            // exactly what IndexedServiceImpl.requestInstantiation does across requests.
+            val forcedKeys = mutableSetOf<String>()
+            for (forceName in listOf("KrapperForce_Alpha", "KrapperForce_Beta")) {
+                val alreadyBound = classes.filterIsInstance<ResolvedClass>()
+                    .mapTo(HashSet()) { it.type.toString() }
+                val scoped = forceResolver.findClasses { defaultFilter() }.filter {
+                    val cls = it as? WrappedClass ?: return@filter true
+                    val key = cls.type.toString()
+                    key.contains(forceName) || key in alreadyBound
+                }
+                classes = classes + scoped.resolveForcing(
+                    forceResolver,
+                    ReferencePolicy.IGNORE_MISSING,
+                    alreadyBound,
+                    forcedKeys
+                )
+            }
+
+            // The writer dedups resolved classes last-wins (KotlinWriter associateBy type), so
+            // assert against the LAST surviving Owner — the copy that actually reaches codegen.
+            val owner = classes.filterIsInstance<ResolvedClass>()
+                .associateBy { it.type.toString() }
+                .values.first { it.type.type == "Owner" }
+            val accessors = owner.children.filterIsInstance<ResolvedMethod>().map { it.name }
+            assertTrue(
+                "aitems" in accessors && "bitems" in accessors,
+                "BOTH range accessors must survive after forcing both element containers; " +
+                    "got $accessors (pre-fix only the last-forced `bitems` survives)"
             )
         }
     }

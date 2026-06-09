@@ -184,11 +184,27 @@ suspend fun List<WrappedElement>.resolveAll(
  * bound classes are excluded from the count; the writer's last-wins dedup still picks up
  * the re-resolved bound classes, which is how `items()` is restored). The full
  * resolved set (minus the transient forcing struct) is returned for appending.
+ *
+ * [forcedContainerKeys] is a CUMULATIVE, in/out set of the container specs forced by every
+ * EARLIER instantiation request, shared across the whole run. It exists because each request
+ * gets its OWN `resolveForcing` with a FRESH tracker holding only THAT request's container,
+ * yet a single owning class can have SEVERAL range accessors over DIFFERENT containers (e.g.
+ * Clang's `CXXRecordDecl` with `methods() -> vector<CXXMethodDecl*>`, `bases() ->
+ * vector<CXXBaseSpecifier*>` and `decls() -> vector<Decl*>`). With only the current request's
+ * container in the tracker, pass 3 recovers THAT one range method and re-drops the others
+ * (their containers aren't visible), and the writer's last-wins dedup keeps whichever request
+ * ran last — silently losing the rest (`decls()` survived only by sorting last). Seeding the
+ * prior containers here (IGNORE_MISSING only — see pass 3) makes `canResolve` true for ALL of
+ * them, so pass 3 recovers EVERY range accessor of the re-resolved class regardless of the
+ * order requests are processed in (the set is cumulative, so whichever request runs last sees
+ * every container). This function also ADDS the container(s) it forces to the set, for the
+ * next request.
  */
 suspend fun List<WrappedElement>.resolveForcing(
     resolver: Resolver,
     policy: ReferencePolicy,
-    alreadyBoundKeys: Set<String>
+    alreadyBoundKeys: Set<String>,
+    forcedContainerKeys: MutableSet<String> = mutableSetOf()
 ): List<ResolvedElement> {
     val classes = filterIsInstance<WrappedClass>()
     // The `KrapperForce_*` struct's `value` member type IS the forced container
@@ -320,6 +336,20 @@ suspend fun List<WrappedElement>.resolveForcing(
         boundClasses.map { it.type.toString() }.toSet()
     }
     evictKeys.forEach { baseContext.tracker.resolvedClasses.remove(it) }
+    // CUMULATIVE forcing recovery: make every PRIOR request's container visible to this
+    // pass-3 re-resolve, not just the one this request forced. `otherResolved` is the set
+    // `canResolve` short-circuits on (it returns true before reaching any on-demand class
+    // resolution), so seeding it keeps a range method whose return container was forced by an
+    // EARLIER request — e.g. when this request forced `vector<Decl*>`, the owning
+    // `CXXRecordDecl`'s `methods()`/`bases()` (forced by sibling requests) are recovered here
+    // too instead of being re-dropped and overwriting the earlier recovery via last-wins.
+    // Seeds are query-only: they don't enter `resolvedClasses`, so they're neither emitted nor
+    // returned (the container is emitted by the request that actually forced it). IGNORE_MISSING
+    // only: under INCLUDE_MISSING nothing dropped in pass 1 (methods materialize on-demand), so
+    // there's nothing to recover and seeding would needlessly perturb the featuregen-stable path.
+    if (policy == ReferencePolicy.IGNORE_MISSING) {
+        baseContext.tracker.otherResolved.addAll(forcedContainerKeys)
+    }
     val pass3 = baseContext
         .withPolicyKeepingNamer(policy)
         .copy(mappingCache = mutableMapOf())
@@ -339,10 +369,18 @@ suspend fun List<WrappedElement>.resolveForcing(
     // transient forcing struct (it's scaffolding, never emitted) and return the rest.
     val resolved = baseContext.tracker.resolvedClasses.values.toList()
         .filter { it.type.toString().contains("KrapperForce_").not() } + methods
-    val newCount = resolved.count { element ->
-        (element as? ResolvedClass)?.type?.toString()?.let { it !in alreadyBoundKeys } == true
+    // Record the container(s) THIS request forced (the genuinely-new resolved classes pass 2
+    // materialized — i.e. those not already bound) so the NEXT request's pass 3 can see them.
+    // This is the cumulative half of the order-independent recovery seeded above. Captured for
+    // every policy (cheap, and never read back under INCLUDE_MISSING where seeding is gated off).
+    val newClassKeys = resolved.mapNotNull { element ->
+        (element as? ResolvedClass)?.type?.toString()?.takeIf { it !in alreadyBoundKeys }
     }
-    Log.i("Forcing introduced $newCount new class(es) (re-resolved ${resolved.size} total)")
+    forcedContainerKeys.addAll(newClassKeys)
+    Log.i(
+        "Forcing introduced ${newClassKeys.size} new class(es) " +
+            "(re-resolved ${resolved.size} total)"
+    )
     return resolved
 }
 
