@@ -53,6 +53,27 @@ class ReturnShapeTest {
         }
     }
 
+    // Resolve [className] under a SCOPED import (only [className] is allowlisted) with the
+    // IGNORE_MISSING policy — the clangwalk self-host harness's exact configuration. Unlike
+    // [classOf] (INCLUDE_MISSING, which pulls std::basic_string in as a wrapped class), here
+    // basic_string is a missing reference, so the GAP B normalization is what keeps a
+    // std::string-by-value return alive (as a STRING boundary) instead of dropping it.
+    private fun scopedMethodsOf(header: String, className: String): List<ResolvedMethod> =
+        memScoped {
+            runBlocking {
+                val index = createIndex(0, 0) ?: error("Failed to create Index")
+                defer { index.dispose() }
+                val tmpFile = "/tmp/krapper_retshape_scoped_${random()}_${random()}.h"
+                File(tmpFile).writeText(header)
+                val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+                val found = resolver.findClasses(AllowListFilter(listOf(className)).wrapperFilter())
+                found.resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+                    .filterIsInstance<ResolvedClass>()
+                    .first { it.type.type == className }
+                    .children.filterIsInstance<ResolvedMethod>()
+            }
+        }
+
     // Emit the C++ wrapper body for one method of a resolved class (the same CppWriter path
     // the real generator runs) so a test can assert the emitted C boundary code.
     private fun emittedCpp(cls: ResolvedClass, method: ResolvedMethod): String = runBlocking {
@@ -99,6 +120,47 @@ class ReturnShapeTest {
         assertTrue(
             methods.any { it.name == "name" },
             "const std::string-by-value method `name` must bind; got ${methods.map { it.name }}"
+        )
+    }
+
+    // GAP B (self-bootstrap front-end): under a SCOPED import (`only(...)`) + IGNORE_MISSING
+    // — the clangwalk harness config — a `std::string`-by-value return surfaces under its
+    // canonical template spelling `std::__cxx11::basic_string<char>`, whose basic_string
+    // class is NOT allowlisted. Before the fix the whole method was silently DROPPED as a
+    // missing dependency (this is the wall for Clang's `QualType::getAsString` /
+    // `NamedDecl::getNameAsString`). The normalization rewrites the unbound basic_string<char>
+    // to `std::string`, so the method SURVIVES and surfaces as Kotlin String. Covers the
+    // by-value and the top-level-`const` by-value forms (both real on the Clang surface).
+    @Test
+    fun scopedStringByValueReturnBindsAsString() {
+        val methods = scopedMethodsOf(
+            """
+            |#include <string>
+            |struct ScopedStrProbe {
+            |    std::string getNameAsString() const { return "x"; }
+            |    const std::string getAsString() const { return "y"; }
+            |    int id() const { return 1; }
+            |};
+            """.trimMargin(),
+            "ScopedStrProbe"
+        )
+        for (name in listOf("getNameAsString", "getAsString")) {
+            val method = methods.firstOrNull { it.name == name }
+            assertTrue(
+                method != null,
+                "scoped std::string-by-value method `$name` must survive IGNORE_MISSING; " +
+                    "got ${methods.map { it.name }}"
+            )
+            assertTrue(
+                method.returnType.kotlinType.fullyQualified.startsWith("kotlin.String"),
+                "`$name` must surface as Kotlin String; " +
+                    "got ${method.returnType.kotlinType.fullyQualified}"
+            )
+        }
+        // Sanity: a sibling plain method binds too (the class itself isn't the problem).
+        assertTrue(
+            methods.any { it.name == "id" },
+            "sibling plain method `id` must bind; got ${methods.map { it.name }}"
         )
     }
 
