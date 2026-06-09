@@ -64,6 +64,43 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             val generatedFile = File(krappedDir, "generated.txt")
             val fixupFile = File(krappedDir, "fixups.json")
             val moduleName = target.name
+            // Declare up-to-date inputs/outputs so Gradle can (a) order this task
+            // ahead of the native compile that consumes krapped/ (see
+            // wireGeneratedBindings), and (b) skip the regeneration when nothing
+            // that feeds it has changed. Inputs: the generator kexe, the
+            // compiler-written manifest, the configured headers, and the
+            // extension config that becomes krapper_gen CLI args. Output: the
+            // whole krapped/ dir (the kexe regenerates it wholesale each run).
+            //
+            // The header-driven path intentionally has no per-method change
+            // tracking (see the hasHeaders force-regenerate note below), so when
+            // headers are configured we leave the task always out-of-date by
+            // declaring no output — Gradle then re-runs it every invocation,
+            // which is the existing, correct behaviour for that path.
+            val ext = target.extensions.findByType(KPlusPlusExtension::class.java)
+            val hasHeadersAtConfig = ext?.headers?.isNotEmpty() == true
+            it.inputs.file(kexe).withPropertyName("krapperGenKexe")
+                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
+            it.inputs.files(manifestFile).withPropertyName("requestedManifest")
+                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
+                .optional(true)
+            ext?.let { e ->
+                it.inputs.property("instantiations", e.instantiations.sorted())
+                it.inputs.property("referencePolicy", e.referencePolicy ?: "")
+                it.inputs.property("cppStandard", e.cppStandard ?: "")
+                it.inputs.property("rootPackage", e.rootPackage ?: "")
+                it.inputs.property("only", e.only.sorted())
+                it.inputs.property("onlyFile", e.onlyFile ?: "")
+                it.inputs.property("fixups", e.fixups.toJsonArray())
+                if (e.headers.isNotEmpty()) {
+                    it.inputs.files(e.headers.map { h -> target.file(h) })
+                        .withPropertyName("headers")
+                        .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+                }
+            }
+            if (!hasHeadersAtConfig) {
+                it.outputs.dir(krappedDir).withPropertyName("krappedDir")
+            }
             it.doLast {
                 if (!kexe.exists()) {
                     throw GradleException(
@@ -73,10 +110,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                             "settings.gradle.kts."
                     )
                 }
-                // Resolve the v2 extension (created in apply()). The block is
+                // The v2 extension (created in apply(), captured above) is
                 // optional — projects with no header import and no fixups
                 // still work via the existing pure-instantiation flow.
-                val ext = target.extensions.findByType(KPlusPlusExtension::class.java)
                 val hasHeaders = ext?.headers?.isNotEmpty() == true
                 val seededInstantiations = ext?.instantiations.orEmpty()
                 val hasManifest = manifestFile.exists()
@@ -336,6 +372,16 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // and the wiring picks up.
         if (kotlinCompilation is KotlinNativeCompilation && kotlinCompilation.name == "main") {
             wireGeneratedBindings(kotlinCompilation, project)
+            // The main compile consumes the generated krapped/ sources and
+            // cinterop .def. Make it (and thereby the test compile, which
+            // depends on it) depend on kplusplusSync so the generator runs —
+            // and Gradle's up-to-date check regenerates stale output — before
+            // anything compiles against it. Without this, `:featuregen:nativeTest`
+            // run as its own invocation would compile whatever krapped/ happened
+            // to be on disk (issue #16).
+            kotlinCompilation.compileTaskProvider.configure { compileTask ->
+                compileTask.dependsOn("kplusplusSync")
+            }
         }
         // Per-compilation manifest path: matches the krapped/ layout the sync
         // task + wireGeneratedBindings already use, so the on-disk wiring stays
@@ -361,12 +407,46 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val krappedDir = File(project.projectDir, "krapped")
         val krappedDef = File(krappedDir, "$moduleName.def")
         val krappedSrc = File(krappedDir, "src")
-        if (krappedDef.exists()) {
+        // Wire the generated cinterop .def + Kotlin source dir into the main
+        // native compilation. This must happen even when the artifacts don't yet
+        // exist at configuration time: kplusplusSync produces them, and the
+        // cinterop/compile tasks depend on it (below), so they run after the
+        // generator. Conditioning on existence (the old behaviour) was the
+        // chicken-and-egg in issue #16 — a stale/missing def at configure time
+        // meant the cinterop was never created, so a sync that regenerated the
+        // def couldn't be picked up in the same invocation and the compile failed
+        // on the unresolved `<module>` cinterop package.
+        //
+        // Only wire when the project is actually configured to generate bindings
+        // (a kplusplus { } block with headers/instantiations, or a manifest the
+        // compiler wrote, or already-present artifacts). A project that does
+        // neither has no krapped/ to consume and must not get a cinterop pointed
+        // at a def that will never exist.
+        project.afterEvaluate {
+            val ext = project.extensions.findByType(KPlusPlusExtension::class.java)
+            val manifestFile = File(krappedDir, "requested.txt")
+            val willGenerate = ext?.headers?.isNotEmpty() == true ||
+                ext?.instantiations?.isNotEmpty() == true ||
+                manifestFile.exists()
+            if (!willGenerate && !krappedDef.exists() && !krappedSrc.exists()) {
+                return@afterEvaluate
+            }
             compilation.cinterops.create("kplusplus") { interop ->
                 interop.defFile = krappedDef
             }
-        }
-        if (krappedSrc.exists()) {
+            // The cinterop task reads the generated .def; make it regenerate via
+            // kplusplusSync first so it can't process a stale def (issue #16).
+            // The interop task is named cinterop<Name><Target>; for the
+            // "kplusplus" interop on the "native" target that is
+            // cinteropKplusplusNative.
+            val interopTaskName = "cinteropKplusplus" +
+                compilation.target.targetName.replaceFirstChar { it.uppercase() }
+            project.tasks.matching { it.name == interopTaskName }.configureEach {
+                it.dependsOn("kplusplusSync")
+            }
+            // The generated Kotlin sources live under krapped/src. srcDir tolerates
+            // a not-yet-existing directory at configure time; kplusplusSync (a
+            // compile dependency) creates it before compilation reads it.
             compilation.defaultSourceSet.kotlin.srcDir(krappedSrc)
         }
     }
