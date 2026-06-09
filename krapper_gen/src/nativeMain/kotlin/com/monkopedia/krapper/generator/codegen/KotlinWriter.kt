@@ -859,35 +859,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     }
 
     // Split a comma-separated template-arg list at top level only (so a nested
-    // `Inner<a, b>` arg stays intact).
+    // `Inner<a, b>` arg stays intact). A trailing blank segment is dropped (so an
+    // empty arg list yields no entries); segments are returned untrimmed.
     private fun splitTopLevelArgs(args: String): List<String> {
-        val result = mutableListOf<String>()
-        var depth = 0
-        val current = StringBuilder()
-        for (c in args) {
-            when (c) {
-                '<' -> {
-                    depth++
-                    current.append(c)
-                }
-
-                '>' -> {
-                    depth--
-                    current.append(c)
-                }
-
-                ',' -> if (depth == 0) {
-                    result.add(current.toString())
-                    current.clear()
-                } else {
-                    current.append(c)
-                }
-
-                else -> current.append(c)
-            }
-        }
-        if (current.isNotBlank()) result.add(current.toString())
-        return result
+        val segments = splitTopLevel(args)
+        return if (segments.last().isBlank()) segments.dropLast(1) else segments
     }
 
     /**
@@ -1970,22 +1946,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val inner = literal.substring(1, close).trim()
         val ret = literal.substring(arrow + 2).trim()
         if (inner.isEmpty()) return emptyList<String>() to ret
-        val args = mutableListOf<String>()
-        var depth = 0
-        var start = 0
-        inner.forEachIndexed { i, c ->
-            when (c) {
-                '(', '<' -> depth++
-
-                ')', '>' -> depth--
-
-                ',' -> if (depth == 0) {
-                    args.add(inner.substring(start, i).trim())
-                    start = i + 1
-                }
-            }
-        }
-        args.add(inner.substring(start).trim())
+        // Track both `()` and `<>` nesting so a nested function/generic arg type
+        // stays intact; every segment is kept (incl. a trailing blank) and trimmed.
+        val args = splitTopLevel(inner, opens = "(<", closes = ")>").map { it.trim() }
         return args to ret
     }
 
@@ -2555,4 +2518,41 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         +Return(retValue.reference)
     }
+}
+
+/**
+ * Split [s] on top-level commas only, tracking nesting depth across the bracket
+ * pairs in [opens]/[closes] (paired by position — `opens[i]` closes with
+ * `closes[i]`) so commas inside a nested `Inner<a, b>` / `(a, b)` group are not
+ * split on. The delimiting commas are dropped; every other character (incl. the
+ * bracket chars) is preserved in its segment. Always returns at least one segment
+ * (the input with no top-level comma yields the whole string); segments are not
+ * trimmed. Callers apply their own trimming / trailing-blank handling.
+ */
+internal fun splitTopLevel(s: String, opens: String = "<", closes: String = ">"): List<String> {
+    val result = mutableListOf<String>()
+    var depth = 0
+    val current = StringBuilder()
+    for (c in s) {
+        when {
+            c in opens -> {
+                depth++
+                current.append(c)
+            }
+
+            c in closes -> {
+                depth--
+                current.append(c)
+            }
+
+            c == ',' && depth == 0 -> {
+                result.add(current.toString())
+                current.clear()
+            }
+
+            else -> current.append(c)
+        }
+    }
+    result.add(current.toString())
+    return result
 }
