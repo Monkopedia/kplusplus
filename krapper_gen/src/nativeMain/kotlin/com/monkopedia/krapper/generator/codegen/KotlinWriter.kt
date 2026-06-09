@@ -397,6 +397,22 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         appendLine()
     }
 
+    // Kotlin names of the class's own member methods — used to detect when a synthesized member
+    // (dispose/owned, up-/down-cast) would clash with a real one.
+    private fun memberMethodNames(cls: ResolvedClass): Set<String> =
+        cls.children.filterIsInstance<ResolvedMethod>()
+            .filter { it.methodType == MethodType.METHOD }
+            .mapTo(mutableSetOf()) { fixNaming(it).name }
+
+    // Cast-generator name-clash guard: if `name` is already a member, emit the NOTE and skip.
+    private fun KotlinCodeBuilder.skipIfNameClash(name: String, existing: Set<String>): Boolean {
+        if (name !in existing) return false
+        comment(
+            "NOTE: $name() not generated — this class already declares a member with that name."
+        )
+        return true
+    }
+
     // Caller-controlled destruction (matrix: OB-return-ptr-owned / IH-destruction). Every
     // `T*`/`T&` return is a NON-owning wrapper, so the caller decides if/when to delete it.
     // For any class with a destructor we surface the dispose C wrapper (`Type_dispose`, the
@@ -412,10 +428,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // Rare collision: a C++ class that already declares a `dispose`/`owned` method would
         // clash with these synthesized members. Skip emission in that case (the existing
         // method keeps the name); the dispose C wrapper is still reachable via the Holder.
-        val hasNameClash = cls.children.filterIsInstance<ResolvedMethod>().any {
-            it.methodType == MethodType.METHOD &&
-                (fixNaming(it).name == "dispose" || fixNaming(it).name == "owned")
-        }
+        val existingNames = memberMethodNames(cls)
+        val hasNameClash = "dispose" in existingNames || "owned" in existingNames
         if (hasNameClash) {
             comment(
                 "NOTE: dispose()/owned() not generated — this class already declares a " +
@@ -468,19 +482,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // upcast's plain reinterpret_cast would read garbage. Complements (does not replace)
     // the offset-0 interface-per-base upcast in handleSuperClassesRecursive.
     private fun KotlinCodeBuilder.generateCastMethods(cls: ResolvedClass) {
-        val existingNames = cls.children.filterIsInstance<ResolvedMethod>()
-            .filter { it.methodType == MethodType.METHOD }
-            .mapTo(mutableSetOf()) { fixNaming(it).name }
+        val existingNames = memberMethodNames(cls)
         for (target in castTargetsFor(cls) { currentClasses[it] }) {
             // Name-clash guard (mirrors generateDisposeMethods): if D already declares a
             // member named `as<Base>`, skip it — the existing method keeps the name.
-            if (target.kotlinMethodName in existingNames) {
-                comment(
-                    "NOTE: ${target.kotlinMethodName}() not generated — this class already " +
-                        "declares a member with that name."
-                )
-                continue
-            }
+            if (skipIfNameClash(target.kotlinMethodName, existingNames)) continue
             inline {
                 function {
                     name = target.kotlinMethodName
@@ -511,18 +517,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // `classof`-bearing type, else `dynamic_cast`) is invisible here. Name-clash-guarded
     // identically to the up-cast and dispose methods.
     private fun KotlinCodeBuilder.generateDownCastMethods(cls: ResolvedClass) {
-        val existingNames = cls.children.filterIsInstance<ResolvedMethod>()
-            .filter { it.methodType == MethodType.METHOD }
-            .mapTo(mutableSetOf()) { fixNaming(it).name }
+        val existingNames = memberMethodNames(cls)
         val allClasses = currentClasses.values.toList()
         for (target in downCastTargetsFor(cls, allClasses) { currentClasses[it] }) {
-            if (target.kotlinMethodName in existingNames) {
-                comment(
-                    "NOTE: ${target.kotlinMethodName}() not generated — this class already " +
-                        "declares a member with that name."
-                )
-                continue
-            }
+            if (skipIfNameClash(target.kotlinMethodName, existingNames)) continue
             inline {
                 function {
                     name = target.kotlinMethodName
