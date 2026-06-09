@@ -92,6 +92,15 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     // for an unrestricted DefaultFilter import (every non-std class is requested).
     private val requested = mutableListOf<String>()
 
+    // The container specializations forced by instantiation requests SO FAR, accumulated
+    // across every requestInstantiation call. Threaded into each resolveForcing so a later
+    // request's pass-3 re-resolve of an already-bound class can recover EVERY range accessor
+    // of that class (one per forced container) at once — not just the one this request forced,
+    // which the per-call fresh tracker + last-wins merge would otherwise leave as the sole
+    // survivor (e.g. CXXRecordDecl keeping only decls() and dropping methods()/bases()). See
+    // `resolveForcing`'s [forcedContainerKeys] doc.
+    private val forcedContainerKeys = mutableSetOf<String>()
+
     init {
         scope.defer {
             index.dispose()
@@ -254,7 +263,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         val newClasses = scopedFound.resolveForcing(
             resolver,
             config.referencePolicy,
-            alreadyBoundKeys
+            alreadyBoundKeys,
+            forcedContainerKeys
         )
         classes = classes + newClasses.filter {
             it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
