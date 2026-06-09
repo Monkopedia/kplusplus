@@ -623,9 +623,32 @@ class WrappedArgument(
             // Secondary path: when the value instead survives as a literal STRING token
             // (the spelling-reconstruction path can yield `Mask<4>` with arg `"4"`),
             // [isNonTypeTemplateArg] classifies that token. Either path catches it.
+            //
+            // Third path — an unmodelable CALLBACK param (`llvm::function_ref<R(Args)>`,
+            // `std::function<R(Args)>`): the template arg is a FUNCTION TYPE (`int (Thing
+            // *)`), which the type model can't bind, so the param fails to resolve. But the
+            // hasDefault cursor heuristic misreads the callback signature's parenthesized
+            // param list as a default value (e.g. `cb`'s "default" surfaces as `Thing*`), so
+            // a callback param with NO real C++ default looks omittable. Trimming it then
+            // emits a SHORT call (`m(a)` for a 2-arg method) — an arity mismatch that fails
+            // to compile and aborts the whole build (the clangwalk self-host hit this on
+            // `clang::ASTContext::adjustType` / `forEachMultiversionedFunctionVersion`). A
+            // function-type arg is never a genuine, trimmable default, so treat it as a false
+            // default: the whole method drops (skip-not-crash, ledgered) instead.
             return referent is WrappedTemplateType &&
-                referent.templateArgs.any { it == UNRESOLVABLE || it.isNonTypeTemplateArg }
+                referent.templateArgs.any {
+                    it == UNRESOLVABLE || it.isNonTypeTemplateArg || it.isFunctionTypeArg
+                }
         }
+
+    // A template-argument WrappedType that is a FUNCTION TYPE — the `R(Args...)` callback
+    // signature inside `function_ref<R(Args...)>` / `std::function<R(Args...)>`. It surfaces
+    // as a bare type spelling carrying a parenthesized parameter list (`int (Thing *)`);
+    // plain/pointer/reference/template type spellings never contain `(`, so a `(` is the
+    // clean structural signal that this arg is a (function-)callable type the model can't
+    // bind by value.
+    private val WrappedType.isFunctionTypeArg: Boolean
+        get() = '(' in toString()
 
     // A template-argument WrappedType whose spelling is a VALUE literal rather than a
     // type name — i.e. a non-type template parameter's argument that survived as a string

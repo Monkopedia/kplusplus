@@ -369,6 +369,86 @@ class ParseTest {
         }
     }
 
+    // GAP A skip-not-crash on an unmodelable CALLBACK param. Under IGNORE_MISSING a method
+    // whose param is `llvm::function_ref<R(Args)>` / `std::function<R(Args)>` (here the
+    // self-contained `FnRef<int(Thing*)>` mimic — a partial specialization over a FUNCTION
+    // TYPE) can't be modeled. The bug: the hasDefault cursor heuristic misread the callback
+    // signature's parenthesized param list as a default value, so the param looked
+    // "omittable" and was silently TRIMMED — emitting a short call `withCallback(a)` for a
+    // 2-arg method (an arity mismatch that fails to compile and aborts the whole build, the
+    // clangwalk self-host's exit-134 on `clang::ASTContext::adjustType` /
+    // `forEachMultiversionedFunctionVersion`). Correct behavior: drop the WHOLE method
+    // (skip-not-crash, ledgered), exactly like an unresolvable return type. The genuinely-
+    // defaulted `withDefaulted` (a real `= Holder<Thing>()` default over a TYPE arg) must
+    // STILL bind by trimming its trailing default — proving the fix doesn't break the
+    // legitimate omittable-default path (e.g. buildASTFromCode's defaulted trailing params).
+    @Test
+    fun testUnmodelableCallbackParamDropsWholeMethod() = memScoped {
+        runBlocking {
+            DropLedger.reset()
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_callbackparam_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |class Thing { public: int v() const; };
+                |// Mimic of llvm::function_ref: a partial specialization over a function type.
+                |template <typename Fn> class FnRef;
+                |template <typename Ret, typename... Params>
+                |class FnRef<Ret(Params...)> {
+                |public:
+                |    FnRef() {}
+                |    template <typename C> FnRef(C&&) {}
+                |    Ret operator()(Params...) const;
+                |};
+                |template <typename T> class Holder { public: T* p; };
+                |class Fix {
+                |public:
+                |    int normal(int a) const;
+                |    int withCallback(int a, FnRef<int(Thing*)> cb) const;
+                |    int withDefaulted(int a, Holder<Thing> s = Holder<Thing>()) const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            val allow = AllowListFilter(listOf("fixture::Fix"))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val resolved = found.resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+            val fix = resolved.filterIsInstance<ResolvedClass>()
+                .first { it.type.type == "fixture::Fix" }
+            val methodNames = fix.children.filterIsInstance<ResolvedMethod>().map { it.name }
+            println("Callback-param resolved methods: $methodNames")
+            // The plain method still binds.
+            assertTrue(
+                "normal" in methodNames,
+                "the ordinary method must still bind; got $methodNames"
+            )
+            // The callback-param method is dropped WHOLE — never emitted with a trimmed
+            // (arity-mismatched) signature.
+            assertTrue(
+                "withCallback" !in methodNames,
+                "the unmodelable-callback-param method must be dropped, not trimmed; " +
+                    "got $methodNames"
+            )
+            // The genuinely-defaulted param method still binds (trailing default trimmed),
+            // proving the legitimate omittable-default path is intact.
+            assertTrue(
+                "withDefaulted" in methodNames,
+                "a genuinely-defaulted trailing param must STAY omittable; got $methodNames"
+            )
+            // The drop is recorded in the ledger with a reason.
+            val drop = DropLedger.drops.firstOrNull { "withCallback" in it.symbol }
+            assertTrue(
+                drop != null && drop.reason.isNotBlank(),
+                "the dropped callback method must be ledgered with a reason; " +
+                    "got ${DropLedger.drops}"
+            )
+            File(tmpFile).delete()
+        }
+    }
+
     // Issue #10 (broad-binding scale tail): regression coverage for the INCLUDE_MISSING
     // cyclic-expansion guard. A seed class `Seed` exposes a `const Node&` accessor; `Node`
     // (not seeded) has a `const Node&` self-accessor — a self-cycle closed by a WRAPPED
