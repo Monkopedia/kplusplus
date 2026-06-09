@@ -193,35 +193,30 @@ class CppWriter(
     //   false -> `dynamic_cast<D*>(value)`           (standard C++ RTTI).
     // Both yield `D*`-or-null, which the shim returns as the opaque `void*`.
     private fun dynOrLlvmCast(derivedType: String, value: Symbol, useLlvmDynCast: Boolean): Symbol =
-        object : Symbol {
-            override fun build(builder: CodeStringBuilder) {
-                if (useLlvmDynCast) {
-                    builder.append("llvm::dyn_cast_or_null<$derivedType>(")
-                } else {
-                    builder.append("dynamic_cast<$derivedType*>(")
-                }
-                value.build(builder)
-                builder.append(")")
-            }
+        if (useLlvmDynCast) {
+            castSymbol("llvm::dyn_cast_or_null<$derivedType>(", value)
+        } else {
+            castSymbol("dynamic_cast<$derivedType*>(", value)
         }
 
     // `static_cast<type>(value)` — used to apply a base subobject offset in the upcast
     // helpers (the wrappers' usual RawCast/reinterpret can't shift the pointer).
-    private fun staticCast(type: String, value: Symbol): Symbol = object : Symbol {
-        override fun build(builder: CodeStringBuilder) {
-            builder.append("static_cast<$type>(")
-            value.build(builder)
-            builder.append(")")
-        }
-    }
+    private fun staticCast(type: String, value: Symbol): Symbol =
+        castSymbol("static_cast<$type>(", value)
 
     // `reinterpret_cast<type>(arg)` over a RAW C++ type string (not a ResolvedType) — used
     // only by the cast helpers, where the type is built by hand. Named distinctly from the
     // ResolvedType-typed `reinterpret` below to avoid confusing the two at the call site.
-    private fun reinterpretRaw(arg: LocalVar, type: String): Symbol = object : Symbol {
+    private fun reinterpretRaw(arg: LocalVar, type: String): Symbol =
+        castSymbol("reinterpret_cast<$type>(", arg.reference)
+
+    // A C++ cast expression `prefix value )` — every cast helper above is just a fixed
+    // `cast<...>(` prefix wrapped around a value and closed with `)`. [prefix] must include
+    // the trailing `(`.
+    private fun castSymbol(prefix: String, value: Symbol): Symbol = object : Symbol {
         override fun build(builder: CodeStringBuilder) {
-            builder.append("reinterpret_cast<$type>(")
-            arg.reference.build(builder)
+            builder.append(prefix)
+            value.build(builder)
             builder.append(")")
         }
     }
@@ -584,56 +579,42 @@ class CppWriter(
         }
     }
 
-    private fun CppCodeBuilder.createPointedStringReturn(call: Symbol) {
+    private fun CppCodeBuilder.createPointedStringReturn(call: Symbol) =
+        createStringReturn(call, byPointer = true)
+
+    // Build the `const char*` boundary return from a (by-value or by-pointer) std::string.
+    // [byPointer] selects the member-access form: `->`/`->length()` for a `std::string*`
+    // ([ResolvedType.PSTRING]) source, `.`/`.length()` for a by-value `std::string`
+    // ([ResolvedType.STRING]). The emitted C++ must stay byte-identical for either form.
+    private fun CppCodeBuilder.createStringReturn(call: Symbol, byPointer: Boolean = false) {
+        val sourceType = if (byPointer) ResolvedType.PSTRING else ResolvedType.STRING
+        // The raw `.length()` / `->length()` access on the source local, as a C++ string.
+        val lengthAccess = "${if (byPointer) "->" else "."}length()"
+        val access: Symbol.(Symbol) -> Symbol = if (byPointer) Symbol::arrow else Symbol::dot
         val returnStr = +define(
             "ret_value",
-            ResolvedType.PSTRING,
+            sourceType,
             initializer = call
         )
         val returnArray = +define(
             "ret_value_cast",
             ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}->length() + 1]"))
+            initializer = New(Raw("char[${returnStr.name}$lengthAccess + 1]"))
         )
         +(
-            returnStr.reference arrow Call(
-                "copy",
-                returnArray.reference,
-                returnStr.reference arrow Call("length"),
-                Raw("0")
+            returnStr.reference.access(
+                Call(
+                    "copy",
+                    returnArray.reference,
+                    returnStr.reference.access(Call("length")),
+                    Raw("0")
+                )
             )
             )
         // std::basic_string::copy does NOT NUL-terminate — the `+ 1` slot is allocated but
         // never written, so toKString() (which scans to the first '\0') reads a garbage byte
         // past the string (the `Point` -> `PointU` corruption). Terminate it explicitly.
-        +Raw("${returnArray.name}[${returnStr.name}->length()] = '\\0'")
-        +Return(returnArray.reference)
-    }
-
-    private fun CppCodeBuilder.createStringReturn(call: Symbol) {
-        val returnStr =
-            +define(
-                "ret_value",
-                ResolvedType.STRING,
-                initializer = call
-            )
-        val returnArray = +define(
-            "ret_value_cast",
-            ResolvedType.CSTRING,
-            initializer = New(Raw("char[${returnStr.name}.length() + 1]"))
-        )
-        +(
-            returnStr.reference dot Call(
-                "copy",
-                returnArray.reference,
-                returnStr.reference dot Call("length"),
-                Raw("0")
-            )
-            )
-        // std::basic_string::copy does NOT NUL-terminate — the `+ 1` slot is allocated but
-        // never written, so toKString() (which scans to the first '\0') reads a garbage byte
-        // past the string (the `Point` -> `PointU` corruption). Terminate it explicitly.
-        +Raw("${returnArray.name}[${returnStr.name}.length()] = '\\0'")
+        +Raw("${returnArray.name}[${returnStr.name}$lengthAccess] = '\\0'")
         +Return(returnArray.reference)
     }
 
