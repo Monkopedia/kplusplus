@@ -1403,11 +1403,18 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     generateOperator(operator, cls, method)
                 } else {
                     val named = fixNaming(method)
+                    // A `get`/`at`-keyed index container's index-get returns a container
+                    // ELEMENT that must stay CONCRETE (so the synthesized iterator's
+                    // `next()` lines up and the element's own methods are reachable) — same
+                    // rule the `[]` operator already gets. Recognize it on the ORIGINAL
+                    // method (detectIndexIterable selects by the un-renamed identity).
+                    val keepConcreteElement = isIndexGetMethod(cls, method)
                     val emit: KotlinCodeBuilder.() -> Unit = {
                         generateBasicMethod(
                             named,
                             uniqueCName,
-                            methodName = overloadMethodName(cls, named)
+                            methodName = overloadMethodName(cls, named),
+                            keepConcreteElement = keepConcreteElement
                         )
                     }
                     // A method declared on the generic template interface OR on a base
@@ -1679,20 +1686,23 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         uniqueCName: Symbol,
         methodName: String = method.name,
         startArgs: List<Symbol> = listOf(ptr),
-        skipFirstArg: Boolean = true
+        skipFirstArg: Boolean = true,
+        keepConcreteElement: Boolean = false
     ) {
         function {
             name = methodName.kotlinMethodName()
             // Declared return upcast to a base interface when applicable; body keeps the
             // concrete returnType (constructs the concrete wrapper). See onGenerate(method).
-            // EXCEPT the index `[]` operator: it returns a CONTAINER ELEMENT, which must stay
+            // EXCEPT the index get: it returns a CONTAINER ELEMENT, which must stay
             // CONCRETE — the synthesized `Iterable<Elem>`/`iterator()` (detectIndexIterable)
             // declares the raw element type, and the element's own methods (e.g. a walked
             // `clang::Decl`'s getDeclKindName/asNamedDecl) live on the concrete class, not the
-            // (member-less) base interface. Remapping `get` to `DeclApi` both mismatched
-            // `next()` and made the elements useless.
+            // (member-less) base interface. Remapping the get to `DeclApi` both mismatched
+            // `next()` and made the elements useless. This covers BOTH the `[]` operator
+            // ([ResolvedOperator.IND]) AND the `get`/`at`-keyed fallbacks (via the
+            // [keepConcreteElement] flag the named-method path sets from [isIndexGetMethod]).
             retType = type(
-                if (method.operator == ResolvedOperator.IND) {
+                if (method.operator == ResolvedOperator.IND || keepConcreteElement) {
                     method.returnType
                 } else {
                     remapReturnType(method.returnType)
@@ -2285,8 +2295,15 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
      * @param elemFq the FQ Kotlin element type (`get`'s return) — `Point?`, or a
      *   `CValuesRef<IntVar>?` element pointer for primitive vectors
      * @param getName the Kotlin name the index get is emitted under (`operator[]` -> `get`)
+     * @param indexGet the resolved index-get method itself (the `operator[]` or the
+     *   `get`/`at` fallback) — so the basic-method emitter can recognize THIS method and
+     *   keep its element type CONCRETE (see [generateBasicMethod]).
      */
-    private data class IndexIterable(val elemFq: String, val getName: String)
+    private data class IndexIterable(
+        val elemFq: String,
+        val getName: String,
+        val indexGet: ResolvedMethod
+    )
 
     /**
      * Detect an index-accessible container (std::vector — exposes a `size()` plus an
@@ -2326,8 +2343,25 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val getName = indexGet.operator?.kotlinOperatorType?.let {
             (it as? KotlinOperator)?.name
         } ?: overloadMethodName(cls, fixNaming(indexGet))
-        return IndexIterable(renderFqKotlinType(indexGet.returnType.kotlinType), getName)
+        return IndexIterable(
+            renderFqKotlinType(indexGet.returnType.kotlinType),
+            getName,
+            indexGet
+        )
     }
+
+    /**
+     * True when [method] is the index-get of an index-accessible container [cls] (the
+     * `operator[]`, or the `get`/`at` fallback that [detectIndexIterable] selected). Its
+     * return type is a CONTAINER ELEMENT that must stay CONCRETE — the synthesized
+     * `iterator()`'s `next()` calls this get and declares the raw element type, and the
+     * element's own methods live on the concrete class, not the (member-less) base
+     * interface. So the element type must NOT be upcast to a base interface. This covers
+     * `operator[]` (already special-cased via [ResolvedOperator.IND]) AND the `get`/`at`
+     * fallbacks, which route through the plain named-method path.
+     */
+    private fun isIndexGetMethod(cls: ResolvedClass, method: ResolvedMethod): Boolean =
+        detectIndexIterable(cls)?.indexGet === method
 
     /**
      * Emit the synthesized `override operator fun iterator()` for an index-accessible

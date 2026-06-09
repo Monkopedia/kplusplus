@@ -371,6 +371,27 @@ struct ShapeProbe {
     }
 };
 
+// CV-getat-base-elem (#7 item 3): a `get`/`at`-keyed index container whose ELEMENT
+// type is a BASE class (`Shape*`, which has a generated `ShapeApi` interface). The
+// generator upcasts the `at(...)` return to `ShapeApi?`, but the synthesized
+// `iterator()`'s `next()` declares the CONCRETE element type — so WITHOUT the item-3
+// fix the emitted `next(): Shape? = at(i): ShapeApi?` doesn't typecheck and the
+// featuregen build fails to compile. With the fix the `at`/`get` get keeps the
+// concrete element type (matching `operator[]`), so the container binds and the stored
+// concrete Shapes round-trip (area() virtual-dispatches through the element).
+//
+// Index keyed by `at`/`get` (NOT `operator[]`) with a `size_t` size + `size_t` index,
+// so detectIndexIterable selects the `at` fallback rather than the IND operator path.
+struct ShapeBag {
+    Shape* items[3];
+    std::size_t n;
+    ShapeBag() : n(0) { items[0] = items[1] = items[2] = nullptr; }
+    void add(Shape* s) { if (n < 3) items[n++] = s; }
+    std::size_t size() const { return n; }
+    Shape* at(std::size_t i) const { return i < n ? items[i] : nullptr; }
+    Shape* get(std::size_t i) const { return at(i); }
+};
+
 // IH-flatten (3-level chain): Animal <- Dog <- Puppy. `Animal` is polymorphic
 // (virtual speak()/legs() + virtual dtor); `Dog` overrides speak(); `Puppy`
 // overrides speak() AGAIN and inherits legs() unchanged. This exercises the
