@@ -69,9 +69,23 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     private var classes: List<ResolvedElement> = emptyList()
     private val mappings = mutableListOf<MappingService>()
 
-    // Headers synthesized by requestInstantiation to force template instantiations.
-    // writeTo references these so the generated wrapper #includes the needed std headers.
+    // Forcing headers synthesized by requestInstantiation to make libclang instantiate a
+    // template specialization. Keyed forceName -> file contents. They are PARSED from a
+    // per-run temp dir (hermetic, cleaned in close()) and then re-materialized into the
+    // output dir by writeTo, so the generated wrapper #includes them by a stable, relative,
+    // self-contained path (no /tmp leak, deterministic across runs).
+    private val forcingHeaders = linkedMapOf<String, String>()
+
+    // The output-relative paths the generated .cc/.h should #include for the forcing headers.
+    // Populated by writeTo once the output dir is known.
     private val syntheticHeaders = mutableListOf<String>()
+
+    // Process-unique scratch dir for parsing the forcing headers. Created lazily on the
+    // first instantiation (a run with no --instantiate touches nothing) and removed in
+    // close(). Per-run unique (pid + counter) so concurrent runs never clobber each other.
+    private var tempDir: File? = null
+    private fun tempDir(): File =
+        tempDir ?: File.createTempDir("krapper_inst").also { tempDir = it }
 
     // What the run was explicitly ASKED to bind: the --only allowlist entries plus each
     // --instantiate target. The drop-ledger report diffs this against what actually
@@ -159,25 +173,26 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             // is unaffected.
             .replace("*", "Ptr")
             .replace("&", "Ref")
-        val tmpFile = "/tmp/krapper_inst_$forceName.h"
-        File(tmpFile).writeText(
-            buildString {
-                // Every type in the instantiation must be declared, not just the
-                // outer base — previously only stdHeaderFor(req.base) was included,
-                // so std::vector<std::string> failed (basic_string undeclared).
-                // Include std headers TARGETED to the types named in `target`
-                // (scanning, so nested element types are covered) plus the
-                // consumer's own headers (for user element types like a wrapped
-                // struct in std::vector<Point>). Targeted rather than a blanket
-                // bundle: a broad include drags unrelated system structs in under
-                // INCLUDE_MISSING (e.g. <sys/timex.h>'s `timex`), which then
-                // generate invalid wrappers.
-                for (stdHeader in stdHeadersFor(target)) appendLine("#include $stdHeader")
-                for (userHeader in request.headers) appendLine("#include \"$userHeader\"")
-                appendLine("struct $forceName { $target value; };")
-            }
-        )
-        syntheticHeaders.add(tmpFile)
+        val forcingContent = buildString {
+            // Every type in the instantiation must be declared, not just the
+            // outer base — previously only stdHeaderFor(req.base) was included,
+            // so std::vector<std::string> failed (basic_string undeclared).
+            // Include std headers TARGETED to the types named in `target`
+            // (scanning, so nested element types are covered) plus the
+            // consumer's own headers (for user element types like a wrapped
+            // struct in std::vector<Point>). Targeted rather than a blanket
+            // bundle: a broad include drags unrelated system structs in under
+            // INCLUDE_MISSING (e.g. <sys/timex.h>'s `timex`), which then
+            // generate invalid wrappers.
+            for (stdHeader in stdHeadersFor(target)) appendLine("#include $stdHeader")
+            for (userHeader in request.headers) appendLine("#include \"$userHeader\"")
+            appendLine("struct $forceName { $target value; };")
+        }
+        forcingHeaders[forceName] = forcingContent
+        // Parse from a per-run temp file (cleaned in close()); the same header is
+        // re-materialized into the output dir by writeTo for the generated wrapper.
+        val tmpFile = File(tempDir(), "$forceName.h").path
+        File(tmpFile).writeText(forcingContent)
         Log.i("Forcing instantiation of $target via $tmpFile")
         val resolver = scope.parseHeader(
             index,
@@ -291,9 +306,18 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 .joinToString(",\n    ")
             Log.i("Generating for [\n    $resolvedClasses\n]")
         }
-        val headers = request.headers + syntheticHeaders
         val outputBase = File(output)
         outputBase.mkdirs()
+        // Re-materialize the forcing headers into the output dir so the generated wrapper
+        // #includes them by a stable relative path (no /tmp), and the emitted .cc is
+        // self-contained / re-compilable. Deterministic name -> deterministic output.
+        syntheticHeaders.clear()
+        for ((forceName, content) in forcingHeaders) {
+            val forcingFile = File(outputBase, "$forceName.h")
+            forcingFile.writeText(content)
+            syntheticHeaders.add(forcingFile.path)
+        }
+        val headers = request.headers + syntheticHeaders
         val namer = NameHandler()
         Log.i("Generating header file")
         File(outputBase, "${config.moduleName}.h").writeText(
@@ -492,7 +516,12 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun close() {
         super.close()
-        index.dispose()
+        // Throwaway forcing-header intermediates — written to a per-run temp dir purely so
+        // libclang can parse them; never part of generated output, so always safe to delete.
+        // Cleared here so they don't accumulate in $TMPDIR across runs.
+        tempDir?.takeIf { it.exists() }?.rmR()
+        // index is disposed by the Arena's deferred cleanup in scope.clear(); disposing it
+        // here too would double-free (clang_disposeIndex on a freed handle → abort).
         scope.clear()
     }
 }

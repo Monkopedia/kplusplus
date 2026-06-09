@@ -188,52 +188,53 @@ class KrapperGen : CliktCommand() {
                 )
             )
             val indexService = service.index(IndexRequest(header, library))
-            // v2 flow: when both --header and --instantiate are present, parse
-            // the headers first (filterAndResolve) then layer the requested
-            // template instantiations on top. This is what the v8 example
-            // needs — a "wrap this whole header set" import combined with the
-            // narrow fixups passed via --fixup-file.
-            val hasHeaders = header.isNotEmpty()
-            val hasInstantiations = instantiate.isNotEmpty()
-            if (hasHeaders) {
-                // Scoped-import allowlist (T1.0a): when --only/--only-file name an
-                // explicit class set, bind ONLY those (referenced-but-unlisted types
-                // fall to --referencePolicy). Otherwise keep the DefaultFilter
-                // (bind-everything-non-std) behavior.
-                val allowList = loadAllowList()
-                val filter = if (allowList.isEmpty()) {
-                    DefaultFilter
-                } else {
-                    Log.i("Scoped import: binding only ${allowList.size} class(es): $allowList")
-                    AllowListFilter(allowList)
+            try {
+                // v2 flow: when both --header and --instantiate are present, parse
+                // the headers first (filterAndResolve) then layer the requested
+                // template instantiations on top. This is what the v8 example
+                // needs — a "wrap this whole header set" import combined with the
+                // narrow fixups passed via --fixup-file.
+                val hasHeaders = header.isNotEmpty()
+                val hasInstantiations = instantiate.isNotEmpty()
+                if (hasHeaders) {
+                    // Scoped-import allowlist (T1.0a): when --only/--only-file name an
+                    // explicit class set, bind ONLY those (referenced-but-unlisted types
+                    // fall to --referencePolicy). Otherwise keep the DefaultFilter
+                    // (bind-everything-non-std) behavior.
+                    val allowList = loadAllowList()
+                    val filter = if (allowList.isEmpty()) {
+                        DefaultFilter
+                    } else {
+                        Log.i("Scoped import: binding only ${allowList.size} class(es): $allowList")
+                        AllowListFilter(allowList)
+                    }
+                    indexService.filterAndResolve(filter)
                 }
-                indexService.filterAndResolve(filter)
-            }
-            if (hasInstantiations) {
-                for (spec in instantiate) {
-                    indexService.requestInstantiation(parseInstantiation(spec))
+                if (hasInstantiations) {
+                    for (spec in instantiate) {
+                        indexService.requestInstantiation(parseInstantiation(spec))
+                    }
                 }
-            }
-            // Apply declarative fixups from --fixup-file (v2 escape hatch).
-            // Empty / missing file is a no-op.
-            val fixups = loadFixups(fixupFile)
-            if (fixups.isNotEmpty()) {
-                Log.i("Loaded ${fixups.size} fixup(s) from $fixupFile")
-                FixupApplier.apply(indexService, fixups)
-            }
-            if (hasInstantiations && !hasHeaders) {
-                // Pure-instantiation path: matches the original M11 sync flow.
-                // Skip the legacy hardcoded v8 mappings entirely (they have
-                // been migrated to the user-supplied --fixup-file).
-                indexService.writeTo(output ?: getcwd())
-                return@runBlocking
-            }
-            // Legacy / headers-only / headers+instantiations path: previous
-            // releases also wired a hardcoded set of v8-specific mappings
-            // here. Those have been migrated to the declarative Fixup
-            // directives (see kplusplus { fixup { ... } } in the compiler
-            // gradle subplugin). The block remains so the same code path
-            // serves both the legacy CLI invocation and the new sync flow.
+                // Apply declarative fixups from --fixup-file (v2 escape hatch).
+                // Empty / missing file is a no-op.
+                val fixups = loadFixups(fixupFile)
+                if (fixups.isNotEmpty()) {
+                    Log.i("Loaded ${fixups.size} fixup(s) from $fixupFile")
+                    FixupApplier.apply(indexService, fixups)
+                }
+                if (hasInstantiations && !hasHeaders) {
+                    // Pure-instantiation path: matches the original M11 sync flow.
+                    // Skip the legacy hardcoded v8 mappings entirely (they have
+                    // been migrated to the user-supplied --fixup-file).
+                    indexService.writeTo(output ?: getcwd())
+                    return@runBlocking
+                }
+                // Legacy / headers-only / headers+instantiations path: previous
+                // releases also wired a hardcoded set of v8-specific mappings
+                // here. Those have been migrated to the declarative Fixup
+                // directives (see kplusplus { fixup { ... } } in the compiler
+                // gradle subplugin). The block remains so the same code path
+                // serves both the legacy CLI invocation and the new sync flow.
 //            for (file in header) {
 //                val tu =
 //                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
@@ -267,7 +268,13 @@ class KrapperGen : CliktCommand() {
 // //                    Log.i("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
 // //                }
 //            }
-            indexService.writeTo(output ?: getcwd())
+                indexService.writeTo(output ?: getcwd())
+            } finally {
+                // Always release the index and delete the run's throwaway temp dir, even
+                // when resolution/writeTo throws — so forcing-header intermediates never
+                // leak into $TMPDIR.
+                indexService.close()
+            }
         }
     }
 
