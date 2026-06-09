@@ -210,8 +210,6 @@ abstract class WrappedElement(
             }
             val element = try {
                 when (value.kind) {
-//                CXCursorKind.CXCursor_UnexposedDecl -> TODO()
-//                CXCursorKind.CXCursor_UnionDecl -> TODO()
                     CXCursorKind.CXCursor_StructDecl,
                     CXCursorKind.CXCursor_ClassDecl -> {
                         // An anonymous record (the unnamed `struct { ... }` in
@@ -251,8 +249,6 @@ abstract class WrappedElement(
                         WrappedClass(value, resolverBuilder)
                     }
 
-                    //                CXCursorKind.CXCursor_EnumDecl -> TODO()
-//                CXCursorKind.CXCursor_EnumConstantDecl -> TODO()
                     CXCursorKind.CXCursor_FieldDecl -> {
                         // Anonymous data members (anon bitfield padding `int :3;`, anon
                         // union/struct members) have a blank spelling. They have no name to
@@ -382,18 +378,13 @@ abstract class WrappedElement(
                             }
                         }
 
-                    //                CXCursorKind.CXCursor_NamespaceAlias -> TODO()
                     CXCursorKind.CXCursor_TemplateTypeParameter -> WrappedTemplateParam(
                         value,
                         resolverBuilder
                     )
 
-                    //                CXCursorKind.CXCursor_NonTypeTemplateParameter -> TODO()
-//                CXCursorKind.CXCursor_TemplateTemplateParameter -> TODO()
                     CXCursorKind.CXCursor_ClassTemplate -> WrappedTemplate(value, resolverBuilder)
 
-                    //                CXCursorKind.CXCursor_ClassTemplatePartialSpecialization -> TODO()
-//                CXCursorKind.CXCursor_TypeAliasDecl -> TODO()
                     CXCursorKind.CXCursor_TypeRef -> WrappedTemplateRef(
                         value.spelling.toKString() ?: error("TypeRef without a name")
                     )
