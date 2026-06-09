@@ -833,34 +833,53 @@ suspend fun WrappedTemplate.typedAs(
 private suspend fun dropMistypedInitializerListMembers(
     element: WrappedElement,
     fullyQualified: String
+) = rewriteMethods(element) { owner, method ->
+    if (owner !is WrappedClass) return@rewriteMethods method
+    val typedefNames = owner.children
+        .filterIsInstance<WrappedTypedef>()
+        .map { it.name }
+        .toSet()
+    val isKeyValueMap = "key_type" in typedefNames && "mapped_type" in typedefNames
+    if (!isKeyValueMap) return@rewriteMethods method
+    val hasBareTemplateInitializerList = method.args.any { arg ->
+        val type = arg.type.maybeUnconst.maybeUnreferenced
+        type is WrappedTemplateType &&
+            type.baseType.toString() == "std::initializer_list" &&
+            type.templateArgs.singleOrNull() is WrappedTemplateRef
+    }
+    if (!hasBareTemplateInitializerList) return@rewriteMethods method
+    Log.i(
+        "Dropping mistyped initializer_list member ${method.name} on " +
+            "$fullyQualified (libclang collapsed value_type to a bare " +
+            "template parameter)"
+    )
+    null
+}
+
+/**
+ * Shared method-rewrite walker for the structurally-identical recursive passes below
+ * ([dropMistypedInitializerListMembers], [rewritePairSecondReturns], [rewriteViewReturns],
+ * [rewriteUniquePtrReturns]). Recurses [element]'s subtree; for every [WrappedMethod] child
+ * of every element it calls [transform], which returns:
+ *  - the same method instance -> leave it in place (no change),
+ *  - a different method        -> replace it (removeChild + addChild),
+ *  - `null`                    -> drop it (removeChild).
+ * This owns the remove/add bookkeeping and the recursion tail the passes used to copy-paste.
+ * Each pass guards on the element type inside [transform] (returning the method unchanged) so
+ * the exact set of rewritten/dropped methods - and the traversal order - is preserved.
+ */
+private suspend fun rewriteMethods(
+    element: WrappedElement,
+    transform: suspend (owner: WrappedElement, method: WrappedMethod) -> WrappedMethod?
 ) {
-    if (element is WrappedClass) {
-        val typedefNames = element.children
-            .filterIsInstance<WrappedTypedef>()
-            .map { it.name }
-            .toSet()
-        val isKeyValueMap = "key_type" in typedefNames && "mapped_type" in typedefNames
-        if (isKeyValueMap) {
-            for (method in element.children.filterIsInstance<WrappedMethod>()) {
-                val hasBareTemplateInitializerList = method.args.any { arg ->
-                    val type = arg.type.maybeUnconst.maybeUnreferenced
-                    type is WrappedTemplateType &&
-                        type.baseType.toString() == "std::initializer_list" &&
-                        type.templateArgs.singleOrNull() is WrappedTemplateRef
-                }
-                if (hasBareTemplateInitializerList) {
-                    Log.i(
-                        "Dropping mistyped initializer_list member ${method.name} on " +
-                            "$fullyQualified (libclang collapsed value_type to a bare " +
-                            "template parameter)"
-                    )
-                    element.removeChild(method)
-                }
-            }
-        }
+    for (method in element.children.filterIsInstance<WrappedMethod>()) {
+        val result = transform(element, method)
+        if (result === method) continue
+        element.removeChild(method)
+        if (result != null) element.addChild(result)
     }
     for (child in element.children) {
-        dropMistypedInitializerListMembers(child, fullyQualified)
+        rewriteMethods(child, transform)
     }
 }
 
@@ -881,30 +900,24 @@ private suspend fun dropMistypedInitializerListMembers(
  * (no const/ref) whose second arg is `bool` — hint/range/initializer_list `insert`
  * overloads (which return an iterator or void) are untouched and stay dropped.
  */
-private suspend fun rewritePairSecondReturns(element: WrappedElement, fullyQualified: String) {
-    if (element is WrappedClass) {
-        for (method in element.children.filterIsInstance<WrappedMethod>()) {
-            val ret = method.returnType
-            val isPairBool = ret is WrappedTemplateType &&
-                ret.baseType.toString() == "std::pair" &&
-                ret.templateArgs.size == 2 &&
-                ret.templateArgs[1].toString() == "bool"
-            if (!isPairBool) continue
-            val rewritten = method.copy(returnType = WrappedType("bool")).also {
-                it.returnsPairSecond = true
-            }
-            Log.i(
-                "Rewriting ${method.name} on $fullyQualified: " +
-                    "$ret -> bool (returning the pair's .second; iterator half unwrappable)"
-            )
-            element.removeChild(method)
-            element.addChild(rewritten)
+private suspend fun rewritePairSecondReturns(element: WrappedElement, fullyQualified: String) =
+    rewriteMethods(element) { owner, method ->
+        if (owner !is WrappedClass) return@rewriteMethods method
+        val ret = method.returnType
+        val isPairBool = ret is WrappedTemplateType &&
+            ret.baseType.toString() == "std::pair" &&
+            ret.templateArgs.size == 2 &&
+            ret.templateArgs[1].toString() == "bool"
+        if (!isPairBool) return@rewriteMethods method
+        val rewritten = method.copy(returnType = WrappedType("bool")).also {
+            it.returnsPairSecond = true
         }
+        Log.i(
+            "Rewriting ${method.name} on $fullyQualified: " +
+                "$ret -> bool (returning the pair's .second; iterator half unwrappable)"
+        )
+        rewritten
     }
-    for (child in element.children) {
-        rewritePairSecondReturns(child, fullyQualified)
-    }
-}
 
 /**
  * T1.10 view-type marshalling. A method returning a non-owning string view
@@ -919,30 +932,24 @@ private suspend fun rewritePairSecondReturns(element: WrappedElement, fullyQuali
  * that ANY recognized view name routes the same way; today only `llvm::StringRef` is
  * listed (it's the view the Clang AST surface forces). Add sibling views here as needed.
  */
-internal suspend fun rewriteViewReturns(element: WrappedElement) {
-    if (element is WrappedClass) {
-        for (method in element.children.filterIsInstance<WrappedMethod>()) {
-            val ret = method.returnType
-            // The view's underlying class name, with any const/reference peeled off.
-            val baseName = ret.let { if (it.isReference) it.unreferenced else it }
-                .let { if (it.isConst) it.unconst else it }
-                .toString()
-            if (baseName !in STRING_VIEW_TYPES) continue
-            val rewritten = method.copy(returnType = WrappedType("std::string")).also {
-                it.returnViaMemberCall = "str"
-            }
-            Log.i(
-                "Rewriting ${method.name} on ${element.type}: " +
-                    "$ret -> std::string (materializing the view via .str())"
-            )
-            element.removeChild(method)
-            element.addChild(rewritten)
+internal suspend fun rewriteViewReturns(element: WrappedElement) =
+    rewriteMethods(element) { owner, method ->
+        if (owner !is WrappedClass) return@rewriteMethods method
+        val ret = method.returnType
+        // The view's underlying class name, with any const/reference peeled off.
+        val baseName = ret.let { if (it.isReference) it.unreferenced else it }
+            .let { if (it.isConst) it.unconst else it }
+            .toString()
+        if (baseName !in STRING_VIEW_TYPES) return@rewriteMethods method
+        val rewritten = method.copy(returnType = WrappedType("std::string")).also {
+            it.returnViaMemberCall = "str"
         }
+        Log.i(
+            "Rewriting ${method.name} on ${owner.type}: " +
+                "$ret -> std::string (materializing the view via .str())"
+        )
+        rewritten
     }
-    for (child in element.children) {
-        rewriteViewReturns(child)
-    }
-}
 
 // Non-owning string-view types. As a RETURN they are materialized to an owned std::string
 // via `.str()` (T1.10, rewriteViewReturns); as a PARAM they are constructed from an inbound
@@ -964,34 +971,28 @@ internal val STRING_VIEW_TYPES = setOf("llvm::StringRef")
  * `unique_ptr<T, Deleter>` is left untouched — `.release()` still hands back `T*`, but the
  * caller-side dispose path can't honor a non-default deleter, so we don't pretend to.
  */
-internal suspend fun rewriteUniquePtrReturns(element: WrappedElement) {
-    // Apply to a class's methods AND to namespace-level FREE FUNCTIONS — a free function
-    // returning std::unique_ptr<T> (e.g. clang::tooling::buildASTFromCode -> unique_ptr<ASTUnit>,
-    // the AST-walk entry point) needs the same release()-rewrite or its move-only return drops.
-    if (element is WrappedClass || element is WrappedNamespace) {
-        val container = (element as? WrappedClass)?.type?.toString()
-            ?: (element as? WrappedNamespace)?.namespace ?: "?"
-        for (method in element.children.filterIsInstance<WrappedMethod>()) {
-            val ret = method.returnType
-            // Match a bare by-value `std::unique_ptr<T>` (no const/reference, single arg).
-            if (ret !is WrappedTemplateType) continue
-            if (ret.baseType.toString() != "std::unique_ptr") continue
-            val elementType = ret.templateArgs.singleOrNull() ?: continue
-            val rewritten = method.copy(returnType = pointerTo(elementType)).also {
-                it.returnViaMemberCall = "release"
-            }
-            Log.i(
-                "Rewriting ${method.name} on $container: " +
-                    "$ret -> ${pointerTo(elementType)} (transferring ownership via .release())"
-            )
-            element.removeChild(method)
-            element.addChild(rewritten)
+// Apply to a class's methods AND to namespace-level FREE FUNCTIONS — a free function
+// returning std::unique_ptr<T> (e.g. clang::tooling::buildASTFromCode -> unique_ptr<ASTUnit>,
+// the AST-walk entry point) needs the same release()-rewrite or its move-only return drops.
+internal suspend fun rewriteUniquePtrReturns(element: WrappedElement) =
+    rewriteMethods(element) { owner, method ->
+        if (owner !is WrappedClass && owner !is WrappedNamespace) return@rewriteMethods method
+        val container = (owner as? WrappedClass)?.type?.toString()
+            ?: (owner as? WrappedNamespace)?.namespace ?: "?"
+        val ret = method.returnType
+        // Match a bare by-value `std::unique_ptr<T>` (no const/reference, single arg).
+        if (ret !is WrappedTemplateType) return@rewriteMethods method
+        if (ret.baseType.toString() != "std::unique_ptr") return@rewriteMethods method
+        val elementType = ret.templateArgs.singleOrNull() ?: return@rewriteMethods method
+        val rewritten = method.copy(returnType = pointerTo(elementType)).also {
+            it.returnViaMemberCall = "release"
         }
+        Log.i(
+            "Rewriting ${method.name} on $container: " +
+                "$ret -> ${pointerTo(elementType)} (transferring ownership via .release())"
+        )
+        rewritten
     }
-    for (child in element.children) {
-        rewriteUniquePtrReturns(child)
-    }
-}
 
 fun removeDuplicateMethods(element: WrappedElement) {
     if (element is WrappedClass) {
