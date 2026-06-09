@@ -43,9 +43,14 @@ fun main(args: Array<String>) = memScoped {
         if (decl == null) continue
         count++
         val kind = decl.getDeclKindName() ?: "?"
-        // A NamedDecl has a name; down-cast (llvm::dyn_cast) to read it.
-        val name = decl.asNamedDecl()?.getName() ?: "<unnamed>"
-        println("  [$kind] $name")
+        // A NamedDecl has a name; down-cast (llvm::dyn_cast) to read it. getNameAsString()
+        // returns std::string by value — under IGNORE_MISSING that return only binds because
+        // #37 normalizes the canonical basic_string<char> spelling to a Kotlin String.
+        val name = decl.asNamedDecl()?.getNameAsString() ?: "<unnamed>"
+        // A ValueDecl (var / function) carries a QualType; QualType::getAsString() is the
+        // second by-value std::string EXTRACT primitive — the type spelling as Clang reports.
+        val typeStr = decl.asValueDecl()?.getType()?.getAsString()?.let { " : $it" } ?: ""
+        println("  [$kind] $name$typeStr")
     }
     println("clangwalk: walked $count top-level declarations via real libclang-cpp")
 }
