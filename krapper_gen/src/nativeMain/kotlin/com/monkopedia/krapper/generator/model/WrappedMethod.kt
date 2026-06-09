@@ -578,10 +578,12 @@ class WrappedArgument(
         get() = hasDefault && !typeCarriesFalseDefault
 
     // True when [hasDefault] is a FALSE positive — the cursor heuristic misread a token in
-    // the param's type as a C++ default, so the param is not legitimately omittable. Three
+    // the param's type as a C++ default, so the param is not legitimately omittable. Four
     // shapes carry a false default: a non-const output reference (the heuristic can misfire
-    // on the `<...>` in `SmallPtrSetImpl<X>&`), an array bound (`int(&)[4]`), and a by-value
-    // template over a NON-TYPE arg (`Mask<4>`'s `4`). A by-value template over only TYPE args
+    // on the `<...>` in `SmallPtrSetImpl<X>&`), an array bound (`int(&)[4]`), an unmodelable
+    // callback (`function_ref<R(Args)>` / `std::function<R(Args)>`, whose parenthesized
+    // signature the heuristic reads as a default), and a by-value template over a NON-TYPE
+    // arg (`Mask<4>`'s `4`). A by-value template over only TYPE args
     // (`shared_ptr<PCHContainerOperations>`) and a CONST reference with a genuine default
     // (`const Alloc& = Alloc()`) keep their real default and stay omittable.
     private val typeCarriesFalseDefault: Boolean
@@ -625,29 +627,36 @@ class WrappedArgument(
             // [isNonTypeTemplateArg] classifies that token. Either path catches it.
             //
             // Third path — an unmodelable CALLBACK param (`llvm::function_ref<R(Args)>`,
-            // `std::function<R(Args)>`): the template arg is a FUNCTION TYPE (`int (Thing
-            // *)`), which the type model can't bind, so the param fails to resolve. But the
+            // `std::function<R(Args)>`): its instantiation carries a FUNCTION TYPE (`int
+            // (Thing *)`) the type model can't bind, so the param never resolves. But the
             // hasDefault cursor heuristic misreads the callback signature's parenthesized
             // param list as a default value (e.g. `cb`'s "default" surfaces as `Thing*`), so
             // a callback param with NO real C++ default looks omittable. Trimming it then
             // emits a SHORT call (`m(a)` for a 2-arg method) — an arity mismatch that fails
             // to compile and aborts the whole build (the clangwalk self-host hit this on
-            // `clang::ASTContext::adjustType` / `forEachMultiversionedFunctionVersion`). A
-            // function-type arg is never a genuine, trimmable default, so treat it as a false
-            // default: the whole method drops (skip-not-crash, ledgered) instead.
+            // `clang::ASTContext::adjustType` / `forEachMultiversionedFunctionVersion`). The
+            // callback signature's parens ride on the referent's OWN spelling whether the
+            // instantiation surfaced as a structured WrappedTemplateType (`FnRef<int (Thing
+            // *)>`, a function-type template arg) OR — at Clang scale, when libclang doesn't
+            // report the template args — collapsed to a bare type-reference string (the same
+            // fallback CollectInheritedProtocols's `SmallPtrSetImpl<...>&` hits above, which
+            // is why the structured-template check alone missed `adjustType`). A function-type
+            // spelling is never a genuine, trimmable default, so a `(` in the referent
+            // spelling is the false-default signal: drop the whole method instead.
+            if (referent.isFunctionType) return true
+            // A by-value template over a NON-TYPE (value) arg also carries a false default
+            // (Mask<4>'s `4`, etc.) — see [isNonTypeTemplateArg] and the UNRESOLVABLE note.
             return referent is WrappedTemplateType &&
-                referent.templateArgs.any {
-                    it == UNRESOLVABLE || it.isNonTypeTemplateArg || it.isFunctionTypeArg
-                }
+                referent.templateArgs.any { it == UNRESOLVABLE || it.isNonTypeTemplateArg }
         }
 
-    // A template-argument WrappedType that is a FUNCTION TYPE — the `R(Args...)` callback
-    // signature inside `function_ref<R(Args...)>` / `std::function<R(Args...)>`. It surfaces
-    // as a bare type spelling carrying a parenthesized parameter list (`int (Thing *)`);
-    // plain/pointer/reference/template type spellings never contain `(`, so a `(` is the
-    // clean structural signal that this arg is a (function-)callable type the model can't
-    // bind by value.
-    private val WrappedType.isFunctionTypeArg: Boolean
+    // A WrappedType whose spelling carries a FUNCTION TYPE — the `R(Args...)` callback
+    // signature of `function_ref<R(Args...)>` / `std::function<R(Args...)>`, whether it rides
+    // as a structured template arg (`FnRef<int (Thing *)>`) or, at Clang scale, as the whole
+    // collapsed type-reference string. Plain/pointer/reference/template type spellings never
+    // contain `(`, so a `(` is the clean structural signal of a (function-)callable type the
+    // model can't bind by value.
+    private val WrappedType.isFunctionType: Boolean
         get() = '(' in toString()
 
     // A template-argument WrappedType whose spelling is a VALUE literal rather than a
