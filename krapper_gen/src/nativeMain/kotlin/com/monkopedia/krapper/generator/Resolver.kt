@@ -649,28 +649,44 @@ private val CHAR_BASIC_STRING_BASES = setOf("std::basic_string", "std::__cxx11::
  * `wstring`/`u16string`/`u32string` (`basic_string<wchar_t>`/`<char16_t>`/`<char32_t>`) are
  * NOT `char*` strings, so they are left untouched and follow the normal policy behavior.
  *
- * Reuses [operateOn] purely as a recursive walk: the handler never removes, so the rewrite
- * reaches the basic_string node even for the multi-arg `<char, char_traits<char>,
- * allocator<char>>` spelling (whose inner trait/allocator args would otherwise be the first
- * to drop), and re-wraps it through any by-value / `const` / `const&` carrier. Gated on the
- * basic_string class being UNRESOLVABLE: when it IS bound (an explicit allowlist entry) the
- * type is left as the wrapped class.
+ * Descends only carriers the STRING boundary can actually marshal: by-value, `const`, and
+ * reference (`&`), re-wrapping the basic_string node through them. A POINTER (`*`) or array
+ * (`[]`) carrier is a HARD STOP — a `std::string*` out-param (e.g. `clang::Decl::getAvailability(
+ * std::string*)`) can't ride the `const char*` boundary: the cast-var is declared with the
+ * pointer-typed `targetType`, so normalizing it would emit `std::string* x = std::string(arg)`,
+ * which does not compile and aborts the whole wrapper build. Leaving such a type unbound makes
+ * the arg/method DROP cleanly (the pre-GAP-B behavior) instead of producing broken codegen.
+ * Matches the basic_string node even for the multi-arg `<char, char_traits<char>,
+ * allocator<char>>` spelling. Gated on the basic_string class being UNRESOLVABLE: when it IS
+ * bound (an explicit allowlist entry) the type is left as the wrapped class.
  */
 private suspend fun WrappedType.normalizeMissingCharString(context: ResolveContext): WrappedType =
-    when (
-        val result = operateOn { leaf ->
-            if (leaf is WrappedTemplateType &&
-                leaf.baseType.toString() in CHAR_BASIC_STRING_BASES &&
-                leaf.templateArgs.firstOrNull()?.toString() == "char" &&
-                !context.tracker.canResolve(leaf, context)
-            ) {
-                ReplaceWith(WrappedType("std::string"))
-            } else {
-                ElementUnchanged
-            }
-        }
-    ) {
-        is ReplaceWith -> result.replacement
+    when {
+        // Pointer / array carrier: cannot marshal through the const char* boundary — stop.
+        this is WrappedModifiedType && (modifier == "*" || modifier == "[]") -> this
+
+        this is WrappedModifiedType ->
+            WrappedModifiedType(baseType.normalizeMissingCharString(context), modifier)
+
+        this is WrappedPrefixedType ->
+            WrappedPrefixedType(baseType.normalizeMissingCharString(context), modifier)
+
+        this is WrappedTemplateType &&
+            baseType.toString() in CHAR_BASIC_STRING_BASES &&
+            templateArgs.firstOrNull()?.toString() == "char" &&
+            !context.tracker.canResolve(this, context) ->
+            WrappedType("std::string")
+
+        // A non-string template still carries value-position args (e.g. a by-value
+        // `pair<std::string,int>`); descend into them so a nested marshallable string survives.
+        this is WrappedTemplateType ->
+            WrappedTemplateType(
+                baseType,
+                templateArgs.map {
+                    it.normalizeMissingCharString(context)
+                }
+            )
+
         else -> this
     }
 
