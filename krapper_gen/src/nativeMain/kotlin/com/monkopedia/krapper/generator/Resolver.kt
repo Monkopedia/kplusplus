@@ -522,8 +522,8 @@ data class ResolveContext(
 }
 
 private fun typeMapper(policy: ReferencePolicy): TypeMapping {
-    return when (policy) {
-        ReferencePolicy.IGNORE_MISSING -> return { t, context ->
+    val mapper: TypeMapping = when (policy) {
+        ReferencePolicy.IGNORE_MISSING -> { t, context ->
             t.operateOn {
                 if (context.tracker.canResolve(it, context)) {
                     ElementUnchanged
@@ -533,7 +533,7 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
             }
         }
 
-        ReferencePolicy.OPAQUE_MISSING -> return { t, context ->
+        ReferencePolicy.OPAQUE_MISSING -> { t, context ->
             t.operateOn {
                 if (context.tracker.canResolve(it, context)) {
                     ElementUnchanged
@@ -543,7 +543,7 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
             }
         }
 
-        ReferencePolicy.THROW_MISSING -> return { t, context ->
+        ReferencePolicy.THROW_MISSING -> { t, context ->
             t.operateOn {
                 if (context.tracker.canResolve(it, context)) {
                     ElementUnchanged
@@ -553,7 +553,7 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
             }
         }
 
-        ReferencePolicy.INCLUDE_MISSING -> return { t, context ->
+        ReferencePolicy.INCLUDE_MISSING -> { t, context ->
             t.operateOn {
                 if (it.isArray) return@operateOn RemoveElement
                 if (!context.tracker.canResolve(it, context)) {
@@ -608,7 +608,71 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
             }
         }
     }
+    // INCLUDE_MISSING binds the basic_string class itself (so std::string returns surface
+    // as the wrapped Basic_string__Char) — leave it untouched so its output stays
+    // byte-identical. Under the missing-tolerant policies, first normalize an unbound
+    // canonical `basic_string<char>` to `std::string` so it survives as a STRING boundary
+    // instead of being dropped/opaqued. See [normalizeMissingCharString].
+    if (policy == ReferencePolicy.INCLUDE_MISSING) return mapper
+    return { t, context ->
+        val normalized = t.normalizeMissingCharString(context)
+        val result = mapper(normalized, context)
+        // When normalization rewrote `t` (basic_string<char> -> std::string) but the mapper
+        // then left the result unchanged (std::string resolves cleanly), `map()` would read
+        // ElementUnchanged as "keep the ORIGINAL `t`" and discard the rewrite. Surface the
+        // normalized type as a ReplaceWith so the std::string actually flows through.
+        if (normalized.toString() == t.toString()) {
+            result
+        } else {
+            when (result) {
+                ElementUnchanged -> ReplaceWith(normalized)
+                else -> result
+            }
+        }
+    }
 }
+
+// libstdc++ spells std::string's canonical type as the ABI-tagged template
+// `std::__cxx11::basic_string<char,...>` (or the plain `std::basic_string<char,...>`),
+// NOT the literal `std::string`. A method returning one by value (e.g. Clang's
+// `QualType::getAsString` / `NamedDecl::getNameAsString`) thus carries a template type
+// that — under a scoped (`only(...)`) import whose allowlist doesn't bind basic_string —
+// matches neither the STRING fast-path nor any tracked class, so a missing-tolerant
+// policy silently DROPS the whole method (self-bootstrap GAP B).
+private val CHAR_BASIC_STRING_BASES = setOf("std::basic_string", "std::__cxx11::basic_string")
+
+/**
+ * Normalize an unbound canonical `basic_string<char,...>` anywhere in [this] to the
+ * always-available `std::string`, so it rides the existing STRING -> `const char*` ->
+ * Kotlin String marshalling (the same destination [Parsing.rewriteViewReturns] routes
+ * `llvm::StringRef` to) instead of being dropped/opaqued as a missing reference. char-only:
+ * `wstring`/`u16string`/`u32string` (`basic_string<wchar_t>`/`<char16_t>`/`<char32_t>`) are
+ * NOT `char*` strings, so they are left untouched and follow the normal policy behavior.
+ *
+ * Reuses [operateOn] purely as a recursive walk: the handler never removes, so the rewrite
+ * reaches the basic_string node even for the multi-arg `<char, char_traits<char>,
+ * allocator<char>>` spelling (whose inner trait/allocator args would otherwise be the first
+ * to drop), and re-wraps it through any by-value / `const` / `const&` carrier. Gated on the
+ * basic_string class being UNRESOLVABLE: when it IS bound (an explicit allowlist entry) the
+ * type is left as the wrapped class.
+ */
+private suspend fun WrappedType.normalizeMissingCharString(context: ResolveContext): WrappedType =
+    when (
+        val result = operateOn { leaf ->
+            if (leaf is WrappedTemplateType &&
+                leaf.baseType.toString() in CHAR_BASIC_STRING_BASES &&
+                leaf.templateArgs.firstOrNull()?.toString() == "char" &&
+                !context.tracker.canResolve(leaf, context)
+            ) {
+                ReplaceWith(WrappedType("std::string"))
+            } else {
+                ElementUnchanged
+            }
+        }
+    ) {
+        is ReplaceWith -> result.replacement
+        else -> this
+    }
 
 suspend fun WrappedType.operateOn(typeHandler: suspend (WrappedType) -> MapResult): MapResult {
     when {
