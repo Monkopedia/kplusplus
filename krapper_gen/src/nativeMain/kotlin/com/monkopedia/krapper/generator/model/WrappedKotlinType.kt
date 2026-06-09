@@ -141,11 +141,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 (listOf(type.baseType) + type.templateArgs).joinToString("__") {
                     it.toString().split("::").last()
                         .capitalize()
-                        .replace(" ", "_")
-                        .replace("<", "_")
-                        .replace(",", "_")
-                        .replace(">", "_")
-                        .replace("*", "_P")
+                        .mangleToIdentifier()
                 }
         )
     }
@@ -209,10 +205,9 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     }
     val name = type.toString()
     if (name.contains("<")) {
-        // findQualifiers/parseTypes do the same hand-rolled index math as the
-        // String overload and can overflow on gnarly nested spellings; skip-not-crash
-        // by surfacing the whole spelling as one opaque leaf on any failure.
-        return runCatching {
+        // Qualified-template spelling: split into qualifiers and parse each
+        // template arg list (skip-not-crash on failure — see parseOrOpaqueLeaf).
+        return parseOrOpaqueLeaf(name) {
             val templateTypes = mutableListOf<WrappedKotlinType>()
             WrappedKotlinType(
                 findQualifiers(name).joinToString("::") {
@@ -232,18 +227,6 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                     }
                 } + "__" + templateTypes.joinToString("__") { it.name }
             )
-        }.getOrElse {
-            DropLedger.record(
-                name,
-                "Failed to parse qualified template spelling (${it.message}); " +
-                    "degraded to opaque leaf",
-                DropPhase.PARSE
-            )
-            println(
-                "WARN skip-not-crash: failed to parse qualified template spelling " +
-                    "'$name' (${it.message}); surfacing as opaque type"
-            )
-            opaqueLeaf(name)
         }
     }
     return WrappedKotlinType(name)
@@ -267,13 +250,9 @@ fun nullable(base: WrappedKotlinType): WrappedKotlinType = NullableKotlinType(ba
 fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
     val name = nameIn.trim()
     if (name.contains("<")) {
-        // The hand-rolled index math below (parseTypes/findTemplates/findEnd) can
-        // overflow or fail on a deeply-nested or malformed template spelling (e.g.
-        // an unbalanced `<`/`>`, or a spelling clang reports in an unexpected shape).
-        // Skip-not-crash: on any parse failure, drop the structured parse and surface
-        // the whole spelling as a single opaque leaf name so the one element degrades
-        // gracefully instead of aborting the entire generation run.
-        return runCatching {
+        // Template spelling: parse the base and its arg list (skip-not-crash on
+        // failure — see parseOrOpaqueLeaf).
+        return parseOrOpaqueLeaf(name) {
             val start = name.indexOf('<')
             val base = name.substring(0, start)
             WrappedKotlinType(base).typedWith(
@@ -284,20 +263,30 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
                     )
                 )
             )
-        }.getOrElse {
-            DropLedger.record(
-                name,
-                "Failed to parse template spelling (${it.message}); degraded to opaque leaf",
-                DropPhase.PARSE
-            )
-            println(
-                "WARN skip-not-crash: failed to parse template spelling '$name' " +
-                    "(${it.message}); surfacing as opaque type"
-            )
-            opaqueLeaf(name)
         }
     }
     return fullyQualifiedType(name.replace("::", ".").replace("*", "_P"), isWrapper = true)
+}
+
+// Skip-not-crash wrapper shared by the two template-parsing entry points. The
+// hand-rolled index math (parseTypes/findQualifiers/findTemplates/findEnd) can
+// overflow or fail on a deeply-nested or malformed spelling; on any failure we
+// record the drop and degrade the one element to a single opaque leaf instead
+// of aborting the whole generation run.
+private inline fun parseOrOpaqueLeaf(
+    name: String,
+    parse: () -> WrappedKotlinType
+): WrappedKotlinType = runCatching(parse).getOrElse {
+    DropLedger.record(
+        name,
+        "Failed to parse template spelling (${it.message}); degraded to opaque leaf",
+        DropPhase.PARSE
+    )
+    println(
+        "WARN skip-not-crash: failed to parse template spelling '$name' " +
+            "(${it.message}); surfacing as opaque type"
+    )
+    opaqueLeaf(name)
 }
 
 // An opaque single-leaf Kotlin type built from an arbitrary (possibly malformed)
@@ -307,13 +296,19 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
 private fun opaqueLeaf(spelling: String): WrappedKotlinType = fullyQualifiedType(
     spelling
         .replace("::", ".")
-        .replace("*", "_P")
-        .replace("<", "_")
-        .replace(">", "_")
-        .replace(",", "_")
-        .replace(" ", "_"),
+        .mangleToIdentifier(),
     isWrapper = true
 )
+
+// Collapse template/pointer punctuation that can't appear in a Kotlin
+// identifier: '< > , space' -> '_', and pointer '*' -> '_P'. Callers handle any
+// '::' themselves (map to '.' or split away) before calling.
+private fun String.mangleToIdentifier(): String = this
+    .replace("*", "_P")
+    .replace("<", "_")
+    .replace(">", "_")
+    .replace(",", "_")
+    .replace(" ", "_")
 
 internal class TemplatedKotlinType(
     internal val baseType: WrappedKotlinType,
