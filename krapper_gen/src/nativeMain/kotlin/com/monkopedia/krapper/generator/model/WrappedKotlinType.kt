@@ -17,6 +17,7 @@ package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.generator.DropLedger
 import com.monkopedia.krapper.generator.DropPhase
+import com.monkopedia.krapper.generator.GenerationContext
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
@@ -380,13 +381,6 @@ private fun String.findEnd(start: Int): Int {
     return end
 }
 
-// When set (via config.rootPackage at the start of a generation pass), every
-// generated wrapper binding's package is rooted under these segments instead of
-// the historical top-level `root` package. Null = back-compat: top-level user
-// types live in `root` and C++ namespaces map to their bare path (`std`, `geo`).
-// Set once in IndexedServiceImpl.init; persists for the process (one generation pass).
-internal var rootPackageOverride: String? = null
-
 fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinType {
     val parts = name.split(".")
     // Only wrapper class names are force-capitalized to Kotlin convention
@@ -395,11 +389,13 @@ fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinT
     // lowercase platform typealiases (`platform.posix.size_t` -> undefined `Size_t`).
     val cased = if (isWrapper) parts.dropLast(1) + parts.last().capitalize() else parts
     // Root-package handling (wrapper types only — never platform/native names):
-    //   - override null: top-level (size 1) wrappers get the legacy `root` prefix,
+    //   - rootPackage null: top-level (size 1) wrappers get the legacy `root` prefix,
     //     namespaced wrappers are left as-is. (Provably identical to historical.)
-    //   - override set: prepend the override's segments to every wrapper package,
+    //   - rootPackage set: prepend the configured segments to every wrapper package,
     //     replacing the legacy `root` for top-level and prefixing namespaced ones.
-    val rootSegments = rootPackageOverride?.split(".")
+    // Set once per run by GenerationContext.reset (via config.rootPackage), before any
+    // resolution — a type's Kotlin package is baked into its ResolvedKotlinType then.
+    val rootSegments = GenerationContext.rootPackage?.split(".")
     val nameList = when {
         !isWrapper -> cased
 

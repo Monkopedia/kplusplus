@@ -20,6 +20,7 @@ import com.monkopedia.krapper.BasicWithDummyMethod
 import com.monkopedia.krapper.InfixMethod
 import com.monkopedia.krapper.KotlinOperator
 import com.monkopedia.krapper.ResolvedOperator
+import com.monkopedia.krapper.generator.GenerationContext
 import com.monkopedia.krapper.generator.builders.Call
 import com.monkopedia.krapper.generator.builders.CodeBuilder
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
@@ -73,7 +74,6 @@ import com.monkopedia.krapper.generator.builders.reference
 import com.monkopedia.krapper.generator.builders.setter
 import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
-import com.monkopedia.krapper.generator.model.rootPackageOverride
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
@@ -174,7 +174,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             // Root the free-functions container's own package the same way the type
             // bindings are rooted (it bypasses fullyQualifiedType, so apply the override
             // here). Override null -> rawPkg as-is; empty namespace under a root -> the root.
-            val pkg = rootPackageOverride?.let { if (rawPkg.isEmpty()) it else "$it.$rawPkg" }
+            val pkg = GenerationContext.rootPackage
+                ?.let { if (rawPkg.isEmpty()) it else "$it.$rawPkg" }
                 ?: rawPkg
             builder.pkg(pkg)
             builder.importBlock(pkg, builder)
