@@ -101,6 +101,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import com.monkopedia.krapper.generator.resolvedmodel.type.fullyQualifiedType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
+import com.monkopedia.krapper.generator.resolvedmodel.type.plainName
 import com.monkopedia.krapper.generator.resolvedmodel.type.typedWith
 
 // Recognizers for the renderable subset of C++ default-argument literals (see
@@ -261,11 +262,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // fixed boilerplate with no AST nodes to model.
     private fun renderEnum(enum: ResolvedKotlinType): String {
         val underlying = enum.enumUnderlying?.name ?: "Int"
-        // The enum's DECLARATION name must be the bare class name — `enum.name` carries the
-        // nullable `?` of the type's default use-position (it's the same ResolvedKotlinType
-        // a nullable field/return uses), which is illegal in a class declaration
-        // (`enum class TranslationUnitKind?`). Type USAGES keep the `?`; the declaration trims.
-        val name = enum.name.trimEnd('?')
+        // The enum's DECLARATION name must be the bare class name (`plainName`): an
+        // `enum class TranslationUnitKind?` is illegal. Type USAGES keep the `?`.
+        val name = enum.plainName
         val entries = enum.enumEntries.joinToString(", ") { entry ->
             "${entry.name}(${literalForUnderlying(entry.value, underlying)})"
         }
@@ -326,7 +325,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // only be obtained by upcast from a concrete subtype, never constructed here.
         // The comment makes that absence discoverable to a reader of the binding.
         if (cls.isAbstract) {
-            val plainName = type.name.trimEnd('?')
+            val plainName = type.plainName
             comment(
                 "Abstract C++ class: no constructor factory is generated. Obtain a " +
                     "$plainName via a concrete subclass (upcast to ${plainName}Api)."
@@ -339,7 +338,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // only a hazard when a derived is held via a base wrapper. Surface it as a
         // generated-code comment; non-fatal.
         if (hasNonVirtualDestructorHazard(cls)) {
-            val plainName = type.name.trimEnd('?')
+            val plainName = type.plainName
             comment(
                 "WARNING: polymorphic class with a non-virtual destructor — deleting a " +
                     "$plainName through a base pointer is undefined in C++ (the derived " +
@@ -364,7 +363,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             // Comparable<Self> is needed for sorted()/maxOrNull() etc. — a bare
             // compareTo only gives `<`/`>`. (Composes with a template supertype above.)
             if (cls.children.any { it is ResolvedMethod && it.operator == ResolvedOperator.LT }) {
-                add("kotlin.Comparable<${type.name.trimEnd('?')}>")
+                add("kotlin.Comparable<${type.plainName}>")
             }
             // Iterable<Elem> for an index-accessible container (std::vector): `for (x in
             // v)` needs only the synthesized `iterator()` (emitted in onGenerateMethods),
@@ -672,9 +671,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // Derived::label -> derivedLabel. Lowercases the class initial so the result is
     // a conventional Kotlin member name.
     private fun classPrefixedName(cls: ResolvedClass, method: ResolvedMethod): String {
-        // kotlinType.name can carry a trailing '?' for a nullable wrapper type; strip
-        // it so the prefix is a plain identifier.
-        val clsName = cls.type.kotlinType.name.trimEnd('?')
+        val clsName = cls.type.kotlinType.plainName
         val prefix = clsName.replaceFirstChar { it.lowercase() }
         val suffix = method.name.replaceFirstChar { it.uppercase() }
         return prefix + suffix
@@ -742,7 +739,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
             extensionFunction {
                 receiver = fqType(MEM_SCOPE)
-                name = cls.type.kotlinType.name.trimEnd('?') + "_Holder"
+                name = cls.type.kotlinType.plainName + "_Holder"
                 retType = type(cls.type)
                 body {
                     if (defaultConstructor != null) {
@@ -1163,7 +1160,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val result = LinkedHashMap<String, BaseInterface>()
         for (typeString in baseTypeStrings) {
             val baseCls = currentClasses[typeString] ?: continue
-            val kotlinName = baseCls.type.kotlinType.name.trimEnd('?')
+            val kotlinName = baseCls.type.kotlinType.plainName
             val interfaceName = kotlinName + "Api"
             val pkg = baseCls.type.kotlinType.pkg
             val interfaceFqType = if (pkg.isEmpty()) interfaceName else "$pkg.$interfaceName"
@@ -1649,7 +1646,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         method.name.startsWith("operator ") &&
             method.name.substring("operator ".length)
                 .firstOrNull()?.let { it.isLetter() || it == '_' } == true ->
-            method.copy(name = "to" + method.returnType.kotlinType.name.trimEnd('?'))
+            method.copy(name = "to" + method.returnType.kotlinType.plainName)
 
         else -> method
     }
@@ -1786,7 +1783,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private fun renderKotlinDefault(arg: ResolvedArgument): String? {
         val raw = arg.defaultValue?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val kotlinType = arg.type.kotlinType
-        val typeName = kotlinType.name.trimEnd('?')
+        val typeName = kotlinType.plainName
 
         // nullptr / NULL / 0 for a pointer/wrapper param -> Kotlin null.
         if (kotlinType.isWrapper || kotlinType.isNullable) {
@@ -2072,7 +2069,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 initializer = memScope dot Call(
                     extensionMethod(
                         kotlinType.fullyQualified + ".Companion",
-                        kotlinType.name.trimEnd('?') + "_Holder"
+                        kotlinType.plainName + "_Holder"
                     )
                 )
             ).also {
@@ -2201,7 +2198,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // generated `_op_eq` C function over the two backing pointers. Using the
     // extensionMethod Call (rather than a Raw) keeps the C symbol's import wired up.
     private fun KotlinCodeBuilder.generateEquals(cls: ResolvedClass, method: ResolvedMethod) {
-        val typeName = cls.type.kotlinType.name.trimEnd('?')
+        val typeName = cls.type.kotlinType.plainName
         override {
             function {
                 name = "equals"
@@ -2523,7 +2520,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
 
     private fun constructorMethod(type: ResolvedKotlinType) = extensionMethod(
         type.pkg,
-        type.name.trimEnd('?')
+        type.plainName
     )
 
     private fun KotlinCodeBuilder.generateStringReturn(call: Symbol, free: Boolean = true) {
