@@ -561,7 +561,20 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                         if (context.tracker.resolvedClasses[it.toString()] != null) {
                             return@operateOn RemoveElement
                         }
-                        context.tracker.otherResolved.add(t.toString())
+                        // Cycle guard: an outer frame may already be expanding this very
+                        // leaf (Clang's AST is densely cyclic — mutual Decl refs, CRTP
+                        // bases, pointer/ref members back into the hierarchy). If so, don't
+                        // recurse; the outer frame will store it. Key on the leaf `it` —
+                        // exactly what canResolve queries — NOT the wrapped carrier `t`
+                        // (e.g. `const clang::X &`). When a class is reached only through a
+                        // wrapped carrier, a `t`-keyed marker never matches the leaf the
+                        // guard checks, so a base/member edge re-entering the in-flight
+                        // class isn't deduped and resolution descends until the native
+                        // stack overflows.
+                        if (context.tracker.otherResolved.contains(it.toString())) {
+                            return@operateOn ElementUnchanged
+                        }
+                        context.tracker.otherResolved.add(it.toString())
                         try {
                             // Reference expansion: keep the legacy hard-fail when a
                             // pulled class's primary base can't resolve (don't
@@ -579,7 +592,7 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                             context.tracker.resolvedClasses[resolved.type.toString()] = resolved
                             context.tracker.classes[wrapper.type.toString()] = wrapper
                         } finally {
-                            context.tracker.otherResolved.remove(t.toString())
+                            context.tracker.otherResolved.remove(it.toString())
                         }
                     } catch (original: Throwable) {
                         try {

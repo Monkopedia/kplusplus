@@ -369,6 +369,80 @@ class ParseTest {
         }
     }
 
+    // Issue #10 (broad-binding scale tail): regression coverage for the INCLUDE_MISSING
+    // cyclic-expansion guard. A seed class `Seed` exposes a `const Node&` accessor; `Node`
+    // (not seeded) has a `const Node&` self-accessor — a self-cycle closed by a WRAPPED
+    // const-reference, the minimal shape of Clang's self-referential AST nodes (a `Decl`'s
+    // accessors handing back `Decl&`). `Node` is reachable ONLY through the wrapped carrier,
+    // so the expansion mapper's in-progress marker is the leaf-vs-carrier case this fix
+    // targets.
+    //
+    // The mapper marks an in-progress leaf in `otherResolved`; the re-entry guard
+    // (`canResolve`) follows a wrapped type down to its BARE LEAF and queries the set by that
+    // leaf string. The marker used to be keyed on the WRAPPED carrier (`const fixture::Node
+    // &`) while the guard checks the leaf (`fixture::Node`), so for a wrapped-only class the
+    // marker was dead — the cycle was never deduped at the marker level and `Node` got
+    // re-resolved redundantly. This fix keys the marker on the leaf, so `canResolve(Node)`
+    // hits and the self-edge is cut.
+    //
+    // NOTE: at this UNIT scale the cycle still terminates WITHOUT the fix — the
+    // `resolvedClasses` cache + `mappingCache` + the (correctly-keyed-by-coincidence) bare
+    // own-type marker bound the redundant work to a constant factor. The native stack
+    // overflow that blocks the broad Clang surface is an emergent property of its dense
+    // ~1269-class graph and is not reproducible in a small fixture (verified empirically
+    // across pointer/const-ref/inheritance/self-ref fixtures). This test therefore asserts
+    // the cyclic INCLUDE_MISSING path TERMINATES and BINDS — it guards against a regression
+    // that would turn the now-deduped cycle back into unbounded descent — rather than
+    // claiming to crash the old code on its own.
+    @Test
+    fun testIncludeMissingCyclicReferenceTerminates() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_cyclic_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |class Node {
+                |public:
+                |    const Node& self() const;
+                |    int nodeValue() const;
+                |};
+                |class Seed {
+                |public:
+                |    const Node& getNode() const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            // Seed only the second class — Node is reachable ONLY as a wrapped reference and
+            // must be pulled in by INCLUDE_MISSING, exercising the cyclic-expansion guard.
+            val allow = AllowListFilter(listOf("fixture::Seed"))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val foundNames = found.mapNotNull { (it as? WrappedClass)?.type?.toString() }
+            println("Cyclic seed found: $foundNames")
+            assertEquals(
+                setOf("fixture::Seed"),
+                foundNames.toSet(),
+                "Allowlist should select exactly Seed; got $foundNames"
+            )
+            // Resolution must terminate and the self-cyclic class must bind (a regression
+            // that un-keyed the marker would turn this into unbounded descent on the dense
+            // broad graph).
+            val resolved = found.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            val resolvedNames = resolved.filterIsInstance<ResolvedClass>()
+                .map { it.type.type }
+                .toSet()
+            println("Cyclic resolved: $resolvedNames")
+            assertTrue(
+                "fixture::Node" in resolvedNames,
+                "Node (the self-referential class) must be pulled in and bind under " +
+                    "INCLUDE_MISSING; got $resolvedNames"
+            )
+        }
+    }
+
     @Test
     fun testInstantiateAndWrite(): Unit = runBlocking {
         val outDir = "/tmp/krapper_slice_${random()}_${random()}"
