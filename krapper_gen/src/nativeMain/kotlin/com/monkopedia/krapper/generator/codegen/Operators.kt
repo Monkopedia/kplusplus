@@ -25,6 +25,17 @@ sealed class Operator {
     abstract fun name(namer: Namer, method: WrappedMethod): String
     protected abstract fun matches(method: WrappedMethod): Boolean
 
+    // Shared base for the operators whose C wrapper name is derived mechanically
+    // from a C-spelling fragment (`cOp`): `<cName>_op_<cOp split + lowercased>`.
+    // ConversionOperator does not extend this — it names by destination type.
+    abstract class NamedByCOp : Operator() {
+        protected abstract val cOp: String
+
+        override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
+            cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
+        }
+    }
+
     companion object {
         val ALL_OPERATORS = listOf(
             BasicBinaryOperator.MINUS,
@@ -71,14 +82,10 @@ sealed class Operator {
 
 data class BasicBinaryOperator private constructor(
     val cppOp: String,
-    private val cOp: String,
+    override val cOp: String,
     override val resolvedOperator: ResolvedOperator,
     val supportsDirectCall: Boolean = true
-) : Operator() {
-
-    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
-    }
+) : Operator.NamedByCOp() {
 
     override fun matches(method: WrappedMethod): Boolean =
         method.args.size == 1 && method.name.substring("operator".length) == cppOp
@@ -123,13 +130,9 @@ data class BasicBinaryOperator private constructor(
 
 data class BasicAssignmentOperator private constructor(
     private val cppOp: String,
-    private val cOp: String,
+    override val cOp: String,
     override val resolvedOperator: ResolvedOperator
-) : Operator() {
-
-    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
-    }
+) : Operator.NamedByCOp() {
 
     override fun matches(method: WrappedMethod): Boolean =
         method.args.size == 1 && method.name.substring("operator".length) == cppOp
@@ -144,13 +147,9 @@ data class BasicAssignmentOperator private constructor(
 
 data class BasicCallOperator private constructor(
     private val cppOp: String,
-    private val cOp: String,
+    override val cOp: String,
     override val resolvedOperator: ResolvedOperator
-) : Operator() {
-
-    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
-    }
+) : Operator.NamedByCOp() {
 
     // operator() can have any arity; match on name alone.
     override fun matches(method: WrappedMethod): Boolean =
@@ -209,13 +208,9 @@ data class ConversionOperator private constructor(override val resolvedOperator:
 
 data class BasicUnaryOperator private constructor(
     private val cppOp: String,
-    private val cOp: String,
+    override val cOp: String,
     override val resolvedOperator: ResolvedOperator
-) : Operator() {
-
-    override fun name(namer: Namer, method: WrappedMethod): String = with(namer) {
-        return cName + "_op_" + cOp.splitCamelcase().joinToString("_") { it.lowercase() }
-    }
+) : Operator.NamedByCOp() {
 
     override fun matches(method: WrappedMethod): Boolean =
         method.args.isEmpty() && method.name.substring("operator".length) == cppOp
