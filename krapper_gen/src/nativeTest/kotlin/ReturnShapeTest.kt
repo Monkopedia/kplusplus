@@ -304,6 +304,74 @@ class ReturnShapeTest {
         )
     }
 
+    // #7 item 5: a method returning `llvm::iterator_range<It>` whose element type CAN'T be
+    // recovered from `It` (a plain class iterator with NO `value_type` typedef and no
+    // template argument — none of elementOfIterator's pointer/value_type/template-arg shapes
+    // match) is DROPPED from range materialization. The drop DECISION is unchanged, but it
+    // must now be DISCOVERABLE: elementOfIterator records a PARSE DropLedger entry instead of
+    // returning null silently. Asserts the ledger captured the drop with a reason, the
+    // dropped method carries no rangeElementType, and a sibling plain method still binds.
+    @Test
+    fun unextractableIteratorRangeRecordsDrop() {
+        DropLedger.reset()
+        val methods = methodsOf(
+            """
+            |namespace llvm {
+            |template <class It> class iterator_range {
+            |    It b_, e_;
+            |public:
+            |    iterator_range(It b, It e) : b_(b), e_(e) {}
+            |    It begin() const { return b_; }
+            |    It end() const { return e_; }
+            |};
+            |}
+            |struct Thing { int x; };
+            |// A plain (non-template) iterator class with NO value_type typedef: none of
+            |// elementOfIterator's shapes (pointer / value_type / first-template-arg) apply,
+            |// so the element can't be recovered.
+            |struct OpaqueIter {
+            |    Thing* p_;
+            |    Thing& operator*() const { return *p_; }
+            |    OpaqueIter& operator++() { ++p_; return *this; }
+            |    bool operator!=(const OpaqueIter& o) const { return p_ != o.p_; }
+            |};
+            |struct OpaqueRangeHolder {
+            |    OpaqueIter b_, e_;
+            |    llvm::iterator_range<OpaqueIter> things() const {
+            |        return llvm::iterator_range<OpaqueIter>(b_, e_);
+            |    }
+            |    int count() const { return 0; }
+            |};
+            """.trimMargin(),
+            "OpaqueRangeHolder"
+        )
+        // The drop is recorded (discoverable), with a non-empty reason, in the PARSE phase.
+        val rangeDrops = DropLedger.drops.filter {
+            it.phase == DropPhase.PARSE && it.reason.contains("iterator_range")
+        }
+        assertTrue(
+            rangeDrops.isNotEmpty(),
+            "an unextractable iterator_range must record a PARSE DropLedger entry; " +
+                "ledger was ${DropLedger.drops}"
+        )
+        assertTrue(
+            rangeDrops.all { it.reason.isNotBlank() },
+            "the drop record must carry a reason; got ${rangeDrops.map { it.reason }}"
+        )
+        // The range method got no element type (the drop DECISION is unchanged)...
+        val things = methods.firstOrNull { it.name == "things" }
+        assertTrue(
+            things == null || things.rangeElementType == null,
+            "the unextractable range method must not record an element type; " +
+                "got ${things?.rangeElementType}"
+        )
+        // ...but the rest of the class still binds.
+        assertTrue(
+            methods.any { it.name == "count" },
+            "the sibling plain method `count` must still bind; got ${methods.map { it.name }}"
+        )
+    }
+
     // A `const value_type&` arg where value_type is a POINTER (the std::vector<Thing*>
     // push_back/assign/fill-ctor shape the range materialization needs) must resolve to a
     // plain `Thing*`, NOT `const Thing*`. The top-level const on a by-value pointer is

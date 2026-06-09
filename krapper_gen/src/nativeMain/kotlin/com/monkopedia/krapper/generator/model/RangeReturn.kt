@@ -19,6 +19,8 @@ import clang.CXCursorKind.CXCursor_TypeAliasDecl
 import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
 import clang.CXTypeKind.CXType_Pointer
+import com.monkopedia.krapper.generator.DropLedger
+import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.children
 import com.monkopedia.krapper.generator.getTemplateArgumentType
@@ -107,6 +109,17 @@ private fun elementOfIterator(iterator: CValue<CXType>): String? {
     if (canon.numTemplateArguments >= 1) {
         return stripDecoration(canon.getTemplateArgumentType(0u).spelling.toKString())
     }
+    // Recognized an `iterator_range<It>` but couldn't recover the element from `It` (no
+    // pointer/`value_type`/template-arg shape matched). The range method is dropped — keep
+    // that DECISION, but make it discoverable: a silent null here was an unanswerable "did
+    // the generator drop it?". PARSE phase: this is a cursor/CXType-level pass with no
+    // ResolveContext yet. (DropLedger.record is non-suspend, so it's callable here.)
+    DropLedger.record(
+        symbol = iterator.spelling.toKString() ?: "<unknown iterator_range element>",
+        reason = "iterator_range element type not extractable from iterator " +
+            "(no pointer/value_type/template-argument shape matched)",
+        phase = DropPhase.PARSE
+    )
     return null
 }
 
