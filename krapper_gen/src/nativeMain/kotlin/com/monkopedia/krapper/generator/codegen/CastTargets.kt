@@ -19,6 +19,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
+import com.monkopedia.krapper.generator.resolvedmodel.type.plainName
 
 // The opaque-pointer C type the upcast helpers take and return (`void* D_as_B(void*)`).
 // Shared by CppWriter (definition) and HeaderWriter (declaration).
@@ -31,7 +32,7 @@ data class CastTarget(val cls: ResolvedClass, val base: ResolvedClass) {
     // Kotlin method name (`as<KotlinName>`) and the C helper name are derived from it,
     // so the name is stable across the Kotlin / C / header writers.
     val baseKotlinName: String
-        get() = base.type.kotlinType.name.trimEnd('?')
+        get() = base.type.kotlinType.plainName
 
     // The Kotlin upcast member name, e.g. `asDrawable2`.
     val kotlinMethodName: String
@@ -90,7 +91,7 @@ data class DownCastTarget(
 ) {
     // The derived's plain Kotlin name (no nullable suffix), e.g. "Derived1".
     val derivedKotlinName: String
-        get() = derived.type.kotlinType.name.trimEnd('?')
+        get() = derived.type.kotlinType.plainName
 
     // The Kotlin down-cast member name, e.g. `asDerived1` (returns a nullable `Derived1?`).
     val kotlinMethodName: String

@@ -207,6 +207,13 @@ data class ResolvedKotlinType(
 
 fun nullable(base: ResolvedKotlinType): ResolvedKotlinType = base.copy(isNullable = true)
 
+// The plain Kotlin class name with the nullable `?` of its default use-position
+// stripped. `name` carries that `?` for a nullable type (the same ResolvedKotlinType a
+// nullable field/return uses); a declaration site, an identifier-derived helper name, or
+// a `<Name>Api`/`to<Name>` prefix needs the bare name without it.
+val ResolvedKotlinType.plainName: String
+    get() = name.trimEnd('?')
+
 fun ResolvedKotlinType.typedWith(parseTypes: List<ResolvedKotlinType>): ResolvedKotlinType =
     copy(templates = parseTypes)
 
