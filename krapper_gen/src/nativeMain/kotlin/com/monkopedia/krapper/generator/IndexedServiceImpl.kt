@@ -41,7 +41,6 @@ import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
-import com.monkopedia.krapper.generator.model.rootPackageOverride
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
@@ -97,14 +96,14 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         scope.defer {
             index.dispose()
         }
-        // Start each generation run with a clean ledger so its report reflects only this
-        // run's drops (the collector is process-scoped, shared with any prior run).
+        // Start each generation run from clean process-scoped state so its output and
+        // report reflect only this run: the drop ledger (shared with any prior run) and
+        // the GenerationContext (the WrappedType intern cache + the rootPackage). Both
+        // must be reset BEFORE any resolution (requestInstantiation / filterAndResolve):
+        // a type's Kotlin package is baked into its ResolvedKotlinType at resolve time,
+        // so rooting it later (e.g. in writeTo) would be too late.
         DropLedger.reset()
-        // Root the generated binding packages under config.rootPackage. Must be set
-        // BEFORE any resolution (requestInstantiation / filterAndResolve) — a type's
-        // Kotlin package is baked into its ResolvedKotlinType at resolve time, so
-        // setting it later (e.g. in writeTo) would be too late.
-        rootPackageOverride = config.rootPackage
+        GenerationContext.reset(config.rootPackage)
     }
 
     private val includePaths = generateIncludes(config.compiler)

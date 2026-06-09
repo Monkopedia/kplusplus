@@ -44,8 +44,8 @@ data class DropRecord(val symbol: String, val reason: String, val phase: DropPha
  * what it dropped and why — turning "the binding isn't there" from an unanswerable
  * question ("did C++ not have it, or did the generator drop it?") into a diffable list.
  *
- * Modeled as an object (matching the sibling [Log] object and the `rootPackageOverride`
- * global): the generator runs one request at a time under `runBlocking`, so a shared
+ * Modeled as an object (matching the sibling [Log] and [GenerationContext] objects):
+ * the generator runs one request at a time under `runBlocking`, so a shared
  * collector is the cohesive carrier without threading a ledger handle through every
  * resolve signature. [reset] clears it between runs (tests and the service path both
  * call it before a fresh generation).

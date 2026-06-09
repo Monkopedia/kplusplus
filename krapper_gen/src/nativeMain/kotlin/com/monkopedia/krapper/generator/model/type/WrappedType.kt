@@ -31,6 +31,7 @@ import clang.CXTypeKind.CXType_Invalid
 import clang.CXTypeKind.CXType_Pointer
 import clang.CXTypeKind.CXType_RValueReference
 import clang.CXTypeKind.CXType_Unexposed
+import com.monkopedia.krapper.generator.GenerationContext
 import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.canonicalType
@@ -58,8 +59,6 @@ import com.monkopedia.krapper.generator.typedefDeclUnderlyingType
 import com.monkopedia.krapper.generator.usr
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.useContents
-
-private val existingTypes = mutableMapOf<String, WrappedType>()
 
 abstract class WrappedType : WrappedElement() {
     abstract val cType: WrappedType
@@ -101,7 +100,7 @@ abstract class WrappedType : WrappedElement() {
         override fun invoke(type: String): WrappedType {
             if (type == "void") return VOID
             if (type == "std::size_t") return invoke("size_t")
-            return existingTypes.getOrPut(type) {
+            return GenerationContext.internedTypes.getOrPut(type) {
                 if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
                 if (type.startsWith("typename ")) {
                     return WrappedTypename(type.substring("typename ".length))
