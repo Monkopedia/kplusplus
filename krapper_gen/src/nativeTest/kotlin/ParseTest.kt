@@ -369,6 +369,73 @@ class ParseTest {
         }
     }
 
+    // Issue #10 (broad-binding scale tail): exercises the INCLUDE_MISSING cyclic-reference
+    // expansion path. A seed class `Seed` exposes a `const Node&` accessor; `Node` (not
+    // seeded) has a `const Node&` self-accessor — a self-cycle closed by a wrapped
+    // const-reference, the minimal shape of Clang's self-referential AST nodes (a `Decl`'s
+    // accessors handing back `Decl&`). `Node` is reachable ONLY through the wrapped carrier,
+    // so it must be pulled in by INCLUDE_MISSING reference-expansion, and that expansion must
+    // terminate and bind `Node` rather than re-descending.
+    //
+    // The expansion mapper marks an in-progress leaf in `otherResolved`, and the re-entry
+    // guard (`canResolve`) follows a wrapped type down to its BARE LEAF and queries the set
+    // by that leaf string. The marker used to be mis-keyed on the WRAPPED carrier
+    // (`const fixture::Node &`) while the guard checks the leaf (`fixture::Node`); keying it
+    // on the leaf (this fix) makes the in-progress marker self-consistent with the guard and
+    // adds an explicit cycle short-circuit. NOTE: this minimal single-TU `resolveAll` shape
+    // terminates and binds `Node` even pre-fix — the simple path's bare-type expansion adds
+    // the leaf key incidentally and masks the mis-keying; the unbounded recursion that
+    // SIGSEGVs only manifests on the deep multi-pass forcing graph of the broad Clang
+    // surface (out of scope to run here). So this is a termination + binding guard for the
+    // cyclic INCLUDE_MISSING path, not a standalone SIGSEGV reproducer.
+    @Test
+    fun testIncludeMissingCyclicReferenceTerminates() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val tmpFile = "/tmp/krapper_cyclic_${random()}_${random()}.h"
+            File(tmpFile).writeText(
+                """
+                |namespace fixture {
+                |class Node {
+                |public:
+                |    const Node& self() const;
+                |    int nodeValue() const;
+                |};
+                |class Seed {
+                |public:
+                |    const Node& getNode() const;
+                |};
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(tmpFile), generateIncludes("clang++"))
+            // Seed only the second class — Node is reachable ONLY as a wrapped reference and
+            // must be pulled in by INCLUDE_MISSING, exercising the cyclic-expansion guard.
+            val allow = AllowListFilter(listOf("fixture::Seed"))
+            val found = resolver.findClasses(allow.wrapperFilter())
+            val foundNames = found.mapNotNull { (it as? WrappedClass)?.type?.toString() }
+            println("Cyclic seed found: $foundNames")
+            assertEquals(
+                setOf("fixture::Seed"),
+                foundNames.toSet(),
+                "Allowlist should select exactly Seed; got $foundNames"
+            )
+            // Resolution must terminate and the self-cyclic class must bind under the
+            // leaf-keyed cycle guard.
+            val resolved = found.resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
+            val resolvedNames = resolved.filterIsInstance<ResolvedClass>()
+                .map { it.type.type }
+                .toSet()
+            println("Cyclic resolved: $resolvedNames")
+            assertTrue(
+                "fixture::Node" in resolvedNames,
+                "Node (the self-referential class) must be pulled in and bind under " +
+                    "INCLUDE_MISSING; got $resolvedNames"
+            )
+        }
+    }
+
     @Test
     fun testInstantiateAndWrite(): Unit = runBlocking {
         val outDir = "/tmp/krapper_slice_${random()}_${random()}"

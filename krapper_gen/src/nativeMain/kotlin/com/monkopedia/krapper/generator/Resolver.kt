@@ -561,7 +561,13 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                         if (context.tracker.resolvedClasses[it.toString()] != null) {
                             return@operateOn RemoveElement
                         }
-                        context.tracker.otherResolved.add(t.toString())
+                        // Cycle guard: if this leaf is already mid-expansion (e.g. a
+                        // self-referential `const Node& self()`), don't recurse into
+                        // resolve again — leave it as a reference and unwind.
+                        if (context.tracker.otherResolved.contains(it.toString())) {
+                            return@operateOn ElementUnchanged
+                        }
+                        context.tracker.otherResolved.add(it.toString())
                         try {
                             // Reference expansion: keep the legacy hard-fail when a
                             // pulled class's primary base can't resolve (don't
@@ -579,7 +585,7 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                             context.tracker.resolvedClasses[resolved.type.toString()] = resolved
                             context.tracker.classes[wrapper.type.toString()] = wrapper
                         } finally {
-                            context.tracker.otherResolved.remove(t.toString())
+                            context.tracker.otherResolved.remove(it.toString())
                         }
                     } catch (original: Throwable) {
                         try {
