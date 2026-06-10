@@ -18,6 +18,7 @@ import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedConstructor
 import com.monkopedia.krapper.generator.model.WrappedDestructor
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
@@ -259,10 +260,7 @@ fun main(args: Array<String>): Unit = memScoped {
     println("cppfrontend: ALL SELF-CHECKS PASSED")
 }
 
-private fun printElements(
-    elements: List<com.monkopedia.krapper.generator.model.WrappedElement>,
-    indent: String
-) {
+private fun printElements(elements: List<WrappedElement>, indent: String) {
     for (child in elements) {
         when (child) {
             is WrappedNamespace -> {
