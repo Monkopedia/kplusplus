@@ -1,0 +1,116 @@
+/*
+ * Copyright 2026 Jason Monk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import com.monkopedia.klinker.klinkedExecutable
+
+plugins {
+    kotlin("multiplatform")
+    alias(libs.plugins.kotlin.serialization)
+    id("com.monkopedia.kplusplus.compiler")
+    id("com.monkopedia.klinker.plugin") version "0.2.0"
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+kotlin {
+    linuxX64("native") {
+        binaries {
+            klinkedExecutable {
+                // Same wiring as :clangwalk (see its build.gradle.kts for the full
+                // rationale): system clang++ link for modern glibc/libstdc++ symbol
+                // versions, --gc-sections so DEBUG dead-strips the stale platform.linux
+                // cinterop cache, and libclang-cpp + LLVM for the Clang C++ AST API.
+                linkerOpts("--gc-sections")
+                compilerOpts(
+                    "-L/usr/lib",
+                    "-lclang-cpp",
+                    "-lLLVM-22",
+                    "-lstdc++",
+                    "-lm",
+                    "-lpthread"
+                )
+                runTask()
+            }
+        }
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions {
+                    optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
+                    freeCompilerArgs.add("-g")
+                }
+            }
+        }
+    }
+    sourceSets["nativeMain"].dependencies {
+        // The whole point of this module (#44 brick 2): construct :krapper_model's pure
+        // parse-output model (WrappedTU/WrappedClass/WrappedMethod/WrappedType) from the
+        // kplusplus-generated libclang-cpp bindings instead of libclang-C cursors.
+        implementation(project(":krapper_model"))
+        implementation(libs.serialization.json)
+    }
+}
+
+// Stage1 front-end scaffold (#44 brick 2): bind the same Clang C++ AST slice :clangwalk
+// proved out (EXTRACT/TRAVERSE/IDENTITY), parse a fixture, and CONSTRUCT a WrappedTU from
+// the walk. Scoped import (only + IGNORE_MISSING) keeps the bound surface to the allowlist.
+kplusplus {
+    header("include/clang_slice.h")
+    // Clang's AST headers must be compiled with clang++, NOT the konan-bundled GCC-8.3
+    // (resolveDefaultCompiler's default) — GCC-8.3/libstdc++ aborts on them (exit 134).
+    compiler = "clang++"
+    cppStandard = "c++17"
+    referencePolicy = "IGNORE_MISSING"
+    only(
+        // Entry point: build an AST from a code string, reach the TU.
+        "clang::tooling::buildASTFromCode",
+        "clang::ASTUnit",
+        "clang::ASTContext",
+        // The Decl hierarchy the construction walks (clangwalk's proven slice).
+        "clang::Decl",
+        "clang::NamedDecl",
+        "clang::DeclContext",
+        "clang::TranslationUnitDecl",
+        "clang::TagDecl",
+        "clang::RecordDecl",
+        "clang::CXXRecordDecl",
+        // FunctionDecl bridges the CXXMethodDecl -> NamedDecl upcast chain and carries
+        // getReturnType()/getNumParams()/getParamDecl() — the signature payload.
+        "clang::FunctionDecl",
+        "clang::CXXMethodDecl",
+        "clang::FieldDecl",
+        "clang::ValueDecl",
+        "clang::DeclaratorDecl",
+        "clang::TypeDecl",
+        "clang::CXXBaseSpecifier",
+        // NEW over clangwalk's slice: parameters. FunctionDecl::getParamDecl(i) returns a
+        // ParmVarDecl* — without ParmVarDecl bound, IGNORE_MISSING drops getParamDecl and
+        // arguments are unreachable (clangwalk never bound it; the walk didn't need args).
+        // VarDecl is ParmVarDecl's direct base: it bridges the ParmVarDecl ->
+        // DeclaratorDecl/ValueDecl/NamedDecl upcast chain (same reason FunctionDecl is
+        // bound for CXXMethodDecl), so a parameter exposes its name + QualType.
+        "clang::ParmVarDecl",
+        "clang::VarDecl",
+        // QualType is the carrier for a decl's type; getAsString() (by-value std::string,
+        // normalized to a Kotlin String by #37) feeds the WrappedType(spelling) factory.
+        "clang::QualType"
+    )
+    // Materialize the range returns the walk iterates (decls()/methods()/bases()).
+    instantiate("std::vector<clang::Decl*>")
+    instantiate("std::vector<clang::CXXMethodDecl*>")
+    instantiate("std::vector<clang::CXXBaseSpecifier*>")
+}
