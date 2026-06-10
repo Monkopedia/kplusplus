@@ -31,4 +31,7 @@ val clangEnabled = (enableClang != null && enableClang != "false") ||
     settings.providers.gradleProperty("llvmConfig").orNull?.let { File(it).canExecute() } == true
 if (clangEnabled) {
     include(":clangwalk")
+    // :cppfrontend is the stage1 front-end scaffold (#44 brick 2): it constructs
+    // :krapper_model's parse-output model from the same gated libclang-cpp bindings.
+    include(":cppfrontend")
 }
