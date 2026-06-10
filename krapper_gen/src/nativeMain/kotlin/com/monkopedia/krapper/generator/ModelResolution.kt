@@ -90,6 +90,8 @@ val ResolvedElement.parentClass: ResolvedClass?
 val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
 
+// The else branch covers WrappedBase / WrappedArgument / WrappedTemplateParam, which
+// have no standalone resolution (they resolve as part of their owning class/method).
 suspend fun WrappedElement.resolve(resolverContext: ResolveContext): ResolvedElement? =
     when (this) {
         is WrappedTU -> resolve(resolverContext)
@@ -100,8 +102,6 @@ suspend fun WrappedElement.resolve(resolverContext: ResolveContext): ResolvedEle
         is WrappedMethod -> resolve(resolverContext)
         is WrappedField -> resolve(resolverContext)
         is WrappedType -> resolverContext.resolve(this)
-        // WrappedBase / WrappedArgument / WrappedTemplateParam have no standalone
-        // resolution (they resolve as part of their owning class/method).
         else -> null
     }
 
@@ -371,8 +371,7 @@ suspend fun determineReturnStyle(
     else -> VOIDP
 }
 
-suspend fun WrappedMethod.resolve(resolverContext: ResolveContext): ResolvedMethod? =
-    when (this) {
+suspend fun WrappedMethod.resolve(resolverContext: ResolveContext): ResolvedMethod? = when (this) {
         is WrappedConstructor -> resolveConstructor(resolverContext)
         is WrappedDestructor -> resolveDestructor(resolverContext)
         else -> resolvePlainMethod(resolverContext)
@@ -622,9 +621,7 @@ private suspend fun WrappedMethod.resolveArguments(
     return retArgs
 }
 
-suspend fun WrappedArgument.resolveArgument(
-    resolverContext: ResolveContext
-): ResolvedArgument? {
+suspend fun WrappedArgument.resolveArgument(resolverContext: ResolveContext): ResolvedArgument? {
     val unreferencedType = if (type.isReference) type.unreferenced else type
     // T1.10p: an inbound non-owning string view (e.g. `const llvm::StringRef&`). Marshal it
     // like a by-value std::string — the C boundary takes a `const char*`, Kotlin sees a
