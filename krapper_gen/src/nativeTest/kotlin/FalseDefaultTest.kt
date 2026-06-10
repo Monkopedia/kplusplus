@@ -105,4 +105,25 @@ class FalseDefaultTest {
         assertTrue(arg(referenceTo(const(WrappedType("Alloc")))).isOmittableDefault)
         assertTrue(arg(referenceTo(const(WrappedType("std::allocator<char>")))).isOmittableDefault)
     }
+
+    // An unmodelable CALLBACK param (`function_ref<R(Args)>`, `std::function<R(Args)>`)
+    // carries a false default: the hasDefault cursor heuristic misreads the callback
+    // signature's parenthesized param list as a default value. The fix keys on the `(` in the
+    // referent spelling, catching the param whether the instantiation surfaced as a structured
+    // template (a function-type arg) OR — at Clang scale, when libclang doesn't report the
+    // template args — collapsed to a bare type-reference string (the same fallback the
+    // SmallPtrSetImpl output ref hits, the case `adjustType` actually presents). Neither is a
+    // real, trimmable default, so the param is NOT omittable (the whole method drops).
+    @Test fun callback_param_is_not_omittable() {
+        // Structured: the function type rides as a template arg.
+        assertFalse(arg(template("std::function", "int (Thing *)")).isOmittableDefault)
+        // Bare-string Clang-scale fallback: libclang didn't report the template args, so the
+        // whole instantiation collapsed to one type-reference spelling carrying the `(`.
+        assertFalse(arg(WrappedType("llvm::function_ref<int (Thing *)>")).isOmittableDefault)
+        // The `adjustType` shape: a const-reference callback, still a bare-string referent.
+        assertFalse(
+            arg(referenceTo(const(WrappedType("llvm::function_ref<QualType (QualType)>"))))
+                .isOmittableDefault
+        )
+    }
 }
