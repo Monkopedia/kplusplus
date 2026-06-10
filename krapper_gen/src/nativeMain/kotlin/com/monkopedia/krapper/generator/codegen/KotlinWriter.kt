@@ -71,6 +71,7 @@ import com.monkopedia.krapper.generator.builders.pkg
 import com.monkopedia.krapper.generator.builders.property
 import com.monkopedia.krapper.generator.builders.qdot
 import com.monkopedia.krapper.generator.builders.reference
+import com.monkopedia.krapper.generator.builders.scope
 import com.monkopedia.krapper.generator.builders.setter
 import com.monkopedia.krapper.generator.builders.symbol
 import com.monkopedia.krapper.generator.builders.type
@@ -2134,14 +2135,23 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         when (val kotlinType = operator.kotlinOperatorType) {
             is KotlinOperator -> {
+                // When the idiomatic operator name is already claimed by another member of
+                // this class (e.g. a class exposing BOTH `operator[]` and a named `get(idx)`
+                // — clang::TemplateArgumentList does), the scope uniquifier renames THIS one
+                // to `_<name>`, and `operator fun _get` is illegal Kotlin. Drop the `operator`
+                // modifier and emit it as a plain (uniquified) method; the `[]`/`+`/... call
+                // syntax falls back to the named sibling that owns the canonical name, and any
+                // index-iterator wiring already targets that sibling by name.
+                val nameTaken = scope.isNameUsed(kotlinType.name)
+                val emit: KotlinCodeBuilder.() -> Unit = {
+                    generateBasicMethod(
+                        method,
+                        extensionMethod(pkg, method.uniqueCName!!),
+                        kotlinType.name
+                    )
+                }
                 inline {
-                    operator {
-                        generateBasicMethod(
-                            method,
-                            extensionMethod(pkg, method.uniqueCName!!),
-                            kotlinType.name
-                        )
-                    }
+                    if (nameTaken) emit() else operator(emit)
                 }
             }
 
