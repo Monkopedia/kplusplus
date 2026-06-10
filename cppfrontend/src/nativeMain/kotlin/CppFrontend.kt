@@ -45,7 +45,10 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
 // the walk, and serialize it to JSON — the end-to-end skeleton the next bricks fill in.
 @Suppress("UNUSED_PARAMETER")
 fun main(args: Array<String>): Unit = memScoped {
-    val unit = buildASTFromCode(FIXTURE_HEADER, "fixture.h")
+    // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
+    // from it, and a ".h" parses as C (where `int area() const` is ill-formed and Shape is a
+    // plain RecordDecl the CXXRecordDecl walk never sees).
+    val unit = buildASTFromCode(FIXTURE_HEADER, "fixture.cc")
         ?: return@memScoped fail("buildASTFromCode returned null")
     val context = unit.getASTContext()
         ?: return@memScoped fail("no ASTContext")
