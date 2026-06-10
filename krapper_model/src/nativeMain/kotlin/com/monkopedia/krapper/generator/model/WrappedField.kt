@@ -15,24 +15,17 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTU
+import com.monkopedia.krapper.generator.model.type.WrappedType
+import kotlinx.serialization.Transient
 
-class WrappedTU : WrappedElement() {
-    operator fun plus(other: WrappedTU): WrappedTU = WrappedTU().also {
-        it.addAllChildren(children)
-        it.addAllChildren(other.children)
-        it.children.forEach { c ->
-            c.parent = it
-        }
-    }
+data class WrappedField(val name: String, val type: WrappedType) : WrappedElement() {
+    @Transient
+    internal val other = Any()
 
-    override fun clone(): WrappedElement = WrappedTU().also {
+    override fun clone(): WrappedElement = WrappedField(name, type).also {
         it.addAllChildren(children)
         it.parent = parent
     }
 
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedTU = ResolvedTU().also {
-        it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
-    }
+    override fun toString(): String = "$name: $type"
 }

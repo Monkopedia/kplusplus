@@ -15,14 +15,9 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplate
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplateParam
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTypedef
 
 data class WrappedTemplate(val name: String) : WrappedElement() {
     val baseClass: WrappedType?
@@ -48,19 +43,6 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
     val methods: List<WrappedMethod>
         get() = children.filterIsInstance<WrappedMethod>()
     var templateArgCounter = 0
-
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
-        return ResolvedTemplate(
-            name,
-            baseClass?.let {
-                resolverContext.resolve(it)
-                    ?: return resolverContext.notifyFailed(this, it, "Base class")
-            },
-            metadata.toResolved(),
-            qualified,
-            templateArgs.mapNotNull { it.resolveTemplateParam(resolverContext) }
-        )
-    }
 
     override fun addChild(child: WrappedElement) {
         if (child is WrappedTemplateParam) {
@@ -115,19 +97,6 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
 
     override fun toString(): String = "$name${defaultType?.let { " $it" } ?: ""} ($children)"
 
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? = null
-
-    suspend fun resolveTemplateParam(resolverContext: ResolveContext): ResolvedTemplateParam? {
-        return ResolvedTemplateParam(
-            name,
-            usr,
-            defaultType?.let {
-                resolverContext.resolve(it)
-                    ?: return resolverContext.notifyFailed(this, it, "Default type")
-            }
-        )
-    }
-
     fun merge(child: WrappedTemplateParam) {
         otherParams.add(child)
     }
@@ -140,15 +109,4 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
     }
 
     override fun toString(): String = "typedef $name = $targetType"
-
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? {
-        return ResolvedTypedef(
-            name,
-            resolverContext.resolve(targetType) ?: return resolverContext.notifyFailed(
-                this,
-                targetType,
-                "Failed to resolve typedef"
-            )
-        )
-    }
 }

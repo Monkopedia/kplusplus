@@ -15,9 +15,6 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
-
 abstract class WrappedElement(
     private val mutableChildren: MutableList<WrappedElement> = mutableListOf()
 ) {
@@ -52,11 +49,12 @@ abstract class WrappedElement(
     }
 
     abstract fun clone(): WrappedElement
-    abstract suspend fun resolve(resolverContext: ResolveContext): ResolvedElement?
 
     // Cursor-side construction (mapAll/map and friends) lives in the libclang front-end
-    // (ModelFactories.kt) as extensions on this companion — the model itself carries no
-    // clang/cinterop dependency (the front-end seam, issue #44).
+    // (ModelFactories.kt) as extensions on this companion, and resolution against the
+    // type graph lives in the resolver (ModelResolution.kt) as a when-dispatch over the
+    // element hierarchy — the model itself carries no clang/cinterop or codegen
+    // dependency (the front-end seam, issue #44).
     companion object
 }
 

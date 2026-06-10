@@ -16,11 +16,7 @@
 package com.monkopedia.krapper.generator.model.type
 
 import com.monkopedia.krapper.generator.GenerationContext
-import com.monkopedia.krapper.generator.ResolveContext
 import com.monkopedia.krapper.generator.model.WrappedElement
-import com.monkopedia.krapper.generator.model.WrappedKotlinType
-import com.monkopedia.krapper.generator.model.typeToKotlinType
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 
 abstract class WrappedType : WrappedElement() {
     abstract val cType: WrappedType
@@ -31,8 +27,6 @@ abstract class WrappedType : WrappedElement() {
     open val isEnum: Boolean
         get() = false
     abstract val isString: Boolean
-    val kotlinType: WrappedKotlinType
-        get() = typeToKotlinType(this)
     abstract val isReturnable: Boolean
     abstract val isVoid: Boolean
 
@@ -46,9 +40,6 @@ abstract class WrappedType : WrappedElement() {
     abstract val isReference: Boolean
     abstract val isConst: Boolean
     abstract val unconst: WrappedType
-
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedElement? =
-        resolverContext.resolve(this)
 
     // Construction from a libclang CXType lives in the front-end (TypeFactories.kt) as
     // `WrappedType.Companion.invoke(CValue<CXType>, ...)` extensions — the type model

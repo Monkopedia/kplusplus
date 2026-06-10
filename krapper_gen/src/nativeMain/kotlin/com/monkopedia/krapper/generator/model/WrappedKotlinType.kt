@@ -114,6 +114,12 @@ private val pointerTypeMap = mapOf(
     "intptr_t" to "kotlinx.cinterop.LongVar"
 )
 
+// The Kotlin-facing spelling of a model type. An extension (not a member) because the
+// model module is front-end/back-end agnostic — the Kotlin naming tables live with the
+// generator (issue #44 brick 1b).
+val WrappedType.kotlinType: WrappedKotlinType
+    get() = typeToKotlinType(this)
+
 fun typeToKotlinType(type: WrappedType): WrappedKotlinType = WrappedKotlinType(type)
 
 fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
