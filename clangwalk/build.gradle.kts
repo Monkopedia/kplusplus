@@ -90,6 +90,12 @@ kplusplus {
         "clang::TagDecl",
         "clang::RecordDecl",
         "clang::CXXRecordDecl",
+        // FunctionDecl is CXXMethodDecl's direct base: it carries getReturnType() (the
+        // method's return QualType — the signature payload the reducer extracts) and bridges
+        // the CXXMethodDecl -> NamedDecl upcast chain (getNameAsString). Without it bound the
+        // chain breaks at FunctionDecl and a walked CXXMethodDecl exposes neither name nor
+        // return type.
+        "clang::FunctionDecl",
         "clang::CXXMethodDecl",
         "clang::FieldDecl",
         "clang::ValueDecl",

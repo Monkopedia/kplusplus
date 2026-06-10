@@ -22,7 +22,13 @@ import kotlinx.cinterop.memScoped
 fun main(args: Array<String>) = memScoped {
     val source = """
         struct Point { int x; int y; };
-        class Shape { public: virtual double area(); };
+        class Shape {
+        public:
+            int area() const;
+            const char* name() const;
+            double scale(double factor) const;
+        };
+        struct Circle : Shape { double radius() const; };
         void freeFunction(int n);
         int globalVar;
     """.trimIndent()
@@ -51,6 +57,28 @@ fun main(args: Array<String>) = memScoped {
         // second by-value std::string EXTRACT primitive — the type spelling as Clang reports.
         val typeStr = decl.asValueDecl()?.getType()?.getAsString()?.let { " : $it" } ?: ""
         println("  [$kind] $name$typeStr")
+
+        // TRAVERSE: for a record, descend into its members. dyn_cast Decl -> CXXRecordDecl
+        // (null for non-records). #40's cumulative-forcing fix is what lets BOTH range
+        // accessors survive together: bases() materializes std::vector<CXXBaseSpecifier*>
+        // and methods() materializes std::vector<CXXMethodDecl*> off the SAME owning class.
+        val record = decl.asCXXRecordDecl() ?: continue
+        // Each CXXBaseSpecifier carries the base class as a QualType (getType()); its
+        // getAsString() spells the base — the inheritance edge the reducer flattens over.
+        for (base in record.bases()) {
+            if (base == null) continue
+            println("      <base> ${base.getType().getAsString()}")
+        }
+        // Each CXXMethodDecl: its name comes from NamedDecl (upcast getNameAsString) and its
+        // return type from FunctionDecl (upcast getReturnType -> QualType -> getAsString).
+        // This is the reducer's core per-record operation: enumerate methods, extract each
+        // signature's name + return type.
+        for (method in record.methods()) {
+            if (method == null) continue
+            val mName = method.asNamedDecl()?.getNameAsString() ?: "<unnamed>"
+            val mRet = method.asFunctionDecl()?.getReturnType()?.getAsString() ?: "?"
+            println("      <method> $mName : $mRet")
+        }
     }
     println("clangwalk: walked $count top-level declarations via real libclang-cpp")
 }
