@@ -18,13 +18,20 @@ import clang.CXXConstructorDecl
 import clang.CXXDestructorDecl
 import clang.CXXMethodDecl
 import clang.CXXRecordDecl
+import clang.ClassTemplateDecl
 import clang.Decl
 import clang.DeclContext
 import clang.FieldDecl
 import clang.FunctionDecl
+import clang.NamedDecl
 import clang.NamespaceDecl
 import clang.ParmVarDecl
+import clang.TemplateDecl
+import clang.TemplateParameterList
 import clang.TranslationUnitDecl
+import clang.TypedefNameDecl
+import clang.decl.Kind
+import com.monkopedia.krapper.generator.model.ClassMetadata
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -35,10 +42,13 @@ import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 
-// The C++-AST front-end's model construction (#44 bricks 2-4): walk a parsed Clang AST on
+// The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
 // model — the same WrappedTU shape the libclang-C front-end (ModelFactories.kt) produces.
 // Every construction rule cites the ModelFactories source it mirrors; types are decoded
@@ -52,7 +62,26 @@ import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 // Phase C's tree-diff treats identity fields as maskable and compares structure only.
 private fun Decl.canonical(): Decl = (getCanonicalDecl() as? Decl) ?: this
 
-private fun Decl.cppUsr(): String = "cpp:${canonical().getID()}"
+// Shared with TypeBuilder (the dependent-T WrappedTemplateRef must key on the SAME
+// identity string as the WrappedTemplateParam it refers to).
+internal fun Decl.cppUsr(): String = "cpp:${canonical().getID()}"
+
+// BRIDGE: the generated `Decl.asClassTemplateDecl()` dyn-cast is missing — the
+// ClassTemplateDecl -> RedeclarableTemplateDecl -> TemplateDecl chain doesn't survive
+// resolution (RedeclarableTemplateDecl is unbound), the same CastTargets gap as
+// TypedefType (TypeBuilder.asTypedefTypeOrNull; probe-confirmed on the brick-5
+// generation run). The gate is EXACTLY the class's static `classof`
+// (`getKind() == ClassTemplate`), and Decl is ClassTemplateDecl's address-identical
+// primary base, so the same-pointer re-view is the generated dyn-cast's semantics.
+private fun Decl.asClassTemplateDeclOrNull(): ClassTemplateDecl? =
+    if (getKind() == Kind.ClassTemplate) ClassTemplateDecl(ptr, memScope) else null
+
+// Load-bearing mirroring, not a gap workaround: ModelFactories.map only has a
+// CXCursor_TypedefDecl branch — a C++ `using` alias (CXCursor_TypeAliasDecl, here
+// Kind.TypeAlias) produces NO element on the libclang path, so the kind gate must
+// exclude it (the generated asTypedefNameDecl() alone would catch both alias kinds).
+private fun Decl.asTypedefDeclOrNull(): TypedefNameDecl? =
+    if (getKind() == Kind.Typedef) asTypedefNameDecl() else null
 
 // operator new/delete are never bound — neither as members nor as free functions
 // (ModelFactories.map's CXXMethod/FunctionDecl branch filters these names).
@@ -90,9 +119,35 @@ private class ModelBuilder {
                 addNamespace(namespace, parent)
                 continue
             }
+            // Brick 5: a `template <typename T> class` is a ClassTemplateDecl (NOT a
+            // CXXRecordDecl — the pattern record hangs off it), mirrored to
+            // WrappedTemplate (ModelFactories.map's CXCursor_ClassTemplate branch).
+            val classTemplate = decl.asClassTemplateDeclOrNull()
+            if (classTemplate != null) {
+                buildTemplate(classTemplate)?.let { parent.addChild(it) }
+                continue
+            }
+            // A ClassTemplateSpecializationDecl IS-A CXXRecordDecl, but libclang's cursor
+            // walk never surfaces IMPLICIT instantiations (they hang off the template's
+            // specialization set, not the TU) — guard so one is never mistaken for a
+            // plain record. Explicit specializations are brick-6+.
+            if (decl.getKind() == Kind.ClassTemplateSpecialization ||
+                decl.getKind() == Kind.ClassTemplatePartialSpecialization
+            ) {
+                continue
+            }
             val record = decl.asCXXRecordDecl()
             if (record != null) {
                 parent.addChild(buildClass(record))
+                continue
+            }
+            // Brick 5: a `typedef` is a WrappedTypedef element at ANY level — TU,
+            // namespace, class, template (ModelFactories.map's CXCursor_TypedefDecl
+            // branch is level-agnostic); a `using` alias produces no element (no
+            // CXCursor_TypeAliasDecl branch) — the Kind.Typedef gate mirrors that split.
+            val typedef = decl.asTypedefDeclOrNull()
+            if (typedef != null) {
+                buildTypedef(typedef)?.let { parent.addChild(it) }
                 continue
             }
             val function = decl.asFunctionDecl()
@@ -106,10 +161,63 @@ private class ModelBuilder {
                 // STATIC when the semantic parent is not a class).
                 parent.addChild(buildFunction(function))
             }
-            // brick-5+: typedef ELEMENTS, enums, global variables, class templates, and
-            // forward-declaration redecl-collapse for classes (elementLookup's other use).
-            // (Typedefs/aliases used as TYPES already resolve — TypeBuilder.kt.)
+            // An EnumDecl deliberately produces NO element: ModelFactories.map has no
+            // CXCursor_EnumDecl branch (`else -> return null`); the enum's payload —
+            // underlying type + constants — rides on every WrappedEnumType LEAF that
+            // references it (TypeBuilder.buildEnumType).
+            // brick-6+: global variables and forward-declaration redecl-collapse for
+            // classes (elementLookup's other use).
         }
+    }
+
+    // ModelFactories.map's CXCursor_TypedefDecl branch: WrappedTypedef(spelling, the
+    // reducer-stack target type). The libclang branch drops a typedef whose type can't be
+    // built (catch -> null); buildTypedefTargetType never throws (UNRESOLVABLE instead),
+    // so only a missing name drops here.
+    private fun buildTypedef(typedef: TypedefNameDecl): WrappedTypedef? {
+        val name = typedef.getNameAsString() ?: return null
+        return WrappedTypedef(name, buildTypedefTargetType(typedef))
+    }
+
+    // ModelFactories.map's CXCursor_ClassTemplate branch + the WrappedTemplate factory
+    // (WrappedTemplate(spelling)): the element is the template's bare name; its children
+    // are the WrappedTemplateParams followed by the templated record's bases + members
+    // built through the SAME paths as a plain class (mapAll's recursion reuses every
+    // member branch on template children; the metadata side-effects land on the
+    // WrappedTemplate via the shared `(parent as? WrappedTemplate)?.metadata` mirrors).
+    private fun buildTemplate(templateDecl: ClassTemplateDecl): WrappedTemplate? {
+        val record = templateDecl.getTemplatedDecl()
+            ?.let { CXXRecordDecl(it.ptr, templateDecl.memScope) } ?: return null
+        val name = record.asNamedDecl().getNameAsString() ?: error("template without a name")
+        val template = WrappedTemplate(name)
+        // getTemplateParameters() lives on TemplateDecl — ClassTemplateDecl's
+        // address-identical primary base chain, so the same-pointer re-view is exact.
+        // Each TYPE parameter mirrors ModelFactories' CXCursor_TemplateTypeParameter ->
+        // WrappedTemplateParam(spelling, usr); a non-type/template-template parameter has
+        // no map branch on the libclang path (`else -> null`) and is skipped the same way.
+        val params = TemplateDecl(templateDecl.ptr, templateDecl.memScope)
+            .getTemplateParameters()
+            ?.let { TemplateParameterList(it.ptr, templateDecl.memScope) }
+            ?: return null
+        for (i in 0u until params.size()) {
+            val param = params.getParam(i)
+                ?.let { NamedDecl(it.ptr, templateDecl.memScope) } ?: continue
+            if (param.getKind() != Kind.TemplateTypeParm) continue
+            template.addChild(
+                WrappedTemplateParam(
+                    param.getNameAsString() ?: error("template param without a name"),
+                    // The identity the dependent-T WrappedTemplateRef keys back to
+                    // (TypeBuilder's TemplateTypeParmType branch reads the same decl).
+                    Decl(param.ptr, templateDecl.memScope).cppUsr()
+                )
+            )
+        }
+        // The pattern record's bases/members go through the exact class construction
+        // path. hasDefinition guards a forward-declared template (definition-data reads).
+        if (record.hasDefinition()) {
+            addBasesAndMembers(record, template, template.metadata)
+        }
+        return template
     }
 
     private fun addNamespace(decl: NamespaceDecl, parent: WrappedElement) {
@@ -131,12 +239,24 @@ private class ModelBuilder {
         // hasDefinition() guards a forward-declared record, whose definition-data
         // accessors may not be read (libclang's isAbstract reads the definition too).
         val cls = WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
+        addBasesAndMembers(record, cls, cls.metadata)
+        return cls
+    }
+
+    // The shared class-body construction: bases + every member through the same branches,
+    // whether [parent] is a WrappedClass or a WrappedTemplate (mapAll's recursion makes no
+    // distinction either; ModelFactories' metadata side-effects mirror to both).
+    private fun addBasesAndMembers(
+        record: CXXRecordDecl,
+        parent: WrappedElement,
+        metadata: ClassMetadata
+    ) {
         for (base in record.bases()) {
             if (base == null) continue
             // ModelFactories.map's CXCursor_CXXBaseSpecifier branch: the base's type built
             // through the CXType factory (structural buildWrappedType here, brick 4),
             // isPublic from the access specifier, isVirtualBase from `virtual` inheritance.
-            cls.addChild(
+            parent.addChild(
                 WrappedBase(
                     buildWrappedType(base.getType()),
                     isPublic = base.getAccessSpecifier() == AccessSpecifier.AS_public,
@@ -149,12 +269,11 @@ private class ModelBuilder {
             // Implicit members (the injected class name, Sema-injected copy ctor/
             // assignment) are never visited by libclang's cursor walk; mirror that.
             if (decl.isImplicit()) continue
-            addMember(decl, cls)
+            addMember(decl, parent, metadata)
         }
-        return cls
     }
 
-    private fun addMember(decl: Decl, cls: WrappedClass) {
+    private fun addMember(decl: Decl, parent: WrappedElement, metadata: ClassMetadata) {
         val access = decl.getAccess()
         // ModelFactories.map's top filter: a private/protected member — or one libclang
         // marks CXAvailability_NotAvailable, which is how `= delete` surfaces (bridged
@@ -164,38 +283,46 @@ private class ModelBuilder {
             access == AccessSpecifier.AS_protected ||
             decl.asFunctionDecl()?.isDeleted() == true
         ) {
-            recordFilteredMember(decl, cls)
+            recordFilteredMember(decl, metadata)
             return
         }
         val constructor = decl.asCXXConstructorDecl()
         if (constructor != null) {
-            cls.addChild(buildConstructor(constructor))
+            parent.addChild(buildConstructor(constructor))
             return
         }
         val destructor = decl.asCXXDestructorDecl()
         if (destructor != null) {
-            cls.addChild(buildDestructor(destructor))
+            parent.addChild(buildDestructor(destructor))
             return
         }
         val method = decl.asCXXMethodDecl()
         if (method != null) {
             if (method.asNamedDecl().getNameAsString() in NEW_DELETE_OPERATORS) return
-            cls.addChild(buildMethod(method))
+            parent.addChild(buildMethod(method))
             return
         }
         val field = decl.asFieldDecl()
         if (field != null) {
-            addField(field, cls)
+            addField(field, parent, metadata)
+            return
         }
-        // Anything else (static data members, member typedefs, nested enums) falls
-        // through ModelFactories.map's `else -> return null` and is dropped; nested
-        // record decls are brick-5+ (together with the nested-in-class-template skip).
+        // Brick 5: a member `typedef` (incl. an in-template `typedef T value_type`) is a
+        // WrappedTypedef element, same map branch as the TU level; `using` aliases and
+        // member EnumDecls produce no element (see addContextDecls).
+        val typedef = decl.asTypedefDeclOrNull()
+        if (typedef != null) {
+            buildTypedef(typedef)?.let { parent.addChild(it) }
+            return
+        }
+        // Anything else (static data members, nested enums) falls through
+        // ModelFactories.map's `else -> return null` and is dropped; nested record decls
+        // are brick-6+ (together with the nested-in-class-template skip).
     }
 
     // Mirror of the metadata side-effects ModelFactories.map records for a member it
     // filters out (private/protected/deleted), keyed by the member's kind and name.
-    private fun recordFilteredMember(decl: Decl, cls: WrappedClass) {
-        val metadata = cls.metadata
+    private fun recordFilteredMember(decl: Decl, metadata: ClassMetadata) {
         val constructor = decl.asCXXConstructorDecl()
         if (constructor != null) {
             metadata.hasConstructor = true
@@ -232,7 +359,7 @@ private class ModelBuilder {
         }
     }
 
-    private fun addField(field: FieldDecl, cls: WrappedClass) {
+    private fun addField(field: FieldDecl, parent: WrappedElement, metadata: ClassMetadata) {
         // Anonymous data members (bitfield padding `int :3;`, anon union/struct members)
         // have a blank spelling and are dropped (ModelFactories' FieldDecl branch).
         val name = field.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() } ?: return
@@ -242,12 +369,12 @@ private class ModelBuilder {
         // constructor — recorded structurally because the implicit special members are
         // never emitted as decls (ModelFactories' FieldDecl branch, T-skip residuals).
         if (type.isReference || type.isConst) {
-            cls.metadata.hasDeletedCopyAssignment = true
+            metadata.hasDeletedCopyAssignment = true
         }
         if (type.isReference) {
-            cls.metadata.hasDeletedDefaultConstructor = true
+            metadata.hasDeletedDefaultConstructor = true
         }
-        cls.addChild(WrappedField(name, type))
+        parent.addChild(WrappedField(name, type))
     }
 
     // ModelFactories.map's CXCursor_Constructor branch: name from the spelling (the class

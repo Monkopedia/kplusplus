@@ -14,10 +14,16 @@
  * limitations under the License.
  */
 import clang.CXXRecordDecl
+import clang.Decl
+import clang.EnumDecl
 import clang.QualType
 import clang.Type
+import clang.TypedefNameDecl
 import clang.TypedefType
 import clang.templateArgument.ArgKind
+import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
+import com.monkopedia.krapper.generator.model.type.WrappedEnumType
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.UNRESOLVABLE
@@ -142,31 +148,19 @@ fun buildWrappedType(type: QualType): WrappedType {
     }
 
     if (typedef != null) {
-        val name = typedef.getNameAsString() ?: ""
-        // sizeTypedefElement: `size_type`/`difference_type` ALWAYS normalize to the
-        // `size_t`/`ptrdiff_t` aliases (so they surface as platform.posix.<name>).
-        when (name) {
-            "size_type" -> return WrappedTypeReference("size_t").maybeConst(isConst)
-            "difference_type" -> return WrappedTypeReference("ptrdiff_t").maybeConst(isConst)
-        }
-        // cAliasTypedefElement: the C platform aliases are preserved as the alias NAME
-        // itself instead of collapsing to the underlying integer. (TypeFactories keys this
-        // on a CXCursor_TypedefDecl only; here it applies to either alias kind — a `using
-        // size_t = ...` is vanishingly rare and the name is the contract either way.)
-        if (name in C_ALIAS_TYPEDEFS) return WrappedTypeReference(name).maybeConst(isConst)
-        // referenceTypedefElement / pointerTypedefElement / assocTypedefElement reduce
-        // std-container member aliases whose underlyings are DEPENDENT trait expressions;
-        // those only arise inside template decls — brick 5's template-DECL construction.
-        //
-        // Everything else collapses to the underlying type, mirroring ResolverBuilderImpl
-        // .visit()'s CXCursor_TypedefDecl branch (recursive typedefDeclUnderlyingType walk).
-        // DIVERGENCE (Phase C normalizer entry): for a C++ `using` alias (TypeAliasDecl)
-        // the libclang path is ORDER-DEPENDENT — visit() leaves the alias un-collapsed
-        // (createForType's `else` then emits the alias NAME as a leaf) unless the
-        // underlying's canonical spelling was already in visit()'s seenNames cache, in
-        // which case the cached record type collapses it anyway. This front-end always
-        // collapses both alias kinds — deterministic, never the order-dependent name leaf.
-        return buildWrappedType(typedef.getUnderlyingType()).maybeConst(isConst)
+        return buildTypedefTargetType(typedef).maybeConst(isConst)
+    }
+
+    // Dependent template-parameter reference: createForType's CXCursor_TemplateTypeParameter
+    // branch (TypeFactories) -> WrappedTemplateRef(the param DECL's USR) — NOT the canonical
+    // `type-parameter-0-0` spelling and NOT the bare name `T`: the identity string ties the
+    // use back to the matching WrappedTemplateParam.usr so substitution can key on it. This
+    // front-end's identity is the same cpp:<canonical-id> convention (ModelBuilder.kt), so
+    // the ref and the param agree. Read off the SUGARED type: the canonical
+    // TemplateTypeParmType carries no decl (TypeBase.h: `assert(!TTPDecl == Canon.isNull())`).
+    ty.asTemplateTypeParmType()?.let { parm ->
+        val decl = parm.getDecl() ?: return UNRESOLVABLE
+        return WrappedTemplateRef(decl.asDecl().cppUsr()).maybeConst(isConst)
     }
 
     // ---- createForType leaf dispatch (post-visit, i.e. against the canonical type) ----
@@ -188,19 +182,91 @@ fun buildWrappedType(type: QualType): WrappedType {
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
-        // DIVERGENCE (Phase C normalizer entry): an enum leaf is a WrappedEnumType on the
-        // libclang path (fullyQualified + underlying integer + the constants, createForType
-        // CXCursor_EnumDecl). The constants' VALUES need llvm::APSInt
-        // (EnumConstantDecl::getInitVal), which has no bound surface yet — so the
-        // structural decode emits the named reference WITHOUT the enum payload. brick-5:
-        // bind EnumType/EnumDecl + an APSInt value bridge and emit the real WrappedEnumType.
-        return WrappedTypeReference(spellingOf(canonical) ?: return UNRESOLVABLE)
-            .maybeConst(isConst)
+        // Enum leaf: createForType's CXCursor_EnumDecl branch (TypeFactories) — the
+        // dual-identity WrappedEnumType: cppName = the decl's fullyQualified (the
+        // "::"-joined semantic-parent chain ≡ getQualifiedNameAsString, so a nested enum
+        // spells `Palette::Flavor`), underlying = the decl's integer type
+        // (clang_getEnumDeclIntegerType ≡ EnumDecl::getIntegerType — the EXPLICIT
+        // underlying for a fixed enum, clang's COMPUTED one otherwise), constants = the
+        // EnumConstantDecl children's (name, value) pairs. Scoped vs unscoped needs no
+        // flag here: both spell their qualified name and both carry their underlying type
+        // (the libclang path never consults clang_EnumDecl_isScoped in construction).
+        // The decl is reached through Type::getAsTagDecl() + the generated asEnumDecl
+        // dyn-cast (clang::EnumType itself is unbindable — see build.gradle.kts); same
+        // decl clang_getTypeDeclaration reports.
+        val enumDecl = canonTy.getAsTagDecl()
+            ?.let { Decl(it.ptr, canonTy.memScope) }
+            ?.asEnumDecl() ?: return UNRESOLVABLE
+        return buildEnumType(enumDecl).maybeConst(isConst)
     }
     // Builtin (and any remaining) leaf: createForType's `else -> WrappedType(spelling)`,
     // spelled from the canonical type — the structural equivalent of visit()'s collapse.
     val spelling = spellingOf(canonical) ?: return UNRESOLVABLE
     return WrappedTypeReference(spelling).maybeConst(isConst)
+}
+
+/**
+ * The target type a typedef/alias DECL reduces to — shared between an alias used as a TYPE
+ * (buildWrappedType's TypedefType branch) and the WrappedTypedef ELEMENT
+ * (ModelBuilder.buildTypedef), both of which run the same TypeFactories reducer stack
+ * against the ORIGINAL declaration (createForType's originalDecl block):
+ *  - sizeTypedefElement: `size_type`/`difference_type` ALWAYS normalize to the
+ *    `size_t`/`ptrdiff_t` aliases (so they surface as platform.posix.<name>).
+ *  - cAliasTypedefElement: the C platform aliases are preserved as the alias NAME itself
+ *    instead of collapsing to the underlying integer. (TypeFactories keys these on a
+ *    CXCursor_TypedefDecl only; here they apply to either alias kind — a `using size_t =
+ *    ...` is vanishingly rare and the name is the contract either way.)
+ *  - referenceTypedefElement / pointerTypedefElement / assocTypedefElement reduce
+ *    std-container member aliases whose underlyings are DEPENDENT trait expressions; they
+ *    only fire on the std headers, so they ride with the std-scale brick (brick-6+).
+ *  - Everything else collapses to the underlying type, mirroring ResolverBuilderImpl
+ *    .visit()'s CXCursor_TypedefDecl branch (recursive typedefDeclUnderlyingType walk) —
+ *    which is also how an in-template `typedef T value_type` lands on the dependent
+ *    WrappedTemplateRef (the underlying TemplateTypeParmType branch above).
+ *    DIVERGENCE (Phase C normalizer entry): for a C++ `using` alias (TypeAliasDecl) the
+ *    libclang path is ORDER-DEPENDENT — visit() leaves the alias un-collapsed
+ *    (createForType's `else` then emits the alias NAME as a leaf) unless the underlying's
+ *    canonical spelling was already in visit()'s seenNames cache, in which case the cached
+ *    record type collapses it anyway. This front-end always collapses both alias kinds —
+ *    deterministic, never the order-dependent name leaf.
+ */
+fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
+    val name = typedef.getNameAsString() ?: ""
+    when (name) {
+        "size_type" -> return WrappedTypeReference("size_t")
+        "difference_type" -> return WrappedTypeReference("ptrdiff_t")
+    }
+    if (name in C_ALIAS_TYPEDEFS) return WrappedTypeReference(name)
+    return buildWrappedType(typedef.getUnderlyingType())
+}
+
+// The WrappedEnumType payload for [enumDecl] (TypeFactories' CXCursor_EnumDecl branch).
+private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
+    val qualified = enumDecl.getQualifiedNameAsString() ?: return UNRESOLVABLE
+    // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
+    // missing name dropping just that constant (TypeFactories' mapNotNull).
+    val constants = enumDecl.asDeclContext().decls()
+        .mapNotNull { it?.asEnumConstantDecl() }
+        .mapNotNull { constant ->
+            val name = constant.getNameAsString() ?: return@mapNotNull null
+            // VALUE BRIDGE (the documented extraction choice): libclang's
+            // clang_getEnumConstantDeclValue is `getInitVal().getSExtValue()` (CIndex.cpp)
+            // — a sign-extension through the constant's bit WIDTH even for an UNSIGNED
+            // enum. Here the value reads through llvm::APSInt::getExtValue() — the
+            // smallest bindable surface (APSInt's OWN method; getSExtValue lives on the
+            // unbound llvm::APInt base) and sign-CORRECT: it extends by the constant's
+            // real signedness. The two agree for every signed constant and every unsigned
+            // constant below the top bit; for an unsigned constant WITH the top bit set
+            // (e.g. `enum X : unsigned { M = 0x80000000 }`) libclang reports the
+            // sign-mangled negative — a Phase C normalizer entry (mask: sign-extend the
+            // libclang value by the underlying width).
+            WrappedEnumConstant(name, constant.getInitVal().getExtValue())
+        }
+    return WrappedEnumType(
+        qualified,
+        buildWrappedType(enumDecl.getIntegerType()),
+        constants
+    )
 }
 
 // Leaf spelling, mirroring createForType's const-stripped spelling read (the constness is

@@ -142,8 +142,51 @@ kplusplus {
         // getTemplateArgs() -> TemplateArgument::getAsType() per argument.
         "clang::ClassTemplateSpecializationDecl",
         "clang::TemplateArgument",
-        "clang::TemplateArgumentList"
+        "clang::TemplateArgumentList",
+        // NEW for brick 5 (template DECLARATIONS): a `template <typename T> class` is a
+        // ClassTemplateDecl whose getTemplatedDecl() is the pattern CXXRecordDecl;
+        // getTemplateParameters() lives on TemplateDecl (the primary base, reached by
+        // re-view — see ModelBuilder) and yields a TemplateParameterList (size/getParam).
+        // TemplateTypeParmDecl is each type param's decl; TemplateTypeParmType is the
+        // DEPENDENT `T` in member signatures, whose getDecl() keys the WrappedTemplateRef
+        // back to the matching WrappedTemplateParam.
+        "clang::TemplateDecl",
+        "clang::ClassTemplateDecl",
+        "clang::TemplateParameterList",
+        "clang::TemplateTypeParmDecl",
+        "clang::TemplateTypeParmType",
+        // NEW for brick 5 (enums): an enum-typed leaf reaches its EnumDecl through the
+        // already-bound Type::getAsTagDecl() + a kind-gated re-view (TypeBuilder).
+        // clang::EnumType is deliberately NOT bound: it declares no constructors of its
+        // own (only inherited `using TagType::TagType`), so no ctor cursor ever marks
+        // hasConstructor and krapper synthesizes a `new clang::EnumType()` default-
+        // construct wrapper that C++ rejects (implicitly deleted — generator gap noted
+        // on #44). EnumDecl carries getIntegerType() (the underlying type,
+        // clang_getEnumDeclIntegerType's source) and its DeclContext holds the
+        // EnumConstantDecls. llvm::APSInt is EnumConstantDecl::getInitVal()'s carrier;
+        // only its OWN surface is needed (getExtValue — see TypeBuilder's value bridge),
+        // so the heavy llvm::APInt base stays unbound.
+        "clang::EnumDecl",
+        "clang::EnumConstantDecl",
+        "llvm::APSInt"
     )
+    // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation
+    // emits invalid Kotlin for four of llvm::APSInt's C++ operators —
+    //  * operator==(int64_t) / operator<(int64_t): the Long overloads of operators whose
+    //    APSInt overload already claimed the idiomatic name (equals/compareTo) are
+    //    emitted as `override fun _equals` / `override operator fun _compareTo`
+    //    (override-nothing + illegal operator name + pointer-vs-Long argument mixups);
+    //  * prefix operator++/operator--: emitted as `operator fun inc(): APSInt?` whose
+    //    NULLABLE return violates Kotlin's inc/dec operator convention.
+    // None of the four is needed here (the enum value bridge is APSInt::getExtValue(),
+    // TypeBuilder.buildEnumType); remove them by uniqueCName until krapper_gen learns
+    // mixed-argument operator overloads (generator gap recorded on #44).
+    fixup {
+        removeMethod("llvm_APSInt_op_eq__long")
+        removeMethod("llvm_APSInt_op_lt__long")
+        removeMethod("llvm_APSInt_op_increment")
+        removeMethod("llvm_APSInt_op_decrement")
+    }
     // Materialize the range returns the walk iterates. Brick 3 walks members through
     // DeclContext::decls() (source order, all member kinds) instead of methods(), so the
     // CXXMethodDecl vector instantiation is gone.

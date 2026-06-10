@@ -22,8 +22,13 @@ import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTypedef
+import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
+import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
@@ -42,6 +47,14 @@ import kotlinx.serialization.json.Json
 // constant-array field, size_t/size_type preservation, typedef/`using` collapse, and a
 // template-typed field. Holder is defined in-fixture rather than using std::vector so the
 // case carries no std-header weight and the decoded shape is byte-deterministic.
+// Brick 5 grows it with template DECLARATIONS and enums: Holder gains a T field, a
+// T-returning const method, a `const T&` param and an in-template typedef (the dependent
+// WrappedTemplateRef surface); the enums cover unscoped-implicit (Color: computed
+// `unsigned int`), scoped-explicit (Mode: `unsigned char`), unscoped-explicit with a
+// SIGNED constant (Status: `long`, OK=-2) and class-nested (Palette::Flavor); Palette
+// exercises enum-typed fields, params and returns. Expected underlyings/values are pinned
+// against the libclang oracle (clang_getEnumDeclIntegerType/clang_getEnumConstantDeclValue
+// run on this exact fixture).
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -84,8 +97,17 @@ private val FIXTURE_HEADER = """
     typedef int MyInt;
     using Real = double;
 
+    enum Color { RED, GREEN = 5 };
+    enum class Mode : unsigned char { A, B };
+    enum Status : long { OK = -2 };
+
     template <typename T>
-    struct Holder { T value; };
+    struct Holder {
+        typedef T value_type;
+        T value;
+        T get() const;
+        void set(const T& v);
+    };
 
     struct Scene {
         typedef unsigned long size_type;
@@ -99,6 +121,17 @@ private val FIXTURE_HEADER = """
         int corners[4];
         Holder<Shape*> shapes;
     };
+
+    struct Palette {
+        enum Flavor { MILD, BOLD };
+        Color primary;
+        Mode mode;
+        Color cycle(Color from);
+        void setMode(Mode m);
+        Mode currentMode() const;
+        Status status() const;
+        Flavor flavor() const;
+    };
 """.trimIndent()
 
 private var failures = 0
@@ -108,10 +141,11 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
     println("  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}")
 }
 
-// #44 bricks 3+4: parse the fixture with Clang's C++ AST (on the kplusplus-generated
+// #44 bricks 3-5: parse the fixture with Clang's C++ AST (on the kplusplus-generated
 // libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU mirroring ModelFactories'
 // full decl/class/member contract — with every type decoded STRUCTURALLY from the QualType
-// tree (TypeBuilder.kt) — and self-check each constructed shape against the model.
+// tree (TypeBuilder.kt), template declarations as WrappedTemplate, and enums as
+// WrappedEnumType leaves — and self-check each constructed shape against the model.
 @Suppress("UNUSED_PARAMETER")
 fun main(args: Array<String>): Unit = memScoped {
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
@@ -429,6 +463,148 @@ fun main(args: Array<String>): Unit = memScoped {
         shapes?.toString() == "Holder<Shape*>"
     )
 
+    // -- Brick 5: template DECLARATION construction (ModelFactories' ClassTemplate branch).
+    val holders = tu.children.filterIsInstance<WrappedTemplate>()
+    val holder = holders.find { it.name == "Holder" }
+    check(
+        "TU contains exactly one WrappedTemplate: Holder",
+        holders.size == 1 && holder != null,
+        "got ${holders.map { it.name }}"
+    )
+    check(
+        "no WrappedClass shadows Holder (implicit specialization never surfaced)",
+        tu.children.filterIsInstance<WrappedClass>().map { it.name }.sorted() ==
+            listOf("Palette", "Scene", "Shape"),
+        "got ${tu.children.filterIsInstance<WrappedClass>().map { it.name }}"
+    )
+    val tParam = holder?.templateArgs?.singleOrNull()
+    check(
+        "Holder has ONE type param 'T' carrying cpp:<canonical-id> identity",
+        tParam != null && tParam.name == "T" && tParam.usr.startsWith("cpp:"),
+        "got ${holder?.templateArgs}"
+    )
+    val valueField = holder?.fields?.singleOrNull()
+    check(
+        "field 'T value': WrappedTemplateRef keyed to the param's usr (substitution contract)",
+        valueField != null && valueField.name == "value" &&
+            (valueField.type as? WrappedTemplateRef)?.target == tParam?.usr,
+        "got $valueField"
+    )
+    val getMethod = holder?.methods?.find { it.name == "get" }
+    check(
+        "T get() const: BARE WrappedTemplateRef return (G8: no const wrap on by-value)",
+        getMethod != null && getMethod.isConst &&
+            (getMethod.returnType as? WrappedTemplateRef)?.target == tParam?.usr,
+        "got ${getMethod?.returnType}"
+    )
+    val setArg = holder?.methods?.find { it.name == "set" }?.args?.singleOrNull()?.type
+    val setBase = (setArg as? WrappedModifiedType)?.baseType as? WrappedPrefixedType
+    check(
+        "set(const T&): the dependent type nests structurally — &(const(WrappedTemplateRef))",
+        setArg is WrappedModifiedType && setArg.modifier == "&" &&
+            setBase?.modifier == "const" &&
+            (setBase?.baseType as? WrappedTemplateRef)?.target == tParam?.usr,
+        "got $setArg"
+    )
+    val valueTypedef = holder?.children?.filterIsInstance<WrappedTypedef>()?.singleOrNull()
+    check(
+        "in-template `typedef T value_type`: WrappedTypedef -> WrappedTemplateRef(param usr)",
+        valueTypedef != null && valueTypedef.name == "value_type" &&
+            (valueTypedef.targetType as? WrappedTemplateRef)?.target == tParam?.usr,
+        "got $valueTypedef"
+    )
+
+    // -- Brick 5: typedef ELEMENTS (map's CXCursor_TypedefDecl branch — and the absence of
+    // a CXCursor_TypeAliasDecl branch, so `using Real` produces NO element).
+    val tuTypedefs = tu.children.filterIsInstance<WrappedTypedef>()
+    check(
+        "TU typedef elements are size_t + MyInt only (`using Real` has no element)",
+        tuTypedefs.map { it.name } == listOf("size_t", "MyInt"),
+        "got ${tuTypedefs.map { it.name }}"
+    )
+    check(
+        "typedef targets run the reducer stack: size_t keeps the C-alias NAME, MyInt -> int",
+        tuTypedefs.find { it.name == "size_t" }?.targetType?.toString() == "size_t" &&
+            tuTypedefs.find { it.name == "MyInt" }?.targetType?.toString() == "int",
+        "got ${tuTypedefs.map { "${it.name}=${it.targetType}" }}"
+    )
+    val sizeTypedef = scene?.children?.filterIsInstance<WrappedTypedef>()?.singleOrNull()
+    check(
+        "Scene's member `typedef ... size_type` element normalizes to size_t",
+        sizeTypedef != null && sizeTypedef.name == "size_type" &&
+            sizeTypedef.targetType.toString() == "size_t",
+        "got $sizeTypedef"
+    )
+
+    // -- Brick 5: enum construction. NO top-level element (ModelFactories.map has no
+    // EnumDecl branch — `else -> null`); the payload rides on every enum-typed LEAF as
+    // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
+    // pinned against the libclang oracle for this fixture.
+    check(
+        "TU has exactly 8 children (the 3 enum DECLs contribute NO elements)",
+        tu.children.size == 8,
+        "got ${tu.children.size}"
+    )
+    val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
+    check("TU contains class Palette", palette != null)
+    val paletteMethods = palette?.children?.filterIsInstance<WrappedMethod>().orEmpty()
+    val paletteFields = palette?.children?.filterIsInstance<WrappedField>().orEmpty()
+    val primary = paletteFields.find { it.name == "primary" }?.type as? WrappedEnumType
+    check(
+        "Color field: WrappedEnumType 'Color' with the COMPUTED underlying 'unsigned int'",
+        primary != null && primary.cppName == "Color" && primary.toString() == "Color" &&
+            primary.underlying.toString() == "unsigned int",
+        "got $primary underlying=${primary?.underlying}"
+    )
+    check(
+        "Color constants mirror the oracle: RED=0, GREEN=5",
+        primary?.constants ==
+            listOf(WrappedEnumConstant("RED", 0L), WrappedEnumConstant("GREEN", 5L)),
+        "got ${primary?.constants}"
+    )
+    check(
+        "enum leaf flags: isEnum, NOT native (boundary casts), cType = the underlying",
+        primary != null && primary.isEnum && !primary.isNative &&
+            primary.cType == primary.underlying
+    )
+    val modeArg =
+        paletteMethods.find { it.name == "setMode" }?.args?.singleOrNull()?.type as? WrappedEnumType
+    check(
+        "scoped `enum class Mode : unsigned char` arg: EXPLICIT underlying + A=0, B=1",
+        modeArg != null && modeArg.cppName == "Mode" &&
+            modeArg.underlying.toString() == "unsigned char" &&
+            modeArg.constants ==
+            listOf(WrappedEnumConstant("A", 0L), WrappedEnumConstant("B", 1L)),
+        "got $modeArg underlying=${modeArg?.underlying} constants=${modeArg?.constants}"
+    )
+    val modeRet = paletteMethods.find { it.name == "currentMode" }?.returnType
+    check(
+        "Mode return on a const method: bare WrappedEnumType (G8: by-value, no const wrap)",
+        (modeRet as? WrappedEnumType)?.cppName == "Mode",
+        "got $modeRet"
+    )
+    val cycle = paletteMethods.find { it.name == "cycle" }
+    check(
+        "Color cycle(Color): the enum decodes as BOTH return and argument",
+        (cycle?.returnType as? WrappedEnumType)?.cppName == "Color" &&
+            (cycle?.args?.singleOrNull()?.type as? WrappedEnumType)?.cppName == "Color",
+        "got ret=${cycle?.returnType} args=${cycle?.args}"
+    )
+    val statusRet = paletteMethods.find { it.name == "status" }?.returnType as? WrappedEnumType
+    check(
+        "unscoped-explicit `enum Status : long`: underlying 'long', SIGNED value OK=-2",
+        statusRet != null && statusRet.underlying.toString() == "long" &&
+            statusRet.constants == listOf(WrappedEnumConstant("OK", -2L)),
+        "got $statusRet underlying=${statusRet?.underlying} constants=${statusRet?.constants}"
+    )
+    val flavorRet = paletteMethods.find { it.name == "flavor" }?.returnType as? WrappedEnumType
+    check(
+        "nested enum spells QUALIFIED: 'Palette::Flavor' (fullyQualified rule), MILD+BOLD",
+        flavorRet != null && flavorRet.cppName == "Palette::Flavor" &&
+            flavorRet.constants.map { it.name } == listOf("MILD", "BOLD"),
+        "got $flavorRet constants=${flavorRet?.constants}"
+    )
+
     check("JSON is non-empty", json.length > 2)
 
     if (failures > 0) fail("$failures self-check(s) failed")
@@ -450,6 +626,14 @@ private fun printElements(elements: List<WrappedElement>, indent: String) {
                 )
                 printElements(child.children, "$indent  ")
             }
+            is WrappedTemplate -> {
+                println(
+                    "${indent}template<${child.templateArgs.joinToString(", ") { it.name }}> " +
+                        "class ${child.name} (${child.children.size} children)"
+                )
+                printElements(child.children, "$indent  ")
+            }
+            is WrappedTypedef -> println("${indent}typedef ${child.name} = ${child.targetType}")
             is WrappedBase -> println("$indent: ${child.type} (public=${child.isPublic})")
             is WrappedField -> println("${indent}val $child")
             is WrappedMethod -> println(
