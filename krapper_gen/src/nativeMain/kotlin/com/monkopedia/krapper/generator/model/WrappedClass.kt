@@ -15,14 +15,9 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import clang.CXCursor
-import clang.CXFile
 import com.monkopedia.krapper.generator.DropLedger
 import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.ResolverBuilder
-import com.monkopedia.krapper.generator.includedFile
-import com.monkopedia.krapper.generator.isAbstract
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
@@ -32,15 +27,6 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClassMetadata
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMultiBase
-import com.monkopedia.krapper.generator.spelling
-import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.type
-import kotlinx.cinterop.CValue
-
-private val CValue<CXCursor>.fileParent: CXFile?
-    get() {
-        return includedFile
-    }
 
 class WrappedBase(
     val type: WrappedType?,
@@ -106,11 +92,6 @@ class WrappedClass(
 
     val type: WrappedType
         get() = specifiedType ?: WrappedType(qualified)
-
-    constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        wrapName(value, value.spelling.toKString() ?: error("Missing name")),
-        value.isAbstract
-    )
 
     override fun clone(): WrappedClass = clone(this.specifiedType)
 
@@ -300,13 +281,6 @@ class WrappedClass(
             ((it as? WrappedMethod)?.methodType != ALIGN_OF) &&
             ((it as? WrappedConstructor)?.children?.isNotEmpty() != false)
     }
-}
-
-private fun wrapName(value: CValue<CXCursor>, name: String): String {
-    val type = value.type.spelling.toKString() ?: return name
-    val index = type.indexOf(name)
-    if (index < 0) return name
-    return type.substring(index)
 }
 
 val WrappedElement.qualified: String
