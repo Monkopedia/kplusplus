@@ -372,10 +372,10 @@ suspend fun determineReturnStyle(
 }
 
 suspend fun WrappedMethod.resolve(resolverContext: ResolveContext): ResolvedMethod? = when (this) {
-        is WrappedConstructor -> resolveConstructor(resolverContext)
-        is WrappedDestructor -> resolveDestructor(resolverContext)
-        else -> resolvePlainMethod(resolverContext)
-    }
+    is WrappedConstructor -> resolveConstructor(resolverContext)
+    is WrappedDestructor -> resolveDestructor(resolverContext)
+    else -> resolvePlainMethod(resolverContext)
+}
 
 private suspend fun WrappedConstructor.thizArg(
     resolverContext: ResolveContext
