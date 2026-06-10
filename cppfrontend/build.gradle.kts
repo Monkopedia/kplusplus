@@ -205,3 +205,52 @@ kplusplus {
     instantiate("std::vector<clang::Decl*>")
     instantiate("std::vector<clang::CXXBaseSpecifier*>")
 }
+
+// ---- #44 brick 7: THE GOLDEN TEST (Phase B exit criterion / Phase C entry) ----
+// Run BOTH front-ends over the same fixture and structurally compare their parse-output
+// models through the canonical SerializedElement projection (:krapper_model):
+//   goldenEmit    — this front-end writes the fixture + its cpp.json (the fixture is
+//                   emitted by the binary itself so both parses consume identical bytes);
+//   goldenDump    — the REAL krapper_gen kexe parses that fixture with
+//                   --dumpParsedModel (parse-only mode, Parsing.kt) -> libclang.json;
+//   goldenCompare — the tree-diff under the documented normalizer ledger
+//                   (GoldenCompare.kt), non-zero exit on unexplained divergence.
+// This is the automated regression lock for the front-end rewrite (issue #8's spirit):
+// any construction drift between ModelFactories/TypeFactories and ModelBuilder/TypeBuilder
+// fails this task. Gated with the module (-PenableClang).
+val goldenDir = layout.buildDirectory.dir("golden").get().asFile
+val cppfrontendBinary = layout.buildDirectory.file("bin/klinker/cppfrontendRelease").get().asFile
+val krapperGenKexe = rootProject.layout.projectDirectory
+    .file("krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe").asFile
+
+val goldenEmit = tasks.register<Exec>("goldenEmit") {
+    dependsOn("linkReleaseExecutableKlinker")
+    doFirst { goldenDir.mkdirs() }
+    commandLine(cppfrontendBinary.absolutePath, "--golden-emit", goldenDir.absolutePath)
+}
+
+val goldenDump = tasks.register<Exec>("goldenDump") {
+    dependsOn(goldenEmit, ":krapper_gen:linkReleaseExecutableNative")
+    commandLine(
+        krapperGenKexe.absolutePath,
+        "-h",
+        File(goldenDir, "fixture.h").absolutePath,
+        // cppfrontend's buildASTFromCode parses fixture.cc under the clang driver default;
+        // the fixture's surface is identical under c++14..c++20, pin c++17 to match the
+        // module's own binding standard.
+        "--std",
+        "c++17",
+        "--dumpParsedModel",
+        File(goldenDir, "libclang.json").absolutePath
+    )
+}
+
+tasks.register<Exec>("goldenCompare") {
+    dependsOn(goldenDump)
+    commandLine(
+        cppfrontendBinary.absolutePath,
+        "--golden-compare",
+        File(goldenDir, "cpp.json").absolutePath,
+        File(goldenDir, "libclang.json").absolutePath
+    )
+}

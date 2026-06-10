@@ -24,6 +24,7 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTypedef
+import com.monkopedia.krapper.generator.model.serialized
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
@@ -176,8 +177,17 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
 // full decl/class/member contract — with every type decoded STRUCTURALLY from the QualType
 // tree (TypeBuilder.kt), template declarations as WrappedTemplate, and enums as
 // WrappedEnumType leaves — and self-check each constructed shape against the model.
-@Suppress("UNUSED_PARAMETER")
+// Brick 7 adds two golden-test modes (see GoldenCompare.kt):
+//  --golden-emit <dir>: write the fixture (for krapper_gen to parse the SAME bytes) and
+//    this front-end's canonical-DTO JSON, then exit (self-checks stay on the default run).
+//  --golden-compare <cpp.json> <libclang.json>: structurally diff the two front-ends'
+//    dumps under the documented normalizer ledger; non-zero exit on divergence.
 fun main(args: Array<String>): Unit = memScoped {
+    if (args.firstOrNull() == "--golden-compare") {
+        val cpp = args.getOrNull(1) ?: fail("--golden-compare <cpp.json> <libclang.json>")
+        val libclang = args.getOrNull(2) ?: fail("--golden-compare <cpp.json> <libclang.json>")
+        goldenCompare(cpp, libclang)
+    }
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
     // from it, and a ".h" parses as C (where `int area() const` is ill-formed and Shape is a
     // plain RecordDecl the CXXRecordDecl walk never sees).
@@ -189,6 +199,16 @@ fun main(args: Array<String>): Unit = memScoped {
         ?: return@memScoped fail("no TranslationUnitDecl")
 
     val tu = buildWrappedTU(tuDecl)
+
+    if (args.firstOrNull() == "--golden-emit") {
+        val dir = args.getOrNull(1) ?: fail("--golden-emit <dir>")
+        // The fixture is written out so krapper_gen parses the EXACT same bytes this
+        // front-end just consumed (buildASTFromCode above) — the one-source guarantee.
+        writeFile("$dir/fixture.h", FIXTURE_HEADER + "\n")
+        writeFile("$dir/cpp.json", Json.encodeToString(tu.serialized()))
+        println("cppfrontend: golden emit -> $dir/fixture.h + $dir/cpp.json")
+        return@memScoped
+    }
 
     // ---- Structural summary ----
     println("cppfrontend: constructed WrappedTU from the Clang C++ AST")
@@ -832,7 +852,7 @@ private fun printElements(elements: List<WrappedElement>, indent: String) {
     }
 }
 
-private fun fail(message: String): Nothing {
+internal fun fail(message: String): Nothing {
     println("cppfrontend: FAIL — $message")
     exitProcess(1)
 }
