@@ -107,7 +107,7 @@ fun goldenCompare(cppPath: String, libclangPath: String): Nothing {
     if (divergences.isEmpty()) {
         println(
             "GOLDEN COMPARE: PASS — cpp front-end and libclang front-end parse output " +
-                "match structurally under the documented normalizer ledger (N1-N4)."
+                "match structurally under the documented normalizer ledger (N1-N5)."
         )
         exitProcess(0)
     }
