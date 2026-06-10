@@ -170,6 +170,23 @@ kplusplus {
         "clang::EnumConstantDecl",
         "llvm::APSInt"
     )
+    // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation
+    // emits invalid Kotlin for four of llvm::APSInt's C++ operators —
+    //  * operator==(int64_t) / operator<(int64_t): the Long overloads of operators whose
+    //    APSInt overload already claimed the idiomatic name (equals/compareTo) are
+    //    emitted as `override fun _equals` / `override operator fun _compareTo`
+    //    (override-nothing + illegal operator name + pointer-vs-Long argument mixups);
+    //  * prefix operator++/operator--: emitted as `operator fun inc(): APSInt?` whose
+    //    NULLABLE return violates Kotlin's inc/dec operator convention.
+    // None of the four is needed here (the enum value bridge is APSInt::getExtValue(),
+    // TypeBuilder.buildEnumType); remove them by uniqueCName until krapper_gen learns
+    // mixed-argument operator overloads (generator gap recorded on #44).
+    fixup {
+        removeMethod("llvm_APSInt_op_eq__long")
+        removeMethod("llvm_APSInt_op_lt__long")
+        removeMethod("llvm_APSInt_op_increment")
+        removeMethod("llvm_APSInt_op_decrement")
+    }
     // Materialize the range returns the walk iterates. Brick 3 walks members through
     // DeclContext::decls() (source order, all member kinds) instead of methods(), so the
     // CXXMethodDecl vector instantiation is gone.
