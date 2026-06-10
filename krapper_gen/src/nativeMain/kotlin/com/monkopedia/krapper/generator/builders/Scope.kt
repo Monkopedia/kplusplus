@@ -26,6 +26,14 @@ class Scope<T : LangFactory>(internal val parent: Scope<T>? = null) {
 
     private fun isUsed(name: String): Boolean = names.contains(name) || parent?.isUsed(name) == true
 
+    /**
+     * Whether [name] is already claimed in this scope (or an enclosing one) — i.e. a later
+     * [allocateName] of it would be uniquified to `_$name`. Lets a caller decide NOT to emit
+     * a construct that requires the exact name (e.g. the `operator` modifier, which is only
+     * legal on the canonical operator identifier — `operator fun _get` does not parse).
+     */
+    fun isNameUsed(name: String): Boolean = isUsed(name)
+
     fun allocateName(desiredName: String): String {
         if (desiredName.isEmpty()) return allocateName("v")
         if (isUsed(desiredName)) {
