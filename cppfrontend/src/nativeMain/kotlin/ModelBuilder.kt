@@ -47,6 +47,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import kppbridge.defaultArgText
 
 // The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
@@ -437,12 +438,30 @@ private class ModelBuilder {
             // positional name the libclang front-end synthesizes.
             val name = param.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() }
                 ?: "_arg_$i"
-            // brick-5+: hasDefault/defaultValue (ParmVarDecl::hasDefaultArg + source text).
+            // Brick 6: hasDefault on the libclang path is the cursor-children HEURISTIC
+            // (ModelFactories.defaultExpr: the param's last child cursor that isn't a
+            // Type/Template/NamespaceRef) — the token-scrape the self-bootstrap deletes.
+            // ParmVarDecl::hasDefaultArg() is the first-class Sema-computed fact: it can
+            // never fire for an integer token inside the param's TYPE (an array bound, a
+            // non-type template arg, a function_ref signature), so the model-side
+            // typeCarriesFalseDefault repairs (#36/#41) have nothing to repair on this
+            // path — the deletion payoff. defaultValue mirrors ModelFactories.defaultValue
+            // (the default sub-expression's token spellings joined with "", blank -> null)
+            // through the kppbridge source-text read (see clang_slice.h for the contract
+            // + the whitespace normalizer entry).
+            val hasDefault = param.hasDefaultArg()
+            val defaultValue = if (hasDefault) {
+                with(param.memScope) { defaultArgText(param) }?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
             addChild(
                 WrappedArgument(
                     name,
                     buildWrappedType(param.asValueDecl().getType()),
-                    param.asDecl().cppUsr()
+                    param.asDecl().cppUsr(),
+                    hasDefault,
+                    defaultValue
                 )
             )
         }

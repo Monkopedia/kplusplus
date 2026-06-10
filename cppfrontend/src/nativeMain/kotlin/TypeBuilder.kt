@@ -16,13 +16,17 @@
 import clang.CXXRecordDecl
 import clang.Decl
 import clang.EnumDecl
+import clang.FunctionProtoType
+import clang.FunctionType
 import clang.QualType
 import clang.Type
 import clang.TypedefNameDecl
 import clang.TypedefType
+import clang.decl.Kind
 import clang.templateArgument.ArgKind
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
+import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -62,6 +66,21 @@ private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companio
     if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
 }
 
+// BRIDGE: same CastTargets gap family as TypedefType above — FunctionProtoType's base list
+// (TypeBase.h: `class FunctionProtoType final : public FunctionType, public
+// llvm::FoldingSetNode, private llvm::TrailingObjects<...>`) doesn't survive resolution,
+// so neither the generated dyn-cast nor FunctionType's inherited methods materialize.
+// classof + the same-pointer re-view; Type is the address-identical primary base through
+// FunctionType (single non-virtual chain), exactly the generated dyn-cast's semantics.
+private fun Type.asFunctionProtoTypeOrNull(): FunctionProtoType? =
+    with(FunctionProtoType.Companion) {
+        if (memScope.classof(this@asFunctionProtoTypeOrNull)) {
+            FunctionProtoType(ptr, memScope)
+        } else {
+            null
+        }
+    }
+
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
 private fun WrappedType.maybeConst(isConst: Boolean): WrappedType =
@@ -98,10 +117,9 @@ fun buildWrappedType(type: QualType): WrappedType {
             // A BARE function-pointer (`int (*)(int)`) spells with a trailing ')' on the
             // libclang path, so it falls through every special case to createForType's
             // `else -> WrappedType(spelling)` — an opaque named leaf. Mirror that shape.
-            // brick-6: the rich WrappedFunctionPointer only exists for a TYPEDEF over a
-            // fn-pointer (functionPointerTypedefElement) — that reducer needs the
-            // underlying-proto decode + the isCFunctionPointerCompatible recursion, so it
-            // (and a fn-pointer fixture case) is deferred to the callbacks brick.
+            // The rich WrappedFunctionPointer only exists for a `typedef` over a
+            // fn-pointer — functionPointerTypedef below (brick 6), reached through the
+            // alias branch; a `using` fn-ptr alias collapses to THIS leaf.
             val spelling = type.getAsString()?.trim() ?: return UNRESOLVABLE
             return WrappedTypeReference(spelling).maybeConst(isConst)
         }
@@ -210,6 +228,9 @@ fun buildWrappedType(type: QualType): WrappedType {
  * (buildWrappedType's TypedefType branch) and the WrappedTypedef ELEMENT
  * (ModelBuilder.buildTypedef), both of which run the same TypeFactories reducer stack
  * against the ORIGINAL declaration (createForType's originalDecl block):
+ *  - functionPointerTypedefElement (brick 6): a `typedef` over a pointer-to-function-proto
+ *    becomes a WrappedFunctionPointer (see [functionPointerTypedef]) — first in the stack,
+ *    `typedef`-only.
  *  - sizeTypedefElement: `size_type`/`difference_type` ALWAYS normalize to the
  *    `size_t`/`ptrdiff_t` aliases (so they surface as platform.posix.<name>).
  *  - cAliasTypedefElement: the C platform aliases are preserved as the alias NAME itself
@@ -231,6 +252,13 @@ fun buildWrappedType(type: QualType): WrappedType {
  *    deterministic, never the order-dependent name leaf.
  */
 fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
+    // functionPointerTypedefElement runs FIRST in createForType's originalDecl reducer
+    // stack, and is keyed on CXCursor_TypedefDecl ONLY — a `using` fn-ptr alias
+    // (TypeAliasDecl) has no branch on the libclang path, so the Kind.Typedef gate
+    // mirrors that split (it collapses to the bare fn-ptr leaf below instead).
+    if (typedef.asDecl().getKind() == Kind.Typedef) {
+        functionPointerTypedef(typedef)?.let { return it }
+    }
     val name = typedef.getNameAsString() ?: ""
     when (name) {
         "size_type" -> return WrappedTypeReference("size_t")
@@ -238,6 +266,41 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
     }
     if (name in C_ALIAS_TYPEDEFS) return WrappedTypeReference(name)
     return buildWrappedType(typedef.getUnderlyingType())
+}
+
+// TypeFactories.isCFunctionPointerCompatible, verbatim: only plain native scalars, void,
+// and `void*` (the Mode-1 context slot) can be re-declared verbatim in the C interop
+// header; enums/refs/class types name C++ types not in scope there.
+private val WrappedType.isCFunctionPointerCompatible: Boolean
+    get() = isVoid || (isNative && !isString) || (isPointer && pointed.isVoid)
+
+/**
+ * TypeFactories.functionPointerTypedefElement (#44 brick 6): a `typedef` over a
+ * pointer-to-function-proto (`typedef int (*IntTransform)(int);` — the CB-cfnptr shape) is
+ * captured as a [WrappedFunctionPointer]: cName = the UNqualified typedef spelling (the
+ * extern-"C" redeclaration name), cppName = the FULLY-QUALIFIED spelling
+ * (`getQualifiedNameAsString` ≡ the cursor `fullyQualified` walk; identical to cName for a
+ * global typedef), return + every param decoded structurally through [buildWrappedType].
+ * The STAGE-1 GATE is mirrored verbatim: only signatures whose return AND every param is
+ * [isCFunctionPointerCompatible] qualify — a richer proto (CB-cfnptr-richsig, e.g. a
+ * class-pointer param) returns null and falls through to the normal alias collapse, same
+ * as the libclang path. The pointer/proto shape checks mirror the CXType_Pointer +
+ * CXType_FunctionProto kind tests on typedefDeclUnderlyingType.
+ */
+private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
+    val underlying = typedef.getUnderlyingType()
+    val ty = underlying.typePtr() ?: return null
+    if (!ty.isPointerType()) return null
+    val proto = ty.getPointeeType().typePtr()?.asFunctionProtoTypeOrNull() ?: return null
+    // getReturnType lives on FunctionType — the address-identical primary base, reached by
+    // the same re-view as the dyn-cast bridge (the gap keeps it off FunctionProtoType).
+    val returnType = buildWrappedType(FunctionType(proto.ptr, proto.memScope).getReturnType())
+    val argTypes = (0u until proto.getNumParams()).map { buildWrappedType(proto.getParamType(it)) }
+    if (!returnType.isCFunctionPointerCompatible) return null
+    if (argTypes.any { !it.isCFunctionPointerCompatible }) return null
+    val cName = typedef.getNameAsString() ?: return null
+    val cppName = typedef.getQualifiedNameAsString()?.takeIf { it.isNotEmpty() } ?: cName
+    return WrappedFunctionPointer(cName, returnType, argTypes, cppName)
 }
 
 // The WrappedEnumType payload for [enumDecl] (TypeFactories' CXCursor_EnumDecl branch).

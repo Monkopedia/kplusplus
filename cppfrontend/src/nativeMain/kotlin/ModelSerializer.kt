@@ -50,6 +50,11 @@ data class SerializedElement(
     // Constructor payload (WrappedConstructor).
     val isCopyConstructor: Boolean? = null,
     val isDefaultConstructor: Boolean? = null,
+    // Default-argument payload (WrappedArgument, brick 6): the resolution contract is the
+    // pair — hasDefault feeds the trailing-defaulted-omit shortcut (isOmittableDefault),
+    // defaultValue feeds KotlinWriter's Kotlin-default mapping.
+    val hasDefault: Boolean? = null,
+    val defaultValue: String? = null,
     // The names of the ClassMetadata flags set on a class (parse-time records about
     // FILTERED members — deleted/non-public ctors, hidden new/delete, const fields).
     val metadata: List<String>? = null,
@@ -114,6 +119,8 @@ fun WrappedElement.serialized(): SerializedElement {
             name = name,
             type = type.toString(),
             usr = usr,
+            hasDefault = hasDefault.takeIf { it },
+            defaultValue = defaultValue,
             children = kids
         )
         is WrappedField -> SerializedElement(
