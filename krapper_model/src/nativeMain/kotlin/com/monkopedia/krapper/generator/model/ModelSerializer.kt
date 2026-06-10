@@ -59,6 +59,7 @@ fun WrappedElement.serialized(): SerializedElement {
     val kids = children.map { it.serialized() }
     return when (this) {
         is WrappedTU -> SerializedElement("tu", children = kids)
+
         is WrappedClass -> SerializedElement(
             "class",
             name = name,
@@ -66,6 +67,7 @@ fun WrappedElement.serialized(): SerializedElement {
             metadata = metadata.flags().takeIf { it.isNotEmpty() },
             children = kids
         )
+
         // Brick 5: template declarations + their params, and typedef elements.
         is WrappedTemplate -> SerializedElement(
             "template",
@@ -73,19 +75,23 @@ fun WrappedElement.serialized(): SerializedElement {
             metadata = metadata.flags().takeIf { it.isNotEmpty() },
             children = kids
         )
+
         is WrappedTemplateParam -> SerializedElement(
             "templateParam",
             name = name,
             usr = usr,
             children = kids
         )
+
         is WrappedTypedef -> SerializedElement(
             "typedef",
             name = name,
             type = targetType.toString(),
             children = kids
         )
+
         is WrappedNamespace -> SerializedElement("namespace", name = namespace, children = kids)
+
         is WrappedBase -> SerializedElement(
             "base",
             type = type?.toString(),
@@ -93,6 +99,7 @@ fun WrappedElement.serialized(): SerializedElement {
             isVirtualBase = isVirtualBase,
             children = kids
         )
+
         // Before WrappedMethod: WrappedArgument/WrappedField are sibling element kinds, a
         // WrappedConstructor IS-A WrappedMethod with extra flags, and a WrappedDestructor
         // IS-A WrappedMethod distinguished by methodType alone.
@@ -105,6 +112,7 @@ fun WrappedElement.serialized(): SerializedElement {
             isDefaultConstructor = isDefaultConstructor,
             children = kids
         )
+
         is WrappedArgument -> SerializedElement(
             "arg",
             name = name,
@@ -114,12 +122,14 @@ fun WrappedElement.serialized(): SerializedElement {
             defaultValue = defaultValue,
             children = kids
         )
+
         is WrappedField -> SerializedElement(
             "field",
             name = name,
             type = type.toString(),
             children = kids
         )
+
         is WrappedMethod -> SerializedElement(
             "method",
             name = name,
@@ -129,6 +139,7 @@ fun WrappedElement.serialized(): SerializedElement {
             isVirtual = isVirtual,
             children = kids
         )
+
         else -> SerializedElement(this::class.simpleName ?: "element", children = kids)
     }
 }
