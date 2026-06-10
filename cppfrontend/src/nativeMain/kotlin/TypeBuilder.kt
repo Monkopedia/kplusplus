@@ -102,8 +102,12 @@ fun buildWrappedType(type: QualType): WrappedType {
             // `else -> WrappedType(spelling)` — an opaque named leaf. Mirror that shape.
             // The rich WrappedFunctionPointer only exists for a `typedef` over a
             // fn-pointer — functionPointerTypedef below (brick 6), reached through the
-            // alias branch; a `using` fn-ptr alias collapses to THIS leaf.
-            val spelling = type.getAsString()?.trim() ?: return UNRESOLVABLE
+            // alias branch; a `using` fn-ptr alias collapses to THIS leaf. The same
+            // PrintingPolicy bridge as spellingOf applies (a `bool` anywhere in the proto
+            // prints as C's `_Bool` under the default policy; `_Bool` is not otherwise a
+            // valid token in a C++ type spelling, so the blanket replace is safe).
+            val spelling = type.getAsString()?.trim()?.replace("_Bool", "bool")
+                ?: return UNRESOLVABLE
             return WrappedTypeReference(spelling).maybeConst(isConst)
         }
         if (ty.isPointerType()) {
@@ -274,9 +278,14 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
     val underlying = typedef.getUnderlyingType()
     val ty = underlying.typePtr() ?: return null
     if (!ty.isPointerType()) return null
-    // Unlike TypedefType (the bridge above), FunctionProtoType's full chain DOES survive
-    // resolution — the generated dyn-cast and inherited getReturnType() are both real.
-    val proto = ty.getPointeeType().typePtr()?.asFunctionProtoType() ?: return null
+    // The pointee is read CANONICALLY: the declarator `void (*Callback)(int)` wraps its
+    // proto in ParenType sugar (Pointer -> Paren -> FunctionProto), which libclang's
+    // clang_getPointeeType desugars before the CXType_FunctionProto kind test fires —
+    // getCanonicalType is the decl-side desugar. Unlike TypedefType (the bridge above),
+    // FunctionProtoType's chain survives resolution — the generated dyn-cast and the
+    // inherited getReturnType() are both real.
+    val proto = ty.getPointeeType().getCanonicalType().typePtr()
+        ?.asFunctionProtoType() ?: return null
     val returnType = buildWrappedType(proto.getReturnType())
     val argTypes = (0u until proto.getNumParams()).map { buildWrappedType(proto.getParamType(it)) }
     if (!returnType.isCFunctionPointerCompatible) return null
