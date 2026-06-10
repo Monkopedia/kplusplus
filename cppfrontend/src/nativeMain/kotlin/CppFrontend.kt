@@ -26,6 +26,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
+import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
@@ -55,6 +56,14 @@ import kotlinx.serialization.json.Json
 // exercises enum-typed fields, params and returns. Expected underlyings/values are pinned
 // against the libclang oracle (clang_getEnumDeclIntegerType/clang_getEnumConstantDeclValue
 // run on this exact fixture).
+// Brick 6 grows it with FUNCTION-POINTER TYPEDEFS and DEFAULT ARGUMENTS: Callback (the
+// CB-cfnptr shape), Notifier (the `void*` Mode-1 context slot), ShapeVisitor (a
+// class-pointer param failing the stage-1 compat gate — CB-cfnptr-richsig), HandlerFn (a
+// `using` fn-ptr alias, which gets NO WrappedFunctionPointer on the libclang path) and the
+// namespace-scoped geo::Predicate (the cName/cppName qualification split); Dispatcher
+// carries the five default-arg value shapes (int literal, negative, enum constant,
+// nullptr, constructed) plus a multi-default trailing run (configure). Expected
+// defaultValue strings are the libclang token-join contract (ModelFactories.defaultValue).
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -91,11 +100,18 @@ private val FIXTURE_HEADER = """
     namespace geo {
         bool enabled();
         Circle* makeCircle();
+        typedef bool (*Predicate)(double);
+        void scan(Predicate p);
     }
 
     typedef unsigned long size_t;
     typedef int MyInt;
     using Real = double;
+
+    typedef void (*Callback)(int);
+    typedef int (*Notifier)(void*, int);
+    typedef void (*ShapeVisitor)(Shape*);
+    using HandlerFn = int (*)(double);
 
     enum Color { RED, GREEN = 5 };
     enum class Mode : unsigned char { A, B };
@@ -131,6 +147,20 @@ private val FIXTURE_HEADER = """
         Mode currentMode() const;
         Status status() const;
         Flavor flavor() const;
+    };
+
+    struct Dispatcher {
+        void onEvent(Callback cb);
+        Callback current() const;
+        void notifyAll(Notifier n);
+        void visit(ShapeVisitor v);
+        void onHandle(HandlerFn h);
+        void resize(int size = 5);
+        void shift(int delta = -1);
+        void paint(Color tint = RED);
+        void fill(Shape* target = nullptr);
+        void blend(Palette p = Palette());
+        void configure(int a, int b = 1, Shape* c = nullptr);
     };
 """.trimIndent()
 
@@ -248,8 +278,8 @@ fun main(args: Array<String>): Unit = memScoped {
     val geo = geos.firstOrNull()
     val geoFns = geo?.children?.filterIsInstance<WrappedMethod>().orEmpty()
     check(
-        "geo holds add+enabled+makeCircle (from both blocks) as STATIC free functions",
-        geoFns.map { it.name }.sorted() == listOf("add", "enabled", "makeCircle") &&
+        "geo holds add+enabled+makeCircle+scan (from both blocks) as STATIC free functions",
+        geoFns.map { it.name }.sorted() == listOf("add", "enabled", "makeCircle", "scan") &&
             geoFns.all { it.methodType == MethodType.STATIC },
         "got $geoFns"
     )
@@ -474,7 +504,7 @@ fun main(args: Array<String>): Unit = memScoped {
     check(
         "no WrappedClass shadows Holder (implicit specialization never surfaced)",
         tu.children.filterIsInstance<WrappedClass>().map { it.name }.sorted() ==
-            listOf("Palette", "Scene", "Shape"),
+            listOf("Dispatcher", "Palette", "Scene", "Shape"),
         "got ${tu.children.filterIsInstance<WrappedClass>().map { it.name }}"
     )
     val tParam = holder?.templateArgs?.singleOrNull()
@@ -518,8 +548,9 @@ fun main(args: Array<String>): Unit = memScoped {
     // a CXCursor_TypeAliasDecl branch, so `using Real` produces NO element).
     val tuTypedefs = tu.children.filterIsInstance<WrappedTypedef>()
     check(
-        "TU typedef elements are size_t + MyInt only (`using Real` has no element)",
-        tuTypedefs.map { it.name } == listOf("size_t", "MyInt"),
+        "TU typedef elements: the `typedef`s only (`using Real`/`using HandlerFn` have none)",
+        tuTypedefs.map { it.name } ==
+            listOf("size_t", "MyInt", "Callback", "Notifier", "ShapeVisitor"),
         "got ${tuTypedefs.map { it.name }}"
     )
     check(
@@ -541,8 +572,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 8 children (the 3 enum DECLs contribute NO elements)",
-        tu.children.size == 8,
+        "TU has exactly 12 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 12,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
@@ -603,6 +634,161 @@ fun main(args: Array<String>): Unit = memScoped {
         flavorRet != null && flavorRet.cppName == "Palette::Flavor" &&
             flavorRet.constants.map { it.name } == listOf("MILD", "BOLD"),
         "got $flavorRet constants=${flavorRet?.constants}"
+    )
+
+    // -- Brick 6: function-pointer typedefs (TypeFactories.functionPointerTypedefElement).
+    val dispatcher = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Dispatcher" }
+    check("TU contains class Dispatcher", dispatcher != null)
+    val dMethods = dispatcher?.children?.filterIsInstance<WrappedMethod>().orEmpty()
+
+    // The typedef ELEMENT's target runs the same reducer (WrappedTypedef(spelling,
+    // WrappedType(cursor.type)) on the libclang path hits functionPointerTypedefElement).
+    val callback = tuTypedefs.find { it.name == "Callback" }?.targetType
+    check(
+        "Callback typedef: WrappedFunctionPointer, cName == cppName == 'Callback' (global)",
+        (callback as? WrappedFunctionPointer)
+            ?.let { it.cName == "Callback" && it.cppName == "Callback" } == true,
+        "got $callback"
+    )
+    check(
+        "Callback proto decodes structurally: return 'void', args ['int']",
+        (callback as? WrappedFunctionPointer)?.let {
+            it.returnType.toString() == "void" &&
+                it.argTypes.map { a -> a.toString() } == listOf("int")
+        } == true,
+        "got ret=${(callback as? WrappedFunctionPointer)?.returnType} " +
+            "args=${(callback as? WrappedFunctionPointer)?.argTypes}"
+    )
+    // The same construction through the TYPE-USE path (a param spelled `Callback`).
+    val onEventArg = dMethods.find { it.name == "onEvent" }?.args?.singleOrNull()?.type
+    check(
+        "onEvent(Callback) param: WrappedFunctionPointer, NATIVE, spells the typedef name",
+        onEventArg is WrappedFunctionPointer && onEventArg.isNative &&
+            onEventArg.toString() == "Callback",
+        "got $onEventArg"
+    )
+    // A fn-ptr is neither pointer nor reference in the model, so the G8 const-method rule
+    // never wraps it — the const method returns the BARE WrappedFunctionPointer
+    // (CB-cfnptr-ret: the returned pointer is directly invokable).
+    val currentFnRet = dMethods.find { it.name == "current" }?.returnType
+    check(
+        "Callback current() const: bare WrappedFunctionPointer return (no const wrap)",
+        (currentFnRet as? WrappedFunctionPointer)?.cName == "Callback",
+        "got $currentFnRet"
+    )
+    // The `void*` Mode-1 context slot is compatible (isPointer && pointed.isVoid).
+    val notifier = tuTypedefs.find { it.name == "Notifier" }?.targetType
+    check(
+        "Notifier(void*, int): the void* context slot passes the stage-1 compat gate",
+        (notifier as? WrappedFunctionPointer)?.let {
+            it.returnType.toString() == "int" &&
+                it.argTypes.map { a -> a.toString() } == listOf("void*", "int")
+        } == true,
+        "got $notifier"
+    )
+    // CB-cfnptr-richsig: a class-pointer param (`Shape*` != `void*`) fails the gate, so
+    // the typedef falls through to the normal alias collapse — the bare fn-ptr leaf
+    // (createForType's `else -> WrappedType(spelling)` after visit()'s collapse).
+    val visitor = tuTypedefs.find { it.name == "ShapeVisitor" }?.targetType
+    check(
+        "ShapeVisitor (Shape* param) fails the gate: NOT a WrappedFunctionPointer",
+        visitor !is WrappedFunctionPointer && visitor?.toString() == "void (*)(Shape *)",
+        "got $visitor"
+    )
+    val visitArg = dMethods.find { it.name == "visit" }?.args?.singleOrNull()?.type
+    check(
+        "visit(ShapeVisitor) param falls through the same way",
+        visitArg !is WrappedFunctionPointer && visitArg?.toString() == "void (*)(Shape *)",
+        "got $visitArg"
+    )
+    // A `using` fn-ptr alias NEVER becomes a WrappedFunctionPointer
+    // (functionPointerTypedefElement is keyed on CXCursor_TypedefDecl only); here it
+    // collapses to the bare fn-ptr leaf (the documented using-collapse divergence — the
+    // libclang path leaves the order-dependent alias-name leaf instead).
+    val onHandleArg = dMethods.find { it.name == "onHandle" }?.args?.singleOrNull()?.type
+    check(
+        "`using HandlerFn` param: NOT a WrappedFunctionPointer (typedef-only contract)",
+        onHandleArg !is WrappedFunctionPointer && onHandleArg?.toString() == "int (*)(double)",
+        "got $onHandleArg"
+    )
+    // A namespace-scoped typedef splits the names: cName stays UNqualified (the extern-"C"
+    // redeclaration), cppName is qualified (the wrapper spelling; fullyQualified rule).
+    val predicate = geo?.children?.filterIsInstance<WrappedTypedef>()
+        ?.find { it.name == "Predicate" }?.targetType
+    check(
+        "geo::Predicate: cName 'Predicate', cppName 'geo::Predicate', bool(double) decoded",
+        (predicate as? WrappedFunctionPointer)?.let {
+            it.cName == "Predicate" && it.cppName == "geo::Predicate" &&
+                it.returnType.toString() == "bool" &&
+                it.argTypes.map { a -> a.toString() } == listOf("double")
+        } == true,
+        "got $predicate"
+    )
+    val scanArg = geoFns.find { it.name == "scan" }?.args?.singleOrNull()?.type
+    check(
+        "scan(Predicate) param carries the same WrappedFunctionPointer",
+        (scanArg as? WrappedFunctionPointer)?.cppName == "geo::Predicate",
+        "got $scanArg"
+    )
+
+    // -- Brick 6: default arguments. hasDefault = ParmVarDecl::hasDefaultArg() (the
+    // first-class fact replacing the libclang cursor-children token heuristic);
+    // defaultValue strings are pinned to the libclang token-join contract
+    // (ModelFactories.defaultValue: tokenSpellings().joinToString("")).
+    fun argOf(method: String, index: Int = 0) =
+        dMethods.find { it.name == method }?.args?.getOrNull(index)
+    check(
+        "int literal default: resize(int size = 5) -> hasDefault, \"5\"",
+        argOf("resize")?.let { it.hasDefault && it.defaultValue == "5" } == true,
+        "got ${argOf("resize")?.hasDefault}/${argOf("resize")?.defaultValue}"
+    )
+    check(
+        "negative default: shift(int delta = -1) -> \"-1\" (unary expr tokens joined)",
+        argOf("shift")?.let { it.hasDefault && it.defaultValue == "-1" } == true,
+        "got ${argOf("shift")?.defaultValue}"
+    )
+    check(
+        "enum-constant default: paint(Color tint = RED) -> \"RED\" on a WrappedEnumType arg",
+        argOf("paint")?.let {
+            it.hasDefault && it.defaultValue == "RED" && it.type is WrappedEnumType
+        } == true,
+        "got ${argOf("paint")?.defaultValue} type=${argOf("paint")?.type}"
+    )
+    check(
+        "nullptr default: fill(Shape* target = nullptr) -> \"nullptr\"",
+        argOf("fill")?.let { it.hasDefault && it.defaultValue == "nullptr" } == true,
+        "got ${argOf("fill")?.defaultValue}"
+    )
+    check(
+        "constructed default: blend(Palette p = Palette()) -> the call spelling \"Palette()\"",
+        argOf("blend")?.let { it.hasDefault && it.defaultValue == "Palette()" } == true,
+        "got ${argOf("blend")?.defaultValue}"
+    )
+    // Multi-default trailing run: the shape the trailing-defaulted-omit shortcut
+    // (ModelResolution's isOmittableDefault subList check) consumes — a REQUIRED head arg
+    // plus omittable defaulted tails. isOmittableDefault is model-side; it holds here
+    // because hasDefaultArg() never fires on the false-default type shapes (#36/#41).
+    check(
+        "configure(int a, int b = 1, Shape* c = nullptr): a required, b \"1\", c \"nullptr\"",
+        argOf("configure", 0)?.let { !it.hasDefault && it.defaultValue == null } == true &&
+            argOf("configure", 1)?.let { it.hasDefault && it.defaultValue == "1" } == true &&
+            argOf("configure", 2)
+            ?.let { it.hasDefault && it.defaultValue == "nullptr" } == true,
+        "got ${dMethods.find { it.name == "configure" }?.args
+            ?.map { "${it.hasDefault}/${it.defaultValue}" }}"
+    )
+    check(
+        "configure's defaulted tail is omittable (the resolution shortcut's contract)",
+        dMethods.find { it.name == "configure" }?.args?.drop(1)
+            ?.all { it.isOmittableDefault } == true
+    )
+    // No false positives anywhere else: every pre-brick-6 arg stays non-defaulted
+    // (hasDefaultArg() is authoritative; nothing to repair on this path).
+    check(
+        "no spurious hasDefault on non-defaulted args (freeFunction, describe, onEvent)",
+        freeFn?.args?.none { it.hasDefault } == true &&
+            sceneMethods.find { it.name == "describe" }?.args?.none { it.hasDefault } == true &&
+            dMethods.find { it.name == "onEvent" }?.args?.none { it.hasDefault } == true
     )
 
     check("JSON is non-empty", json.length > 2)
