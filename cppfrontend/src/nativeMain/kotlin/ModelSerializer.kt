@@ -16,9 +16,11 @@
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedConstructor
 import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import kotlinx.serialization.Serializable
 
@@ -38,6 +40,15 @@ data class SerializedElement(
     val isConst: Boolean? = null,
     val isVirtual: Boolean? = null,
     val isAbstract: Boolean? = null,
+    // Base-specifier payload (WrappedBase).
+    val isPublic: Boolean? = null,
+    val isVirtualBase: Boolean? = null,
+    // Constructor payload (WrappedConstructor).
+    val isCopyConstructor: Boolean? = null,
+    val isDefaultConstructor: Boolean? = null,
+    // The names of the ClassMetadata flags set on a class (parse-time records about
+    // FILTERED members — deleted/non-public ctors, hidden new/delete, const fields).
+    val metadata: List<String>? = null,
     // Identity field — "cpp:<canonical Decl id>" here vs a libclang USR string from the
     // libclang front-end; maskable in the Phase C tree-diff (see ModelBuilder.kt).
     val usr: String? = null,
@@ -52,11 +63,29 @@ fun WrappedElement.serialized(): SerializedElement {
             "class",
             name = name,
             isAbstract = isAbstract,
+            metadata = metadataFlags().takeIf { it.isNotEmpty() },
             children = kids
         )
-        is WrappedBase -> SerializedElement("base", type = type?.toString(), children = kids)
-        // Before WrappedMethod: WrappedArgument/WrappedField are sibling element kinds, and
-        // a WrappedConstructor/WrappedDestructor IS-A WrappedMethod (kind via methodType).
+        is WrappedNamespace -> SerializedElement("namespace", name = namespace, children = kids)
+        is WrappedBase -> SerializedElement(
+            "base",
+            type = type?.toString(),
+            isPublic = isPublic,
+            isVirtualBase = isVirtualBase,
+            children = kids
+        )
+        // Before WrappedMethod: WrappedArgument/WrappedField are sibling element kinds, a
+        // WrappedConstructor IS-A WrappedMethod with extra flags, and a WrappedDestructor
+        // IS-A WrappedMethod distinguished by methodType alone.
+        is WrappedConstructor -> SerializedElement(
+            "method",
+            name = name,
+            returnType = returnType.toString(),
+            methodType = methodType.name,
+            isCopyConstructor = isCopyConstructor,
+            isDefaultConstructor = isDefaultConstructor,
+            children = kids
+        )
         is WrappedArgument -> SerializedElement(
             "arg",
             name = name,
@@ -81,4 +110,16 @@ fun WrappedElement.serialized(): SerializedElement {
         )
         else -> SerializedElement(this::class.simpleName ?: "element", children = kids)
     }
+}
+
+private fun WrappedClass.metadataFlags(): List<String> = buildList {
+    if (metadata.hasHiddenNew) add("hasHiddenNew")
+    if (metadata.hasHiddenDelete) add("hasHiddenDelete")
+    if (metadata.hasConstructor) add("hasConstructor")
+    if (metadata.hasPrivateConstField) add("hasPrivateConstField")
+    if (metadata.hasDefaultConstructor) add("hasDefaultConstructor")
+    if (metadata.hasCopyConstructor) add("hasCopyConstructor")
+    if (metadata.hasDeletedCopyConstructor) add("hasDeletedCopyConstructor")
+    if (metadata.hasDeletedCopyAssignment) add("hasDeletedCopyAssignment")
+    if (metadata.hasDeletedDefaultConstructor) add("hasDeletedDefaultConstructor")
 }

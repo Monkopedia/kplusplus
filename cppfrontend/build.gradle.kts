@@ -85,6 +85,12 @@ kplusplus {
         "clang::NamedDecl",
         "clang::DeclContext",
         "clang::TranslationUnitDecl",
+        // NEW for brick 3 (construction depth): namespace nesting. NamespaceBaseDecl is
+        // NamespaceDecl's direct base (the Clang 22 NamespaceDecl/alias split); it bridges
+        // the NamespaceDecl -> NamedDecl upcast chain the same way FunctionDecl bridges
+        // CXXMethodDecl's.
+        "clang::NamespaceBaseDecl",
+        "clang::NamespaceDecl",
         "clang::TagDecl",
         "clang::RecordDecl",
         "clang::CXXRecordDecl",
@@ -92,6 +98,11 @@ kplusplus {
         // getReturnType()/getNumParams()/getParamDecl() — the signature payload.
         "clang::FunctionDecl",
         "clang::CXXMethodDecl",
+        // NEW for brick 3: real Decl classes for ctors/dtors (libclang only has cursor
+        // kinds) — CXXConstructorDecl carries is{Copy,Default}Constructor, the C++-AST
+        // equivalents of clang_CXXConstructor_is{Copy,Default}Constructor.
+        "clang::CXXConstructorDecl",
+        "clang::CXXDestructorDecl",
         "clang::FieldDecl",
         "clang::ValueDecl",
         "clang::DeclaratorDecl",
@@ -109,8 +120,9 @@ kplusplus {
         // normalized to a Kotlin String by #37) feeds the WrappedType(spelling) factory.
         "clang::QualType"
     )
-    // Materialize the range returns the walk iterates (decls()/methods()/bases()).
+    // Materialize the range returns the walk iterates. Brick 3 walks members through
+    // DeclContext::decls() (source order, all member kinds) instead of methods(), so the
+    // CXXMethodDecl vector instantiation is gone.
     instantiate("std::vector<clang::Decl*>")
-    instantiate("std::vector<clang::CXXMethodDecl*>")
     instantiate("std::vector<clang::CXXBaseSpecifier*>")
 }
