@@ -171,9 +171,9 @@ kplusplus {
         "llvm::APSInt",
         // NEW for brick 6 (function-pointer typedefs): a typedef over a pointer-to-
         // function-proto decodes through FunctionProtoType — getNumParams()/getParamType()
-        // — with getReturnType() on FunctionType (its address-identical primary base;
-        // FunctionProtoType's own base list has the same multi-base CastTargets gap as
-        // TypedefType, bridged by classof + re-view in TypeBuilder).
+        // + the inherited getReturnType(). Unlike TypedefType, this chain survives
+        // resolution intact (the generated Type.asFunctionProtoType() dyn-cast is real);
+        // FunctionType is bound as the bridging base.
         "clang::FunctionType",
         "clang::FunctionProtoType",
         // NEW for brick 6 (default arguments): the smallest bindable surface for the

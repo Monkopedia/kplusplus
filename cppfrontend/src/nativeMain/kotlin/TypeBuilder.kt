@@ -16,8 +16,6 @@
 import clang.CXXRecordDecl
 import clang.Decl
 import clang.EnumDecl
-import clang.FunctionProtoType
-import clang.FunctionType
 import clang.QualType
 import clang.Type
 import clang.TypedefNameDecl
@@ -65,21 +63,6 @@ private fun Type.asRecord(): CXXRecordDecl? =
 private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companion) {
     if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
 }
-
-// BRIDGE: same CastTargets gap family as TypedefType above — FunctionProtoType's base list
-// (TypeBase.h: `class FunctionProtoType final : public FunctionType, public
-// llvm::FoldingSetNode, private llvm::TrailingObjects<...>`) doesn't survive resolution,
-// so neither the generated dyn-cast nor FunctionType's inherited methods materialize.
-// classof + the same-pointer re-view; Type is the address-identical primary base through
-// FunctionType (single non-virtual chain), exactly the generated dyn-cast's semantics.
-private fun Type.asFunctionProtoTypeOrNull(): FunctionProtoType? =
-    with(FunctionProtoType.Companion) {
-        if (memScope.classof(this@asFunctionProtoTypeOrNull)) {
-            FunctionProtoType(ptr, memScope)
-        } else {
-            null
-        }
-    }
 
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
@@ -291,10 +274,10 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
     val underlying = typedef.getUnderlyingType()
     val ty = underlying.typePtr() ?: return null
     if (!ty.isPointerType()) return null
-    val proto = ty.getPointeeType().typePtr()?.asFunctionProtoTypeOrNull() ?: return null
-    // getReturnType lives on FunctionType — the address-identical primary base, reached by
-    // the same re-view as the dyn-cast bridge (the gap keeps it off FunctionProtoType).
-    val returnType = buildWrappedType(FunctionType(proto.ptr, proto.memScope).getReturnType())
+    // Unlike TypedefType (the bridge above), FunctionProtoType's full chain DOES survive
+    // resolution — the generated dyn-cast and inherited getReturnType() are both real.
+    val proto = ty.getPointeeType().typePtr()?.asFunctionProtoType() ?: return null
+    val returnType = buildWrappedType(proto.getReturnType())
     val argTypes = (0u until proto.getNumParams()).map { buildWrappedType(proto.getParamType(it)) }
     if (!returnType.isCFunctionPointerCompatible) return null
     if (argTypes.any { !it.isCFunctionPointerCompatible }) return null

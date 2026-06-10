@@ -1,3 +1,11 @@
+// Include guard required: the generated wrapper includes this header both directly and
+// through each KrapperForce_*.h (via differently-spelled relative paths, so #pragma once
+// can't be trusted to dedupe) — without a guard the inline kppbridge helper below is a
+// same-TU redefinition. The clang/LLVM includes self-guard, which is why the header
+// didn't need one before it carried a definition of its own.
+#ifndef KPLUSPLUS_CPPFRONTEND_CLANG_SLICE_H_
+#define KPLUSPLUS_CPPFRONTEND_CLANG_SLICE_H_
+
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
@@ -38,3 +46,5 @@ inline std::string defaultArgText(clang::ParmVarDecl *parm) {
         .str();
 }
 } // namespace kppbridge
+
+#endif // KPLUSPLUS_CPPFRONTEND_CLANG_SLICE_H_
