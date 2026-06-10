@@ -22,6 +22,10 @@ import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
+import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
+import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlin.system.exitProcess
 import kotlinx.cinterop.memScoped
@@ -33,6 +37,11 @@ import kotlinx.serialization.json.Json
 // with metadata), ctors (default + copy) and a virtual dtor, a deleted copy assignment,
 // a static method, public/private fields (incl. the const-field metadata rules), an
 // abstract class, namespace nesting with block merging, and a derived class's bases.
+// Brick 4 grows it with the STRUCTURAL type surface (Scene + the aliases + Holder): a
+// `const Shape&` param, `Shape*` returns (one through the G8 const-method rule), a
+// constant-array field, size_t/size_type preservation, typedef/`using` collapse, and a
+// template-typed field. Holder is defined in-fixture rather than using std::vector so the
+// case carries no std-header weight and the decoded shape is byte-deterministic.
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -68,7 +77,28 @@ private val FIXTURE_HEADER = """
 
     namespace geo {
         bool enabled();
+        Circle* makeCircle();
     }
+
+    typedef unsigned long size_t;
+    typedef int MyInt;
+    using Real = double;
+
+    template <typename T>
+    struct Holder { T value; };
+
+    struct Scene {
+        typedef unsigned long size_type;
+        Shape* current();
+        Shape* cloneShape() const;
+        void describe(const Shape& shape);
+        void reserve(size_t capacity);
+        void setId(MyInt id);
+        void setScale(Real scale);
+        size_type size() const;
+        int corners[4];
+        Holder<Shape*> shapes;
+    };
 """.trimIndent()
 
 private var failures = 0
@@ -78,10 +108,10 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
     println("  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}")
 }
 
-// #44 brick 3, construction depth: parse the fixture with Clang's C++ AST (on the
-// kplusplus-generated libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU
-// mirroring ModelFactories' full decl/class/member contract, and self-check every
-// constructed shape against the model.
+// #44 bricks 3+4: parse the fixture with Clang's C++ AST (on the kplusplus-generated
+// libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU mirroring ModelFactories'
+// full decl/class/member contract — with every type decoded STRUCTURALLY from the QualType
+// tree (TypeBuilder.kt) — and self-check each constructed shape against the model.
 @Suppress("UNUSED_PARAMETER")
 fun main(args: Array<String>): Unit = memScoped {
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
@@ -184,8 +214,8 @@ fun main(args: Array<String>): Unit = memScoped {
     val geo = geos.firstOrNull()
     val geoFns = geo?.children?.filterIsInstance<WrappedMethod>().orEmpty()
     check(
-        "geo holds add+enabled (from both blocks) as STATIC free functions",
-        geoFns.map { it.name }.sorted() == listOf("add", "enabled") &&
+        "geo holds add+enabled+makeCircle (from both blocks) as STATIC free functions",
+        geoFns.map { it.name }.sorted() == listOf("add", "enabled", "makeCircle") &&
             geoFns.all { it.methodType == MethodType.STATIC },
         "got $geoFns"
     )
@@ -254,6 +284,151 @@ fun main(args: Array<String>): Unit = memScoped {
         freeFn?.args?.firstOrNull()?.usr?.startsWith("cpp:") == true,
         "got '${freeFn?.args?.firstOrNull()?.usr}'"
     )
+
+    // -- Brick 4: STRUCTURAL type construction (TypeBuilder.kt mirroring TypeFactories.kt).
+    // Each check asserts the constructed WrappedType TREE (not just its spelling) AND that
+    // toString() round-trips to the libclang path's spelling, citing the mirrored rule.
+    val scene = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Scene" }
+    check("TU contains class Scene", scene != null)
+    val sceneMethods = scene?.children?.filterIsInstance<WrappedMethod>().orEmpty()
+    val sceneFields = scene?.children?.filterIsInstance<WrappedField>().orEmpty()
+
+    // Builtin leaf (createForType `else -> WrappedType(spelling)`) + the PrintingPolicy
+    // bridge: getAsString()'s default policy spells C's `_Bool`; the libclang path (the
+    // TU's C++ LangOpts) spells `bool` — normalized in TypeBuilder.spellingOf.
+    val enabled = geoFns.find { it.name == "enabled" }
+    check(
+        "bool return: builtin leaf normalizes _Bool -> WrappedTypeReference(\"bool\")",
+        (enabled?.returnType as? WrappedTypeReference)?.name == "bool",
+        "got ${enabled?.returnType}"
+    )
+
+    // Record leaf: createForType's ClassDecl/StructDecl -> WrappedType(fullyQualified) —
+    // a namespaced record spells its "::"-joined semantic-parent chain.
+    val makeCircle = geoFns.find { it.name == "makeCircle" }
+    check(
+        "makeCircle return spells the QUALIFIED record leaf: 'geo::Circle*'",
+        makeCircle?.returnType?.toString() == "geo::Circle*",
+        "got ${makeCircle?.returnType}"
+    )
+
+    // Pointer shape: invoke's `spelling.endsWith("*") -> pointerTo(invoke(pointee))`.
+    val currentRet = sceneMethods.find { it.name == "current" }?.returnType
+    check(
+        "Shape* return: WrappedModifiedType(\"*\") over record leaf WrappedTypeReference(\"Shape\")",
+        currentRet is WrappedModifiedType && currentRet.modifier == "*" &&
+            (currentRet.baseType as? WrappedTypeReference)?.name == "Shape",
+        "got $currentRet"
+    )
+    check("Shape* round-trips to 'Shape*'", currentRet?.toString() == "Shape*")
+
+    // G8 const-method rule (ModelFactories.WrappedMethod): a const method's constness
+    // carries to a pointer return as an OUTER const — const(pointerTo(Shape)).
+    val cloneRet = sceneMethods.find { it.name == "cloneShape" }?.returnType
+    check(
+        "const method's Shape* return gains OUTER const: WrappedPrefixedType(const, Shape*)",
+        cloneRet is WrappedPrefixedType && cloneRet.modifier == "const" &&
+            (cloneRet.baseType as? WrappedModifiedType)?.modifier == "*",
+        "got $cloneRet"
+    )
+
+    // Reference shape: invoke's `spelling.endsWith("&") -> referenceTo(invoke(pointee))`;
+    // the const is the POINTEE's qualifier, so it nests INSIDE: &(const(Shape)).
+    val describeArg = sceneMethods.find { it.name == "describe" }?.args?.singleOrNull()?.type
+    val describeBase = (describeArg as? WrappedModifiedType)?.baseType
+    check(
+        "const Shape& param: WrappedModifiedType(\"&\") over WrappedPrefixedType(const) over Shape",
+        describeArg is WrappedModifiedType && describeArg.modifier == "&" &&
+            describeBase is WrappedPrefixedType && describeBase.modifier == "const" &&
+            (describeBase.baseType as? WrappedTypeReference)?.name == "Shape",
+        "got $describeArg"
+    )
+    check(
+        "const Shape& round-trips to 'const Shape&'",
+        describeArg?.toString() == "const Shape&"
+    )
+    // The same shape now backs Shape's copy-ctor arg (brick 3 parsed it from a spelling).
+    val copyArg = copyCtor?.args?.singleOrNull()?.type
+    check(
+        "copy-ctor's const Shape& arg decodes to the same structural shape",
+        copyArg is WrappedModifiedType && copyArg.modifier == "&" &&
+            (copyArg.baseType as? WrappedPrefixedType)?.modifier == "const",
+        "got $copyArg"
+    )
+    // ...and name()'s return is the pointer flavor: *(const(char)).
+    val nameRet = name?.returnType
+    check(
+        "const char* return: WrappedModifiedType(\"*\") over WrappedPrefixedType(const) over char",
+        nameRet is WrappedModifiedType && nameRet.modifier == "*" &&
+            ((nameRet.baseType as? WrappedPrefixedType)?.baseType as? WrappedTypeReference)
+                ?.name == "char",
+        "got $nameRet"
+    )
+
+    // size_t param: cAliasTypedefElement preserves the alias NAME (not the canonical
+    // 'unsigned long'), so the Kotlin side surfaces platform.posix.size_t.
+    val reserveArg = sceneMethods.find { it.name == "reserve" }?.args?.singleOrNull()?.type
+    check(
+        "size_t param preserved as the NATIVE alias leaf WrappedTypeReference(\"size_t\")",
+        (reserveArg as? WrappedTypeReference)?.name == "size_t" && reserveArg?.isNative == true,
+        "got $reserveArg"
+    )
+    // size_type return: sizeTypedefElement always normalizes size_type -> size_t.
+    val sizeRet = sceneMethods.find { it.name == "size" }?.returnType
+    check(
+        "size_type return normalizes to WrappedTypeReference(\"size_t\")",
+        (sizeRet as? WrappedTypeReference)?.name == "size_t",
+        "got $sizeRet"
+    )
+    // Ordinary typedef collapse (ResolverBuilderImpl.visit's CXCursor_TypedefDecl branch).
+    val setIdArg = sceneMethods.find { it.name == "setId" }?.args?.singleOrNull()?.type
+    check(
+        "typedef'd MyInt param collapses to the underlying builtin 'int'",
+        (setIdArg as? WrappedTypeReference)?.name == "int",
+        "got $setIdArg"
+    )
+    // `using` alias collapse — deterministic here; ORDER-DEPENDENT on the libclang path
+    // (the documented Phase C divergence, see TypeBuilder.kt's typedef branch).
+    val setScaleArg = sceneMethods.find { it.name == "setScale" }?.args?.singleOrNull()?.type
+    check(
+        "`using Real` param collapses to the underlying builtin 'double'",
+        (setScaleArg as? WrappedTypeReference)?.name == "double",
+        "got $setScaleArg"
+    )
+
+    // Constant array: the libclang leaf spelling is "int [4]" (krapper_gen TestData
+    // golden "int [5]"); WrappedTypeReference parses element/extent off that name.
+    val corners = sceneFields.find { it.name == "corners" }?.type
+    check(
+        "int[4] field: WrappedTypeReference(\"int [4]\") with isArray, size 4, element int",
+        (corners as? WrappedTypeReference)?.let {
+            it.name == "int [4]" && it.isArray && it.arraySize == 4 && it.arrayType.name == "int"
+        } == true,
+        "got $corners"
+    )
+
+    // Template-typed reference: WrappedTemplateType(base ref, decoded args) — base from
+    // the specialization decl's qualified name, each arg structurally decoded.
+    val shapes = sceneFields.find { it.name == "shapes" }?.type
+    val shapesArg = (shapes as? WrappedTemplateType)?.templateArgs?.singleOrNull()
+    check(
+        "Holder<Shape*> field: WrappedTemplateType(base WrappedTypeReference(\"Holder\"), 1 arg)",
+        shapes is WrappedTemplateType &&
+            (shapes.baseType as? WrappedTypeReference)?.name == "Holder" &&
+            shapes.templateArgs.size == 1,
+        "got $shapes"
+    )
+    check(
+        "Holder's template arg decodes structurally to *(Shape)",
+        shapesArg is WrappedModifiedType && shapesArg.modifier == "*" &&
+            (shapesArg.baseType as? WrappedTypeReference)?.name == "Shape",
+        "got $shapesArg"
+    )
+    check(
+        "Holder<Shape*> round-trips to 'Holder<Shape*>'",
+        shapes?.toString() == "Holder<Shape*>"
+    )
+
     check("JSON is non-empty", json.length > 2)
 
     if (failures > 0) fail("$failures self-check(s) failed")

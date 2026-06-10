@@ -38,10 +38,11 @@ import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 
-// The C++-AST front-end's model construction (#44 bricks 2+3): walk a parsed Clang AST on
+// The C++-AST front-end's model construction (#44 bricks 2-4): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
 // model — the same WrappedTU shape the libclang-C front-end (ModelFactories.kt) produces.
-// Every construction rule cites the ModelFactories source it mirrors.
+// Every construction rule cites the ModelFactories source it mirrors; types are decoded
+// STRUCTURALLY from the QualType tree (TypeBuilder.kt, mirroring TypeFactories.kt).
 
 // IDENTITY CONVENTION: the libclang front-end keys identity fields (WrappedArgument.usr and
 // the reducer's lookup maps) on libclang's USR string. This front-end's equivalent is the
@@ -105,8 +106,9 @@ private class ModelBuilder {
                 // STATIC when the semantic parent is not a class).
                 parent.addChild(buildFunction(function))
             }
-            // brick-4+: typedefs, enums, global variables, class templates, and
+            // brick-5+: typedef ELEMENTS, enums, global variables, class templates, and
             // forward-declaration redecl-collapse for classes (elementLookup's other use).
+            // (Typedefs/aliases used as TYPES already resolve — TypeBuilder.kt.)
         }
     }
 
@@ -131,12 +133,12 @@ private class ModelBuilder {
         val cls = WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
         for (base in record.bases()) {
             if (base == null) continue
-            val spelling = base.getType().getAsString() ?: continue
-            // ModelFactories.map's CXCursor_CXXBaseSpecifier branch: isPublic from the
-            // base's access specifier, isVirtualBase from `virtual` inheritance.
+            // ModelFactories.map's CXCursor_CXXBaseSpecifier branch: the base's type built
+            // through the CXType factory (structural buildWrappedType here, brick 4),
+            // isPublic from the access specifier, isVirtualBase from `virtual` inheritance.
             cls.addChild(
                 WrappedBase(
-                    WrappedType(spelling),
+                    buildWrappedType(base.getType()),
                     isPublic = base.getAccessSpecifier() == AccessSpecifier.AS_public,
                     isVirtualBase = base.isVirtual()
                 )
@@ -187,7 +189,7 @@ private class ModelBuilder {
         }
         // Anything else (static data members, member typedefs, nested enums) falls
         // through ModelFactories.map's `else -> return null` and is dropped; nested
-        // record decls are brick-4+ (together with the nested-in-class-template skip).
+        // record decls are brick-5+ (together with the nested-in-class-template skip).
     }
 
     // Mirror of the metadata side-effects ModelFactories.map records for a member it
@@ -224,8 +226,7 @@ private class ModelBuilder {
         if (field != null) {
             // A private/protected CONST field (ModelFactories' CXCursor_FieldDecl filter
             // branch) blocks the generated default-assignment paths.
-            val spelling = field.getType().getAsString() ?: return
-            if (WrappedType(spelling).isConst) {
+            if (buildWrappedType(field.getType()).isConst) {
                 metadata.hasPrivateConstField = true
             }
         }
@@ -235,8 +236,7 @@ private class ModelBuilder {
         // Anonymous data members (bitfield padding `int :3;`, anon union/struct members)
         // have a blank spelling and are dropped (ModelFactories' FieldDecl branch).
         val name = field.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() } ?: return
-        val spelling = field.getType().getAsString() ?: return
-        val type = WrappedType(spelling)
+        val type = buildWrappedType(field.getType())
         // A public REFERENCE or CONST member implicitly deletes the enclosing class's
         // copy assignment, and a reference member also deletes the implicit default
         // constructor — recorded structurally because the implicit special members are
@@ -276,11 +276,10 @@ private class ModelBuilder {
     private fun buildMethod(method: CXXMethodDecl): WrappedMethod {
         val name = method.asNamedDecl().getNameAsString() ?: error("method without a name")
         val isConst = method.isConst()
-        val spelling = method.getReturnType().getAsString() ?: error("method without a return")
         // Mirror the libclang front-end's return-const rule (ModelFactories.WrappedMethod):
         // a `const` method's constness only carries to a pointer/reference return; const on
         // a by-value return is meaningless for the temporary and breaks the Holder path (G8).
-        val returnType = WrappedType(spelling).let {
+        val returnType = buildWrappedType(method.getReturnType()).let {
             if (isConst && (it.isPointer || it.isReference)) WrappedType.const(it) else it
         }
         // ModelFactories.WrappedMethod: STATIC for a static member (or a non-class-parent
@@ -295,7 +294,7 @@ private class ModelBuilder {
 
     private fun buildFunction(function: FunctionDecl): WrappedMethod {
         val name = function.asNamedDecl().getNameAsString() ?: error("function without a name")
-        val returnType = WrappedType(function.getReturnType().getAsString() ?: error("no return"))
+        val returnType = buildWrappedType(function.getReturnType())
         return WrappedMethod(name, returnType, MethodType.STATIC).also {
             it.addArgs(function)
         }
@@ -311,9 +310,14 @@ private class ModelBuilder {
             // positional name the libclang front-end synthesizes.
             val name = param.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() }
                 ?: "_arg_$i"
-            val spelling = param.asValueDecl().getType().getAsString() ?: continue
-            // brick-4+: hasDefault/defaultValue (ParmVarDecl::hasDefaultArg + source text).
-            addChild(WrappedArgument(name, WrappedType(spelling), param.asDecl().cppUsr()))
+            // brick-5+: hasDefault/defaultValue (ParmVarDecl::hasDefaultArg + source text).
+            addChild(
+                WrappedArgument(
+                    name,
+                    buildWrappedType(param.asValueDecl().getType()),
+                    param.asDecl().cppUsr()
+                )
+            )
         }
     }
 }

@@ -117,8 +117,32 @@ kplusplus {
         "clang::ParmVarDecl",
         "clang::VarDecl",
         // QualType is the carrier for a decl's type; getAsString() (by-value std::string,
-        // normalized to a Kotlin String by #37) feeds the WrappedType(spelling) factory.
-        "clang::QualType"
+        // normalized to a Kotlin String by #37) spells the leaves.
+        "clang::QualType",
+        // NEW for brick 4 (structural type construction, TypeBuilder.kt): clang::Type
+        // carries the shape-classification predicates (isPointerType/isReferenceType/
+        // isRValueReferenceType/isFunctionPointerType/isConstantArrayType/isEnumeralType),
+        // getPointeeType(), and the record recovery (getAsCXXRecordDecl) — the decode
+        // surface proven on clangwalk/type-decode-probe (59ebf04).
+        "clang::Type",
+        // Typedef/alias decode: a sugared QualType's Type dyn-casts to TypedefType, whose
+        // getDecl() (a TypedefNameDecl — covers both `typedef` and `using`) provides the
+        // alias NAME (the size_t/size_type preservation rules) and getUnderlyingType()
+        // (the canonical-collapse recursion). TypeDecl (already bound) bridges the
+        // TypedefNameDecl -> NamedDecl upcast chain.
+        "clang::TypedefType",
+        "clang::TypedefNameDecl",
+        // Constant-array decode: ConstantArrayType::getZExtSize() is the extent and
+        // ArrayType (its direct base) carries getElementType() — together they reconstruct
+        // the libclang "elem [N]" array leaf structurally.
+        "clang::ArrayType",
+        "clang::ConstantArrayType",
+        // Template-specialization decode (probe-proven): a template-typed field/param's
+        // canonical record dyn-casts to ClassTemplateSpecializationDecl ->
+        // getTemplateArgs() -> TemplateArgument::getAsType() per argument.
+        "clang::ClassTemplateSpecializationDecl",
+        "clang::TemplateArgument",
+        "clang::TemplateArgumentList"
     )
     // Materialize the range returns the walk iterates. Brick 3 walks members through
     // DeclContext::decls() (source order, all member kinds) instead of methods(), so the
