@@ -90,6 +90,12 @@ kplusplus {
         "clang::TagDecl",
         "clang::RecordDecl",
         "clang::CXXRecordDecl",
+        // FunctionDecl is CXXMethodDecl's direct base: it carries getReturnType() (the
+        // method's return QualType — the signature payload the reducer extracts) and bridges
+        // the CXXMethodDecl -> NamedDecl upcast chain (getNameAsString). Without it bound the
+        // chain breaks at FunctionDecl and a walked CXXMethodDecl exposes neither name nor
+        // return type.
+        "clang::FunctionDecl",
         "clang::CXXMethodDecl",
         "clang::FieldDecl",
         "clang::ValueDecl",
@@ -106,13 +112,4 @@ kplusplus {
     instantiate("std::vector<clang::Decl*>")
     instantiate("std::vector<clang::CXXMethodDecl*>")
     instantiate("std::vector<clang::CXXBaseSpecifier*>")
-    // ASTContext::adjustType(QualType, llvm::function_ref<QualType(QualType)>) has an
-    // un-modelable function_ref second arg. With QualType now bound its return resolves, so
-    // the method is no longer dropped-by-unresolved-return — and the function_ref param is
-    // mis-flagged omittable-default (the cursor-children default heuristic fires on the
-    // function_ref's type tokens), emitting an under-arity `adjustType(Old)` call that won't
-    // compile. Drop it explicitly until that heuristic is tightened (a krapper_gen follow-up).
-    fixup {
-        removeMethod("clang_ASTContext_adjust_type")
-    }
 }
