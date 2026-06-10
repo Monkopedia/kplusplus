@@ -106,7 +106,25 @@ kplusplus {
         // survive and exposes QualType::getAsString() (a by-value std::string return) — the
         // #37 EXTRACT payoff: under IGNORE_MISSING the string return now normalizes to a
         // Kotlin String instead of dropping the whole method.
-        "clang::QualType"
+        "clang::QualType",
+        // TYPE STRUCTURAL DECODE probe (clangwalk/type-decode-probe): bind clang::Type and
+        // the few subclasses the reducer's CXType decode group reads, to prove the C++-AST
+        // decode primitives reproduce the libclang accessors AND that getCanonicalType()
+        // replaces the libclang typedef-reducer. clang::Type carries the shape-classification
+        // predicates (isPointerType/isReferenceType/isRecordType/isBuiltinType/
+        // isEnumeralType/isConstantArrayType), getPointeeType(), and the record/enum decl
+        // recovery (getAsCXXRecordDecl/getAsRecordDecl). QualType::getTypePtr() bridges to it.
+        "clang::Type",
+        // Function-proto decode: a method/fn-pointer QualType -> Type* dyn_casts to
+        // FunctionProtoType for getReturnType()/getParamType(i)/getNumParams().
+        "clang::FunctionType",
+        "clang::FunctionProtoType",
+        // Template-specialization decode: a class-template instantiation's record dyn_casts
+        // (CXXRecordDecl -> ClassTemplateSpecializationDecl) to reach getTemplateArgs() ->
+        // TemplateArgument::getAsType() — the element type T + its decl identity.
+        "clang::ClassTemplateSpecializationDecl",
+        "clang::TemplateArgument",
+        "clang::TemplateArgumentList"
     )
     // Materialize the range returns the walk iterates (decls()/methods()/bases()).
     instantiate("std::vector<clang::Decl*>")
