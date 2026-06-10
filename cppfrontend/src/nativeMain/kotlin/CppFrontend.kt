@@ -14,23 +14,60 @@
  * limitations under the License.
  */
 import clang.tooling.buildASTFromCode
+import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedConstructor
+import com.monkopedia.krapper.generator.model.WrappedDestructor
+import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
+import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlin.system.exitProcess
 import kotlinx.cinterop.memScoped
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-// The brick-2 fixture "header": deliberately minimal (one free function + one plain class)
-// — later bricks grow it, not this one. Fed to buildASTFromCode as an in-memory source,
-// the same way :clangwalk feeds its fixture.
+// The brick-3 fixture "header" (#44 construction depth): exercises the full decl/class/
+// member construction contract — access filtering (public kept, private/protected filtered
+// with metadata), ctors (default + copy) and a virtual dtor, a deleted copy assignment,
+// a static method, public/private fields (incl. the const-field metadata rules), an
+// abstract class, namespace nesting with block merging, and a derived class's bases.
 private val FIXTURE_HEADER = """
     void freeFunction(int);
+
     struct Shape {
-        int area() const;
+        Shape();
+        Shape(const Shape& other);
+        virtual ~Shape();
+        Shape& operator=(const Shape& other) = delete;
+        virtual int area() const = 0;
         const char* name() const;
+        static int count();
+        int id;
+    private:
+        int secret;
+        const int cache;
     };
+
+    namespace geo {
+        int add(int a, int b);
+
+        class Circle : public Shape {
+        public:
+            Circle(double r);
+            int area() const override;
+            double radius() const;
+            double r;
+            const int version;
+        private:
+            Circle();
+            double cached;
+        };
+    }
+
+    namespace geo {
+        bool enabled();
+    }
 """.trimIndent()
 
 private var failures = 0
@@ -40,9 +77,10 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
     println("  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}")
 }
 
-// #44 brick 2, the front-end scaffold: parse the fixture with Clang's C++ AST (on the
-// kplusplus-generated libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU from
-// the walk, and serialize it to JSON — the end-to-end skeleton the next bricks fill in.
+// #44 brick 3, construction depth: parse the fixture with Clang's C++ AST (on the
+// kplusplus-generated libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU
+// mirroring ModelFactories' full decl/class/member contract, and self-check every
+// constructed shape against the model.
 @Suppress("UNUSED_PARAMETER")
 fun main(args: Array<String>): Unit = memScoped {
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
@@ -59,18 +97,7 @@ fun main(args: Array<String>): Unit = memScoped {
 
     // ---- Structural summary ----
     println("cppfrontend: constructed WrappedTU from the Clang C++ AST")
-    for (child in tu.children) {
-        when (child) {
-            is WrappedClass -> {
-                println("  class ${child.name} (${child.children.size} members)")
-                child.children.filterIsInstance<WrappedMethod>().forEach {
-                    println("    $it${if (it.isConst) " const" else ""}")
-                }
-            }
-            is WrappedMethod -> println("  free fn $child [${child.methodType}]")
-            else -> println("  ${child::class.simpleName}")
-        }
-    }
+    printElements(tu.children, indent = "  ")
 
     // ---- Serialize ----
     val json = Json { prettyPrint = true }.encodeToString(tu.serialized())
@@ -79,23 +106,138 @@ fun main(args: Array<String>): Unit = memScoped {
 
     // ---- Self-checks ----
     println("\ncppfrontend: self-checks")
+
+    // -- Shape: TU-level abstract class with ctors/dtor/methods/fields + metadata.
     val shape = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Shape" }
-    val methods = shape?.children?.filterIsInstance<WrappedMethod>().orEmpty()
     check("TU contains class Shape", shape != null)
-    check("Shape has 2 methods", methods.size == 2, "got ${methods.size}")
-    val area = methods.find { it.name == "area" }
+    check("Shape is abstract (pure-virtual area)", shape?.isAbstract == true)
+
+    val shapeMethods = shape?.children?.filterIsInstance<WrappedMethod>().orEmpty()
+        .filter { it !is WrappedConstructor && it !is WrappedDestructor }
+    check(
+        "Shape has 3 plain methods (area, name, count)",
+        shapeMethods.map { it.name }.sorted() == listOf("area", "count", "name"),
+        "got ${shapeMethods.map { it.name }}"
+    )
+    val area = shapeMethods.find { it.name == "area" }
     check(
         "area return type spelling is 'int'",
         area?.returnType?.toString() == "int",
         "got ${area?.returnType}"
     )
     check("area is const", area?.isConst == true)
-    val name = methods.find { it.name == "name" }
+    check("area is virtual", area?.isVirtual == true)
+    check("area is an instance METHOD", area?.methodType == MethodType.METHOD)
+    val name = shapeMethods.find { it.name == "name" }
     check(
         "name return type spelling is 'const char*'",
         name?.returnType?.toString() == "const char*",
         "got ${name?.returnType}"
     )
+    val count = shapeMethods.find { it.name == "count" }
+    check("static count() maps to MethodType.STATIC", count?.methodType == MethodType.STATIC)
+
+    val shapeCtors = shape?.children?.filterIsInstance<WrappedConstructor>().orEmpty()
+    check("Shape has 2 constructors", shapeCtors.size == 2, "got ${shapeCtors.size}")
+    val defaultCtor = shapeCtors.find { it.isDefaultConstructor }
+    check(
+        "default ctor: isDefaultConstructor, not copy, 0 args",
+        defaultCtor != null && !defaultCtor.isCopyConstructor && defaultCtor.args.isEmpty()
+    )
+    val copyCtor = shapeCtors.find { it.isCopyConstructor }
+    check(
+        "copy ctor: isCopyConstructor with 1 reference arg",
+        copyCtor != null && copyCtor.args.singleOrNull()?.type?.isReference == true,
+        "got ${copyCtor?.args}"
+    )
+    val dtor = shape?.children?.filterIsInstance<WrappedDestructor>()?.singleOrNull()
+    check("Shape has a destructor and it is virtual", dtor?.isVirtual == true)
+
+    check(
+        "deleted operator= is filtered out",
+        shapeMethods.none { it.name == "operator=" }
+    )
+    check(
+        "Shape metadata: hasDeletedCopyAssignment (deleted operator=)",
+        shape?.metadata?.hasDeletedCopyAssignment == true
+    )
+    check(
+        "Shape metadata: hasPrivateConstField (private 'const int cache')",
+        shape?.metadata?.hasPrivateConstField == true
+    )
+    // ModelFactories only sets hasConstructor for a FILTERED ctor; Shape's are public.
+    check(
+        "Shape metadata: hasConstructor stays false for public-only ctors",
+        shape?.metadata?.hasConstructor == false
+    )
+    val shapeFields = shape?.children?.filterIsInstance<WrappedField>().orEmpty()
+    check(
+        "Shape public field 'id: int' is the only field (private ones filtered)",
+        shapeFields.singleOrNull()?.let { it.name == "id" && it.type.toString() == "int" } == true,
+        "got $shapeFields"
+    )
+
+    // -- geo: namespace nesting, block merging, members landing inside it.
+    val geos = tu.children.filterIsInstance<WrappedNamespace>().filter { it.namespace == "geo" }
+    check("both 'namespace geo' blocks merge into ONE WrappedNamespace", geos.size == 1)
+    val geo = geos.firstOrNull()
+    val geoFns = geo?.children?.filterIsInstance<WrappedMethod>().orEmpty()
+    check(
+        "geo holds add+enabled (from both blocks) as STATIC free functions",
+        geoFns.map { it.name }.sorted() == listOf("add", "enabled") &&
+            geoFns.all { it.methodType == MethodType.STATIC },
+        "got $geoFns"
+    )
+    val add = geoFns.find { it.name == "add" }
+    check(
+        "add(int a, int b) carries real parameter names",
+        add?.args?.map { it.name } == listOf("a", "b"),
+        "got ${add?.args}"
+    )
+
+    // -- Circle: derived class inside the namespace.
+    val circle = geo?.children?.filterIsInstance<WrappedClass>()?.find { it.name == "Circle" }
+    check("geo contains class Circle", circle != null)
+    check("Circle is not abstract (area overridden)", circle?.isAbstract == false)
+    val base = circle?.children?.filterIsInstance<WrappedBase>()?.singleOrNull()
+    check(
+        "Circle base: public, non-virtual, type Shape",
+        base != null && base.isPublic && !base.isVirtualBase && base.type?.toString() == "Shape",
+        "got ${base?.type} public=${base?.isPublic} virtual=${base?.isVirtualBase}"
+    )
+    val circleCtors = circle?.children?.filterIsInstance<WrappedConstructor>().orEmpty()
+    check(
+        "Circle keeps 1 public ctor (the private one is filtered)",
+        circleCtors.size == 1,
+        "got ${circleCtors.size}"
+    )
+    val circleCtor = circleCtors.firstOrNull()
+    check(
+        "Circle(double r): not copy, not default, 1 double arg named r",
+        circleCtor != null && !circleCtor.isCopyConstructor && !circleCtor.isDefaultConstructor &&
+            circleCtor.args.singleOrNull()
+                ?.let { it.name == "r" && it.type.toString() == "double" } == true,
+        "got ${circleCtor?.args}"
+    )
+    check(
+        "Circle metadata: hasConstructor (private ctor recorded)",
+        circle?.metadata?.hasConstructor == true
+    )
+    val circleFields = circle?.children?.filterIsInstance<WrappedField>().orEmpty()
+    check(
+        "Circle public fields are r + version (private 'cached' filtered)",
+        circleFields.map { it.name } == listOf("r", "version"),
+        "got $circleFields"
+    )
+    check(
+        "Circle metadata: hasDeletedCopyAssignment (public 'const int version')",
+        circle?.metadata?.hasDeletedCopyAssignment == true
+    )
+    val circleArea = circle?.children?.filterIsInstance<WrappedMethod>()
+        ?.find { it.name == "area" && it !is WrappedConstructor }
+    check("Circle's area override is virtual", circleArea?.isVirtual == true)
+
+    // -- TU-level free function (unchanged from brick 2).
     val freeFn = tu.children.filterIsInstance<WrappedMethod>().find { it.name == "freeFunction" }
     check(
         "freeFunction is a TU-level STATIC method",
@@ -115,6 +257,36 @@ fun main(args: Array<String>): Unit = memScoped {
 
     if (failures > 0) fail("$failures self-check(s) failed")
     println("cppfrontend: ALL SELF-CHECKS PASSED")
+}
+
+private fun printElements(
+    elements: List<com.monkopedia.krapper.generator.model.WrappedElement>,
+    indent: String
+) {
+    for (child in elements) {
+        when (child) {
+            is WrappedNamespace -> {
+                println("${indent}namespace ${child.namespace}")
+                printElements(child.children, "$indent  ")
+            }
+            is WrappedClass -> {
+                println(
+                    "${indent}class ${child.name}" +
+                        (if (child.isAbstract) " (abstract)" else "") +
+                        " (${child.children.size} members)"
+                )
+                printElements(child.children, "$indent  ")
+            }
+            is WrappedBase -> println("$indent: ${child.type} (public=${child.isPublic})")
+            is WrappedField -> println("${indent}val $child")
+            is WrappedMethod -> println(
+                "$indent$child [${child.methodType}]" +
+                    (if (child.isConst) " const" else "") +
+                    (if (child.isVirtual) " virtual" else "")
+            )
+            else -> println("$indent${child::class.simpleName}")
+        }
+    }
 }
 
 private fun fail(message: String): Nothing {
