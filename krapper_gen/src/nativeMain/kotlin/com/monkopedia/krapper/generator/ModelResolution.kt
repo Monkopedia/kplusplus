@@ -168,9 +168,9 @@ suspend fun WrappedClass.resolve(resolverContext: ResolveContext): ResolvedClass
         isAbstract,
         specifiedType?.let {
             // If no type, thats fine, but if type exists, it needs to resolve.
-            resolverContext.resolve(specifiedType) ?: return resolverContext.notifyFailed(
+            resolverContext.resolve(it) ?: return resolverContext.notifyFailed(
                 this,
-                specifiedType,
+                it,
                 "Specified class type resolve"
             )
         },
