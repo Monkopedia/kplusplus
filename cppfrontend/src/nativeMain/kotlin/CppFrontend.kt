@@ -43,7 +43,8 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
 // #44 brick 2, the front-end scaffold: parse the fixture with Clang's C++ AST (on the
 // kplusplus-generated libclang-cpp bindings), CONSTRUCT :krapper_model's WrappedTU from
 // the walk, and serialize it to JSON — the end-to-end skeleton the next bricks fill in.
-fun main(): Unit = memScoped {
+@Suppress("UNUSED_PARAMETER")
+fun main(args: Array<String>): Unit = memScoped {
     val unit = buildASTFromCode(FIXTURE_HEADER, "fixture.h")
         ?: return@memScoped fail("buildASTFromCode returned null")
     val context = unit.getASTContext()
