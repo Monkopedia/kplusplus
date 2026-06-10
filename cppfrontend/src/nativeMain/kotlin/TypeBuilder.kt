@@ -43,13 +43,15 @@ private fun Type.asRecord(): CXXRecordDecl? =
     getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr, memScope) }
 
 // BRIDGE: the generated down-cast helper `Type.asTypedefType()` is missing — TypedefType's
-// base list doesn't survive resolution (`class TypedefType final : public Type, ...,
-// private llvm::TrailingObjects<...>`), so CastTargets never records Type as its base and
-// emits neither TypedefType.asType() nor the inverse dyn-cast (binding gap to fix in
-// krapper_gen). Bridge with the exact mechanism the generated `B_dyncast_D` helper uses:
+// base list doesn't survive resolution (TypeBase.h: `class TypedefType final : public
+// TypeWithKeyword, private llvm::TrailingObjects<...>`; the chain is TypedefType ->
+// TypeWithKeyword -> KeywordWrapper<Type> -> Type), so CastTargets never records Type as a
+// base and emits neither TypedefType.asType() nor the inverse dyn-cast (binding gap to fix
+// in krapper_gen). Bridge with the exact mechanism the generated `B_dyncast_D` helper uses:
 // TypedefType's static llvm `classof` (bound on its companion), then re-view the SAME
-// pointer as the derived class (Type is TypedefType's primary base, so the address is
-// identical — precisely what the generated llvm::dyn_cast helper compiles to).
+// pointer as the derived class — safe because Type is the address-identical primary base
+// through that whole chain (KeywordHelpers contributes no state, so EBO applies) —
+// precisely what the generated llvm::dyn_cast helper compiles to.
 private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companion) {
     if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
 }
