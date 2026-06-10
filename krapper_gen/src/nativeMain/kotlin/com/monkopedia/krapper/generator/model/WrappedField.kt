@@ -15,30 +15,18 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import clang.CXCursor
 import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedArgument
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldGetter
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedFieldSetter
 import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
-import com.monkopedia.krapper.generator.spelling
-import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.type
-import kotlinx.cinterop.CValue
 import kotlinx.serialization.Transient
 
 data class WrappedField(val name: String, val type: WrappedType) : WrappedElement() {
     @Transient
     internal val other = Any()
-
-    constructor(field: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        field.referenced.spelling.toKString() ?: error("Can't find name for $field"),
-        WrappedType(field.type, resolverBuilder)
-    )
 
     override fun clone(): WrappedElement = WrappedField(name, type).also {
         it.addAllChildren(children)

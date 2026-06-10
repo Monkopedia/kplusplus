@@ -15,28 +15,17 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import clang.CXCursor
-import clang.CXCursorKind
 import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.STRING_VIEW_TYPES
-import com.monkopedia.krapper.generator.children
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.codegen.STACK_CONSTRUCTOR_CALLBACK
-import com.monkopedia.krapper.generator.isConst
-import com.monkopedia.krapper.generator.isStatic
-import com.monkopedia.krapper.generator.isVirtual
-import com.monkopedia.krapper.generator.kind
-import com.monkopedia.krapper.generator.lexicalParent
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.UNRESOLVABLE
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.VOID
-import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
-import com.monkopedia.krapper.generator.referenced
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.DIRECT
 import com.monkopedia.krapper.generator.resolvedmodel.AllocationStyle.STACK
@@ -65,14 +54,6 @@ import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP
 import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle.VOIDP_REFERENCE
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
-import com.monkopedia.krapper.generator.result
-import com.monkopedia.krapper.generator.semanticParent
-import com.monkopedia.krapper.generator.spelling
-import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.tokenSpellings
-import com.monkopedia.krapper.generator.type
-import com.monkopedia.krapper.generator.usr
-import kotlinx.cinterop.CValue
 
 val WrappedElement.parentClass: WrappedClass?
     get() = (parent as? WrappedClass) ?: parent?.parentClass
@@ -328,32 +309,6 @@ open class WrappedMethod(
     // returnViaMemberCall.
     var rangeElementType: String? = null
 
-    constructor(method: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        method.referenced.spelling.toKString() ?: error("Can't find name of $method"),
-        rangeVectorReturn(method) ?: WrappedType(method.type.result, resolverBuilder).let {
-            // A `const` method says nothing about its RETURN type's constness. Const on
-            // a by-value (non-pointer/reference) return is meaningless for the returned
-            // temporary (G8) and actively breaks the by-value Holder path — placement-new
-            // into a `const T*` is ill-formed. Only carry method-derived const for a
-            // pointer/reference return, where const-of-pointee can matter; strip it on a
-            // by-value return.
-            if (method.isConst && (it.isPointer || it.isReference)) const(it) else it
-        },
-        if (method.isStatic ||
-            (method.semanticParent.kind !in clsParents && method.lexicalParent.kind !in clsParents)
-        ) {
-            MethodType.STATIC
-        } else {
-            MethodType.METHOD
-        }
-    ) {
-        isVirtual = method.isVirtual
-        isConst = method.isConst
-        // T1.3: an `iterator_range<It>` return is materialized into the
-        // `std::vector<Elem*>` produced above; record Elem so CppWriter emits the loop.
-        rangeElementType = extractRangeReturn(method.type.result)?.elementSpelling
-    }
-
     open fun copy(
         name: String = this.name,
         returnType: WrappedType = this.returnType,
@@ -522,27 +477,6 @@ open class WrappedMethod(
     }
 
     override fun toString(): String = "fun $name(${args.joinToString(", ")}): $returnType"
-
-    companion object {
-        private val clsParents = listOf(
-            CXCursorKind.CXCursor_ClassTemplate,
-            CXCursorKind.CXCursor_ClassDecl,
-            CXCursorKind.CXCursor_StructDecl
-        )
-
-        // T1.3: if [method] returns `llvm::iterator_range<It>`, build the materialized
-        // `std::vector<Elem*>` return type (a real template type, so it resolves through
-        // the existing vector-instantiation/CppVector path — yielding a `for`-iterable on
-        // the Kotlin side). Returns null for any non-range return, so the caller falls
-        // back to the normal return-type construction.
-        private fun rangeVectorReturn(method: CValue<CXCursor>): WrappedType? {
-            val range = extractRangeReturn(method.type.result) ?: return null
-            return WrappedTemplateType(
-                WrappedType("std::vector"),
-                listOf(pointerTo(WrappedType(range.elementSpelling)))
-            )
-        }
-    }
 }
 
 class WrappedArgument(
@@ -555,14 +489,6 @@ class WrappedArgument(
     // KotlinWriter maps a renderable subset of these to Kotlin default values.
     val defaultValue: String? = null
 ) : WrappedElement() {
-    constructor(arg: CValue<CXCursor>, resolverBuilder: ResolverBuilder, index: Int = 0) : this(
-        arg.spelling.toKString()?.takeIf { it.isNotBlank() } ?: "_arg_$index",
-        WrappedType(arg.type, resolverBuilder),
-        arg.usr.toKString() ?: "",
-        hasDefault(arg),
-        defaultValue(arg)
-    )
-
     // True only when this param can be SAFELY left off the generated C++ call because
     // the C++ method genuinely has a trailing C++ default for it. Stricter than the raw
     // [hasDefault]: that flag is derived from a cursor-children heuristic that ALSO fires
@@ -765,29 +691,6 @@ class WrappedArgument(
             hasDefault,
             defaultValue
         )
-    }
-
-    companion object {
-        private val nonDefaultChildKinds = listOf(
-            CXCursorKind.CXCursor_TypeRef,
-            CXCursorKind.CXCursor_TemplateRef,
-            CXCursorKind.CXCursor_NamespaceRef
-        )
-
-        private fun defaultExpr(value: CValue<CXCursor>): CValue<CXCursor>? {
-            val last = value.children.lastOrNull() ?: return null
-            return last.takeIf { it.kind !in nonDefaultChildKinds }
-        }
-
-        fun hasDefault(value: CValue<CXCursor>): Boolean = defaultExpr(value) != null
-
-        // Recovers the C++ source text of the parameter's default-value expression by
-        // tokenizing the default sub-expression cursor's extent (libclang exposes no
-        // direct accessor). Returns null when there is no default.
-        fun defaultValue(value: CValue<CXCursor>): String? {
-            val expr = defaultExpr(value) ?: return null
-            return expr.tokenSpellings().joinToString("").takeIf { it.isNotBlank() }
-        }
     }
 }
 

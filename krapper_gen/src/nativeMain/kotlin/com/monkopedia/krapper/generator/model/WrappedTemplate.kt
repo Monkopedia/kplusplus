@@ -15,10 +15,7 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import clang.CXCursor
-import clang.CXTypeKind
 import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.ResolverBuilder
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -26,12 +23,6 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplate
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTemplateParam
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTypedef
-import com.monkopedia.krapper.generator.spelling
-import com.monkopedia.krapper.generator.toKString
-import com.monkopedia.krapper.generator.type
-import com.monkopedia.krapper.generator.usr
-import kotlinx.cinterop.CValue
-import kotlinx.cinterop.useContents
 
 data class WrappedTemplate(val name: String) : WrappedElement() {
     val baseClass: WrappedType?
@@ -57,10 +48,6 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
     val methods: List<WrappedMethod>
         get() = children.filterIsInstance<WrappedMethod>()
     var templateArgCounter = 0
-
-    constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        value.spelling.toKString() ?: error("Missing name")
-    )
 
     override suspend fun resolve(resolverContext: ResolveContext): ResolvedTemplate? {
         return ResolvedTemplate(
@@ -121,11 +108,6 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         }
     val otherParams = mutableListOf<WrappedTemplateParam>()
 
-    constructor(value: CValue<CXCursor>, resolverBuilder: ResolverBuilder) : this(
-        value.spelling.toKString() ?: error("Template param without name $value"),
-        value.usr.toKString() ?: error("Template param without USR $value")
-    )
-
     override fun clone(): WrappedTemplateParam = WrappedTemplateParam(name, usr).also {
         it.addAllChildren(children)
         it.parent = parent
@@ -149,32 +131,9 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
     fun merge(child: WrappedTemplateParam) {
         otherParams.add(child)
     }
-
-    companion object {
-        private fun determineType(
-            value: CValue<CXCursor>,
-            resolverBuilder: ResolverBuilder
-        ): WrappedType? {
-            val type = value.type
-            type.useContents {
-                if (kind == CXTypeKind.CXType_Invalid) {
-                    return@determineType null
-                }
-            }
-            return WrappedType(type, resolverBuilder)
-        }
-    }
 }
 
 class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedElement() {
-    constructor(
-        value: CValue<CXCursor>,
-        resolverBuilder: ResolverBuilder
-    ) : this(
-        value.spelling.toKString() ?: error("Template param without name $value"),
-        determineType(value, resolverBuilder)
-    )
-
     override fun clone(): WrappedTypedef = WrappedTypedef(name, targetType).also {
         it.addAllChildren(children)
         it.parent = parent
@@ -191,12 +150,5 @@ class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedEle
                 "Failed to resolve typedef"
             )
         )
-    }
-
-    companion object {
-        private fun determineType(
-            value: CValue<CXCursor>,
-            resolverBuilder: ResolverBuilder
-        ): WrappedType = WrappedType(value.type, resolverBuilder)
     }
 }
