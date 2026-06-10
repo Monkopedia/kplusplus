@@ -142,7 +142,30 @@ kplusplus {
         // getTemplateArgs() -> TemplateArgument::getAsType() per argument.
         "clang::ClassTemplateSpecializationDecl",
         "clang::TemplateArgument",
-        "clang::TemplateArgumentList"
+        "clang::TemplateArgumentList",
+        // NEW for brick 5 (template DECLARATIONS): a `template <typename T> class` is a
+        // ClassTemplateDecl whose getTemplatedDecl() is the pattern CXXRecordDecl;
+        // getTemplateParameters() lives on TemplateDecl (the primary base, reached by
+        // re-view — see ModelBuilder) and yields a TemplateParameterList (size/getParam).
+        // TemplateTypeParmDecl is each type param's decl; TemplateTypeParmType is the
+        // DEPENDENT `T` in member signatures, whose getDecl() keys the WrappedTemplateRef
+        // back to the matching WrappedTemplateParam.
+        "clang::TemplateDecl",
+        "clang::ClassTemplateDecl",
+        "clang::TemplateParameterList",
+        "clang::TemplateTypeParmDecl",
+        "clang::TemplateTypeParmType",
+        // NEW for brick 5 (enums): an enum-typed leaf reaches its EnumDecl through
+        // EnumType::getDecl() (the Type-side dyn-cast is bridged by TypeClass check —
+        // TypeBuilder); EnumDecl carries getIntegerType() (the underlying type,
+        // clang_getEnumDeclIntegerType's source) and its DeclContext holds the
+        // EnumConstantDecls. llvm::APSInt is EnumConstantDecl::getInitVal()'s carrier;
+        // only its OWN surface is needed (getExtValue — see TypeBuilder's value bridge),
+        // so the heavy llvm::APInt base stays unbound.
+        "clang::EnumDecl",
+        "clang::EnumConstantDecl",
+        "clang::EnumType",
+        "llvm::APSInt"
     )
     // Materialize the range returns the walk iterates. Brick 3 walks members through
     // DeclContext::decls() (source order, all member kinds) instead of methods(), so the

@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import com.monkopedia.krapper.generator.model.ClassMetadata
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -22,6 +23,9 @@ import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
+import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.WrappedTemplateParam
+import com.monkopedia.krapper.generator.model.WrappedTypedef
 import kotlinx.serialization.Serializable
 
 // JSON projection of the parse-output model (#44 brick 2). The WrappedElement hierarchy
@@ -63,7 +67,26 @@ fun WrappedElement.serialized(): SerializedElement {
             "class",
             name = name,
             isAbstract = isAbstract,
-            metadata = metadataFlags().takeIf { it.isNotEmpty() },
+            metadata = metadata.flags().takeIf { it.isNotEmpty() },
+            children = kids
+        )
+        // Brick 5: template declarations + their params, and typedef elements.
+        is WrappedTemplate -> SerializedElement(
+            "template",
+            name = name,
+            metadata = metadata.flags().takeIf { it.isNotEmpty() },
+            children = kids
+        )
+        is WrappedTemplateParam -> SerializedElement(
+            "templateParam",
+            name = name,
+            usr = usr,
+            children = kids
+        )
+        is WrappedTypedef -> SerializedElement(
+            "typedef",
+            name = name,
+            type = targetType.toString(),
             children = kids
         )
         is WrappedNamespace -> SerializedElement("namespace", name = namespace, children = kids)
@@ -112,14 +135,14 @@ fun WrappedElement.serialized(): SerializedElement {
     }
 }
 
-private fun WrappedClass.metadataFlags(): List<String> = buildList {
-    if (metadata.hasHiddenNew) add("hasHiddenNew")
-    if (metadata.hasHiddenDelete) add("hasHiddenDelete")
-    if (metadata.hasConstructor) add("hasConstructor")
-    if (metadata.hasPrivateConstField) add("hasPrivateConstField")
-    if (metadata.hasDefaultConstructor) add("hasDefaultConstructor")
-    if (metadata.hasCopyConstructor) add("hasCopyConstructor")
-    if (metadata.hasDeletedCopyConstructor) add("hasDeletedCopyConstructor")
-    if (metadata.hasDeletedCopyAssignment) add("hasDeletedCopyAssignment")
-    if (metadata.hasDeletedDefaultConstructor) add("hasDeletedDefaultConstructor")
+private fun ClassMetadata.flags(): List<String> = buildList {
+    if (hasHiddenNew) add("hasHiddenNew")
+    if (hasHiddenDelete) add("hasHiddenDelete")
+    if (hasConstructor) add("hasConstructor")
+    if (hasPrivateConstField) add("hasPrivateConstField")
+    if (hasDefaultConstructor) add("hasDefaultConstructor")
+    if (hasCopyConstructor) add("hasCopyConstructor")
+    if (hasDeletedCopyConstructor) add("hasDeletedCopyConstructor")
+    if (hasDeletedCopyAssignment) add("hasDeletedCopyAssignment")
+    if (hasDeletedDefaultConstructor) add("hasDeletedDefaultConstructor")
 }
