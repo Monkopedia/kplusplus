@@ -16,7 +16,8 @@
 import clang.CXXRecordDecl
 import clang.QualType
 import clang.Type
-import clang.TypedefNameDecl
+import clang.TypedefType
+import clang.templateArgument.ArgKind
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.UNRESOLVABLE
@@ -40,6 +41,18 @@ private fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr, m
 // dyn-cast helpers + NamedDecl upcasts resolve.
 private fun Type.asRecord(): CXXRecordDecl? =
     getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr, memScope) }
+
+// BRIDGE: the generated down-cast helper `Type.asTypedefType()` is missing — TypedefType's
+// base list doesn't survive resolution (`class TypedefType final : public Type, ...,
+// private llvm::TrailingObjects<...>`), so CastTargets never records Type as its base and
+// emits neither TypedefType.asType() nor the inverse dyn-cast (binding gap to fix in
+// krapper_gen). Bridge with the exact mechanism the generated `B_dyncast_D` helper uses:
+// TypedefType's static llvm `classof` (bound on its companion), then re-view the SAME
+// pointer as the derived class (Type is TypedefType's primary base, so the address is
+// identical — precisely what the generated llvm::dyn_cast helper compiles to).
+private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companion) {
+    if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
+}
 
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
@@ -68,7 +81,7 @@ fun buildWrappedType(type: QualType): WrappedType {
     // the SUGARED spelling (`endsWith("*")`/`endsWith("&")`) — and an alias spells its own
     // name, never taking those branches. TypedefType covers both `typedef` and `using`
     // (both are TypedefNameDecls).
-    val typedef = ty.asTypedefType()?.getDecl()?.let { TypedefNameDecl(it.ptr, type.memScope) }
+    val typedef = ty.asTypedefTypeOrNull()?.getDecl()
     if (typedef == null) {
         // invoke: CXType_RValueReference throws "RValues unsupported" -> UNRESOLVABLE
         // under the call sites' throwOnError=false.
@@ -113,20 +126,21 @@ fun buildWrappedType(type: QualType): WrappedType {
         // (surfaced as a ClassDecl/StructDecl cursor) -> WrappedType(referencedDecl
         // .fullyQualified); NamedDecl::getQualifiedNameAsString() is the Decl-side spelling
         // of that same semantic-parent walk (template args are not part of either).
-        val baseName = spec.asNamedDecl().getQualifiedNameAsString() ?: return UNRESOLVABLE
-        val argList = spec.getTemplateArgs()
+        val baseName = spec.getQualifiedNameAsString() ?: return UNRESOLVABLE
+        val argList = spec.getTemplateArgs() ?: return UNRESOLVABLE
         val args = (0u until argList.size()).mapNotNull { i ->
-            // TypeFactories keeps only TYPE arguments (getTemplateArgumentType yields
-            // CXType_Invalid for value args -> filterNotNull). Mirroring that filter needs
-            // TemplateArgument::getKind()'s ArgKind enum surface; the fixture's templates
-            // are type-arg-only, so non-type-arg filtering is a brick-5 residual here.
-            argList.get(i)?.getAsType()?.let { buildWrappedType(it) }
+            // TypeFactories keeps only TYPE arguments: getTemplateArgumentType yields
+            // CXType_Invalid for a value arg, and the invalid slot is dropped
+            // (filterNotNull) — the ArgKind.Type filter is that same rule decl-side.
+            val arg = argList.get(i) ?: return@mapNotNull null
+            if (arg.getKind() != ArgKind.Type) return@mapNotNull null
+            buildWrappedType(arg.getAsType())
         }
         return WrappedTemplateType(WrappedTypeReference(baseName), args).maybeConst(isConst)
     }
 
     if (typedef != null) {
-        val name = typedef.asNamedDecl().getNameAsString() ?: ""
+        val name = typedef.getNameAsString() ?: ""
         // sizeTypedefElement: `size_type`/`difference_type` ALWAYS normalize to the
         // `size_t`/`ptrdiff_t` aliases (so they surface as platform.posix.<name>).
         when (name) {
@@ -161,14 +175,14 @@ fun buildWrappedType(type: QualType): WrappedType {
         // "int [5]") — WrappedTypeReference models the array parsing on that exact name.
         // Reconstruct the same spelling structurally from element + extent.
         val array = canonTy.asConstantArrayType() ?: return UNRESOLVABLE
-        val element = buildWrappedType(array.asArrayType().getElementType())
+        val element = buildWrappedType(array.getElementType())
         return WrappedTypeReference("$element [${array.getZExtSize()}]").maybeConst(isConst)
     }
     canonTy?.asRecord()?.let { record ->
         // Record leaf: createForType's CXCursor_ClassDecl/StructDecl branches ->
         // WrappedType(referencedDecl.fullyQualified) — the "::"-joined semantic-parent
         // chain, which is exactly NamedDecl::getQualifiedNameAsString().
-        val qualified = record.asNamedDecl().getQualifiedNameAsString() ?: return UNRESOLVABLE
+        val qualified = record.getQualifiedNameAsString() ?: return UNRESOLVABLE
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
