@@ -480,13 +480,14 @@ fun main(args: Array<String>): Unit = memScoped {
         "got $setScaleArg"
     )
 
-    // Constant array: the libclang leaf spelling is "int [4]" (krapper_gen TestData
-    // golden "int [5]"); WrappedTypeReference parses element/extent off that name.
+    // Constant array: LLVM-22's libclang leaf spelling is "int[4]" — no space (pinned by
+    // the golden compare; the old TestData golden "int [5]" predates the TypePrinter
+    // change). WrappedTypeReference parses element/extent off that name either way.
     val corners = sceneFields.find { it.name == "corners" }?.type
     check(
-        "int[4] field: WrappedTypeReference(\"int [4]\") with isArray, size 4, element int",
+        "int[4] field: WrappedTypeReference(\"int[4]\") with isArray, size 4, element int",
         (corners as? WrappedTypeReference)?.let {
-            it.name == "int [4]" && it.isArray && it.arraySize == 4 && it.arrayType.name == "int"
+            it.name == "int[4]" && it.isArray && it.arraySize == 4 && it.arrayType.name == "int"
         } == true,
         "got $corners"
     )

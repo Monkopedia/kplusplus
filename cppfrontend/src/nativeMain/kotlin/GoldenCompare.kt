@@ -18,6 +18,7 @@ import kotlin.system.exitProcess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.set
 import kotlinx.cinterop.toKString
 import kotlinx.serialization.json.Json
 import platform.posix.fclose
@@ -44,9 +45,16 @@ import platform.posix.fread
 //    to POSITIONAL tokens ("tp:0", document order) on both sides — preserving the
 //    structural keying the resolver depends on — while arg usrs (referenced by nothing)
 //    are masked to null.
-// N2 IDENTITY-IN-SPELLINGS (WrappedTemplateRef.toString = "template<target>" embeds the
-//    param usr in type/returnType spellings, e.g. Holder's `T get()` return). The same
-//    positional rewrite as N1 is applied inside every type string.
+// N2 TEMPLATE-REF KEYING IN SPELLINGS (WrappedTemplateRef.toString = "template<target>"
+//    embeds the ref's key in type/returnType spellings, e.g. Holder's `T get()` return).
+//    The libclang path keys a dependent-T ref EITHER on the param's USR (TypeFactories'
+//    CXCursor_TemplateTypeParameter branch) OR on its bare NAME ("template<T>", the
+//    CXType_Unexposed/NoDeclFound fallback — which is what every dependent use inside a
+//    ClassTemplate's members actually hits, libclang not resolving the dependent decl);
+//    this front-end always keys on identity (TypeBuilder's TemplateTypeParmType branch).
+//    The resolver accepts BOTH keys (Parsing.typedAs maps the param's name AND usr to the
+//    same substitution), so within a template's subtree, "template<usr>" and
+//    "template<name>" of each of its params rewrite to the same positional token.
 // N3 CURSOR-WALK TYPE RESIDUE (dropped child elements). ModelFactories.mapAll attaches
 //    elements for CXCursor_TypeRef (-> WrappedTemplateRef) and CXCursor_TemplateRef
 //    (-> WrappedType) cursors when their parent cursor maps to a real element — stray
@@ -59,7 +67,20 @@ import platform.posix.fread
 //    separators (ModelFactories.defaultValue: joinToString("")); this front-end reads the
 //    raw SOURCE text (kppbridge::defaultArgText over the default-arg range), which keeps
 //    the author's spacing. Whitespace is stripped from defaultValue on both sides.
+// N5 USING-ALIAS COLLAPSE ORDER-DEPENDENCE (the documented brick-5/6 divergence). A
+//    `using` alias produces no typedef ELEMENT on either path, but as a type USE the
+//    libclang path's reducer collapse (ResolverBuilderImpl.visit) is ORDER-DEPENDENT —
+//    for the fixture's `using HandlerFn = int (*)(double)` the leaf survives as the
+//    alias NAME ("HandlerFn"), while this front-end deterministically collapses to the
+//    canonical spelling ("int (*)(double)", TypeBuilder's typedef branch). Normalized by
+//    the fixture's alias table below; durable convergence (deterministic collapse on the
+//    libclang path, or alias preservation here) is a Phase D tail item (#46).
 // ===================================================================================
+
+// N5's fixture-scoped `using`-alias spellings: alias-name leaf -> canonical collapse.
+private val USING_ALIAS_SPELLINGS = mapOf(
+    "HandlerFn" to "int (*)(double)"
+)
 
 // The element kinds ModelSerializer names explicitly — everything both front-ends MODEL.
 // Any other kind (the serializer's `else` branch spells the class name, e.g.
@@ -97,49 +118,59 @@ fun goldenCompare(cppPath: String, libclangPath: String): Nothing {
 
 // ---- Normalization (the ledger, executable) ----
 
-private fun SerializedElement.normalized(): SerializedElement {
-    // N1: collect template-param usrs in document order -> positional tokens.
-    val paramUsrs = mutableListOf<String>()
-    collectTemplateParamUsrs(this, paramUsrs)
-    // Longest-first so one usr being a prefix of another (e.g. "cpp:7"/"cpp:75") can't
-    // corrupt the in-spelling rewrite (N2).
-    val rewrites = paramUsrs.withIndex()
-        .sortedByDescending { it.value.length }
-        .map { (i, usr) -> usr to "tp:$i" }
-    return normalize(this, rewrites)
-}
+private fun SerializedElement.normalized(): SerializedElement = normalize(this, emptyList(), Counter())
 
-private fun collectTemplateParamUsrs(element: SerializedElement, out: MutableList<String>) {
-    if (element.kind == "templateParam") {
-        element.usr?.takeIf { it.isNotEmpty() && it !in out }?.let(out::add)
-    }
-    for (child in element.children) collectTemplateParamUsrs(child, out)
+private class Counter {
+    var next = 0
 }
 
 private fun normalize(
     element: SerializedElement,
-    paramRewrites: List<Pair<String, String>>
+    inherited: List<Pair<String, String>>,
+    counter: Counter
 ): SerializedElement {
-    fun String.rewriteUsrs(): String {
+    // N1+N2: entering a template scope assigns each of its params a positional token
+    // (document order — identical on both sides, both walks being source-ordered) and
+    // registers the rewrites: the param's usr (either side's identity string), and the
+    // exact "template<name>" spelling (the libclang name-keyed ref form). The bare name
+    // is never rewritten outside the template<...> wrapper — "T" alone is too short to
+    // substring-replace safely.
+    val rewrites = if (element.kind == "template") {
+        inherited + element.children.filter { it.kind == "templateParam" }.flatMap { param ->
+            val token = "tp:${counter.next++}"
+            listOfNotNull(
+                param.usr?.takeIf { it.isNotEmpty() }?.let { it to token },
+                param.name?.let { "template<$it>" to "template<$token>" }
+            )
+        }
+    } else {
+        inherited
+    }
+    fun String.rewriteKeys(): String {
+        // Longest-first so one key being a prefix of another (e.g. "cpp:7"/"cpp:75")
+        // can't corrupt the rewrite.
         var result = this
-        for ((usr, token) in paramRewrites) result = result.replace(usr, token)
+        for ((key, token) in rewrites.sortedByDescending { it.first.length }) {
+            result = result.replace(key, token)
+        }
         return result
     }
+    // N5: a whole-leaf `using`-alias spelling normalizes to its canonical collapse.
+    fun String.collapseAliases(): String = USING_ALIAS_SPELLINGS[this] ?: this
     return element.copy(
-        // N2: identity embedded in type spellings (WrappedTemplateRef.toString).
-        type = element.type?.rewriteUsrs(),
-        returnType = element.returnType?.rewriteUsrs(),
+        type = element.type?.collapseAliases()?.rewriteKeys(),
+        returnType = element.returnType?.collapseAliases()?.rewriteKeys(),
         // N4: whitespace-insensitive default values.
         defaultValue = element.defaultValue?.filterNot { it.isWhitespace() },
-        // N1: positional template-param identity; arg identity masked entirely.
+        // N1: positional template-param identity; all other identity masked entirely.
         usr = when (element.kind) {
-            "templateParam" -> element.usr?.rewriteUsrs()
+            "templateParam" -> element.usr?.rewriteKeys()
             else -> null
         },
         // N3: drop cursor-walk type residue, recurse into the real model children.
         children = element.children
             .filter { it.kind in MODEL_KINDS }
-            .map { normalize(it, paramRewrites) }
+            .map { normalize(it, rewrites, counter) }
     )
 }
 
@@ -206,7 +237,7 @@ internal fun readFile(path: String): String = memScoped {
         while (true) {
             val read = fread(buffer, 1u, bufferSize.toULong(), file)
             if (read == 0uL) break
-            buffer[read.toInt()] = 0
+            buffer[read.toInt()] = 0.toByte()
             builder.append(buffer.toKString())
         }
         builder.toString()

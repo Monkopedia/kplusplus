@@ -172,12 +172,14 @@ fun buildWrappedType(type: QualType): WrappedType {
 
     if (canonTy != null && canonTy.isConstantArrayType()) {
         // A constant array falls through createForType to `else -> WrappedType(spelling)`,
-        // and libclang's TypePrinter spells it "elem [N]" (krapper_gen TestData golden:
-        // "int [5]") — WrappedTypeReference models the array parsing on that exact name.
+        // and LLVM-22's TypePrinter spells it "elem[N]" with NO space — proven by the
+        // golden compare against the live libclang dump ("int[4]"; the krapper_gen
+        // TestData golden "int [5]" predates the printer change). WrappedTypeReference's
+        // array parsing (indexOf('[') + trim) accepts either spelling.
         // Reconstruct the same spelling structurally from element + extent.
         val array = canonTy.asConstantArrayType() ?: return UNRESOLVABLE
         val element = buildWrappedType(array.getElementType())
-        return WrappedTypeReference("$element [${array.getZExtSize()}]").maybeConst(isConst)
+        return WrappedTypeReference("$element[${array.getZExtSize()}]").maybeConst(isConst)
     }
     canonTy?.asRecord()?.let { record ->
         // Record leaf: createForType's CXCursor_ClassDecl/StructDecl branches ->

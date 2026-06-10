@@ -219,7 +219,8 @@ kplusplus {
 // any construction drift between ModelFactories/TypeFactories and ModelBuilder/TypeBuilder
 // fails this task. Gated with the module (-PenableClang).
 val goldenDir = layout.buildDirectory.dir("golden").get().asFile
-val cppfrontendBinary = layout.buildDirectory.file("bin/klinker/cppfrontendRelease").get().asFile
+val cppfrontendBinary = layout.buildDirectory
+    .file("bin/klinker/cppfrontendRelease/cppfrontend").get().asFile
 val krapperGenKexe = rootProject.layout.projectDirectory
     .file("krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe").asFile
 
