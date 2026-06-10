@@ -26,6 +26,7 @@ import com.monkopedia.krapper.ReplaceChild
 import com.monkopedia.krapper.ScriptOriginOptionsFix
 import com.monkopedia.krapper.StripConstFromReturnType
 import com.monkopedia.krapper.addMapping
+import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode.REINT_CAST
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.METHOD

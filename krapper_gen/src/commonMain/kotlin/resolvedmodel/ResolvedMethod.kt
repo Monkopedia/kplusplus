@@ -24,15 +24,9 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-enum class MethodType {
-    CONSTRUCTOR,
-    DESTRUCTOR,
-    METHOD,
-    STATIC_OP,
-    STATIC,
-    SIZE_OF,
-    ALIGN_OF
-}
+// MethodType and AllocationStyle live in :krapper_model (the parse-output model module):
+// they are carried as data on the Wrapped model (WrappedMethod.methodType /
+// WrappedConstructor.allocationStyle) as well as here on the resolved schema.
 
 enum class ReturnStyle {
     VOID,
@@ -49,11 +43,6 @@ enum class ReturnStyle {
     // integer, so the call result (the real enum type) is cast back to it. Needed
     // because a scoped enum does not implicitly convert to its integer.
     ENUM_RETURN
-}
-
-enum class AllocationStyle {
-    DIRECT,
-    STACK
 }
 
 @Serializable

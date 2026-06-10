@@ -41,6 +41,7 @@ import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement

@@ -15,9 +15,6 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedTU
-
 class WrappedTU : WrappedElement() {
     operator fun plus(other: WrappedTU): WrappedTU = WrappedTU().also {
         it.addAllChildren(children)
@@ -30,9 +27,5 @@ class WrappedTU : WrappedElement() {
     override fun clone(): WrappedElement = WrappedTU().also {
         it.addAllChildren(children)
         it.parent = parent
-    }
-
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedTU = ResolvedTU().also {
-        it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
     }
 }

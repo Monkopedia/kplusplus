@@ -30,6 +30,7 @@ import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTemplate
+import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType

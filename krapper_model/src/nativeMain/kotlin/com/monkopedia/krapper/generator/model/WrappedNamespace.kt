@@ -15,9 +15,6 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.ResolveContext
-import com.monkopedia.krapper.generator.resolvedmodel.ResolvedNamespace
-
 class WrappedNamespace(val namespace: String) : WrappedElement() {
     val fullyQualified: String
         get() = withParents.mapNotNull { it.named }.joinToString("::")
@@ -35,11 +32,6 @@ class WrappedNamespace(val namespace: String) : WrappedElement() {
         it.addAllChildren(children)
         it.parent = parent
     }
-
-    override suspend fun resolve(resolverContext: ResolveContext): ResolvedNamespace =
-        ResolvedNamespace(namespace).also {
-            it.addAllChildren(children.mapNotNull { it.resolve(resolverContext) })
-        }
 
     override fun toString(): String = "nm($namespace)"
 }

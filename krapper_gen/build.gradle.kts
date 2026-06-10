@@ -83,6 +83,8 @@ kotlin {
     }
     jvm()
     sourceSets["commonMain"].dependencies {
+        // The pure parse-output model (front-end seam, issue #44 brick 1b).
+        api(project(":krapper_model"))
         implementation(libs.coroutines.core)
         implementation(libs.serialization.json)
         api(kotlin("stdlib"))
