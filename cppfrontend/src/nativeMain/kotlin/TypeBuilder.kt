@@ -15,19 +15,12 @@
  */
 import clang.CXXRecordDecl
 import clang.Decl
-import clang.EnumConstantDecl
 import clang.EnumDecl
-import clang.EnumType
-import clang.NamedDecl
 import clang.QualType
-import clang.TagDecl
-import clang.TemplateTypeParmType
 import clang.Type
 import clang.TypedefNameDecl
 import clang.TypedefType
-import clang.decl.Kind
 import clang.templateArgument.ArgKind
-import clang.type.TypeClass
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
@@ -68,23 +61,6 @@ private fun Type.asRecord(): CXXRecordDecl? =
 private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companion) {
     if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
 }
-
-// BRIDGE: the same generated-helper gap as TypedefType above, for the brick-5 type
-// classes — EnumType (TypeBase.h: `class EnumType final : public TagType`, the same
-// TypeWithKeyword chain CastTargets can't resolve) and TemplateTypeParmType (TypeBase.h:
-// `: public Type, public llvm::FoldingSetNode`, the unbound second base). Each check is
-// EXACTLY what the class's static `classof` compiles to (`getTypeClass() == Enum` /
-// `== TemplateTypeParm`), and Type is the address-identical primary base of both, so the
-// kind check + same-pointer re-view is precisely the generated dyn-cast's semantics.
-private fun Type.asEnumTypeOrNull(): EnumType? =
-    if (getTypeClass() == TypeClass.Enum) EnumType(ptr, memScope) else null
-
-private fun Type.asTemplateTypeParmTypeOrNull(): TemplateTypeParmType? =
-    if (getTypeClass() == TypeClass.TemplateTypeParm) {
-        TemplateTypeParmType(ptr, memScope)
-    } else {
-        null
-    }
 
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
@@ -182,9 +158,9 @@ fun buildWrappedType(type: QualType): WrappedType {
     // front-end's identity is the same cpp:<canonical-id> convention (ModelBuilder.kt), so
     // the ref and the param agree. Read off the SUGARED type: the canonical
     // TemplateTypeParmType carries no decl (TypeBase.h: `assert(!TTPDecl == Canon.isNull())`).
-    ty.asTemplateTypeParmTypeOrNull()?.let { parm ->
+    ty.asTemplateTypeParmType()?.let { parm ->
         val decl = parm.getDecl() ?: return UNRESOLVABLE
-        return WrappedTemplateRef(Decl(decl.ptr, ty.memScope).cppUsr()).maybeConst(isConst)
+        return WrappedTemplateRef(decl.asDecl().cppUsr()).maybeConst(isConst)
     }
 
     // ---- createForType leaf dispatch (post-visit, i.e. against the canonical type) ----
@@ -215,8 +191,12 @@ fun buildWrappedType(type: QualType): WrappedType {
         // EnumConstantDecl children's (name, value) pairs. Scoped vs unscoped needs no
         // flag here: both spell their qualified name and both carry their underlying type
         // (the libclang path never consults clang_EnumDecl_isScoped in construction).
-        val enumDecl = canonTy.asEnumTypeOrNull()?.getDecl()
-            ?.let { EnumDecl(it.ptr, canonTy.memScope) } ?: return UNRESOLVABLE
+        // The decl is reached through Type::getAsTagDecl() + the generated asEnumDecl
+        // dyn-cast (clang::EnumType itself is unbindable — see build.gradle.kts); same
+        // decl clang_getTypeDeclaration reports.
+        val enumDecl = canonTy.getAsTagDecl()
+            ?.let { Decl(it.ptr, canonTy.memScope) }
+            ?.asEnumDecl() ?: return UNRESOLVABLE
         return buildEnumType(enumDecl).maybeConst(isConst)
     }
     // Builtin (and any remaining) leaf: createForType's `else -> WrappedType(spelling)`,
@@ -262,18 +242,13 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
 
 // The WrappedEnumType payload for [enumDecl] (TypeFactories' CXCursor_EnumDecl branch).
 private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
-    val qualified = NamedDecl(enumDecl.ptr, enumDecl.memScope).getQualifiedNameAsString()
-        ?: return UNRESOLVABLE
+    val qualified = enumDecl.getQualifiedNameAsString() ?: return UNRESOLVABLE
     // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
-    // missing name dropping just that constant (TypeFactories' mapNotNull). The decl-side
-    // walk is the enum's DeclContext; TagDecl is EnumDecl's address-identical primary
-    // base, so the re-view + TagDecl's GENERATED asDeclContext() (a real pointer
-    // adjustment — DeclContext is a secondary base) reach it without new cast surface.
-    val constants = TagDecl(enumDecl.ptr, enumDecl.memScope).asDeclContext().decls()
-        .filterNotNull()
-        .filter { it.getKind() == Kind.EnumConstant }
+    // missing name dropping just that constant (TypeFactories' mapNotNull).
+    val constants = enumDecl.asDeclContext().decls()
+        .mapNotNull { it?.asEnumConstantDecl() }
         .mapNotNull { constant ->
-            val name = constant.asNamedDecl()?.getNameAsString() ?: return@mapNotNull null
+            val name = constant.getNameAsString() ?: return@mapNotNull null
             // VALUE BRIDGE (the documented extraction choice): libclang's
             // clang_getEnumConstantDeclValue is `getInitVal().getSExtValue()` (CIndex.cpp)
             // — a sign-extension through the constant's bit WIDTH even for an UNSIGNED
@@ -284,14 +259,8 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
             // constant below the top bit; for an unsigned constant WITH the top bit set
             // (e.g. `enum X : unsigned { M = 0x80000000 }`) libclang reports the
             // sign-mangled negative — a Phase C normalizer entry (mask: sign-extend the
-            // libclang value by the underlying width). EnumConstantDecl's Decl is the
-            // address-identical primary base (ValueDecl chain; Decl.h: `: public
-            // ValueDecl, public Mergeable<>, public APIntStorage`), so the kind-gated
-            // re-view mirrors its static classof (`getKind() == EnumConstant`).
-            val value = EnumConstantDecl(constant.ptr, constant.memScope)
-                .getInitVal()
-                .getExtValue()
-            WrappedEnumConstant(name, value)
+            // libclang value by the underlying width).
+            WrappedEnumConstant(name, constant.getInitVal().getExtValue())
         }
     return WrappedEnumType(
         qualified,

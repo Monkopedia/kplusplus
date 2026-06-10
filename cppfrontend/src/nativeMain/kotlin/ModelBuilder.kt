@@ -66,17 +66,20 @@ private fun Decl.canonical(): Decl = (getCanonicalDecl() as? Decl) ?: this
 // identity string as the WrappedTemplateParam it refers to).
 internal fun Decl.cppUsr(): String = "cpp:${canonical().getID()}"
 
-// BRIDGE: kind-gated down-casts for the brick-5 Decl classes, in case CastTargets skips
-// their dyn-cast helpers (multi/unbound base lists — the TypedefType gap, see
-// TypeBuilder.asTypedefTypeOrNull). Each gate is EXACTLY the class's static `classof`
-// (`getKind() == ClassTemplate` / `== Typedef`), and each target's Decl is its
-// address-identical primary base, so the same-pointer re-view is the generated dyn-cast's
-// semantics. The Typedef gate is also load-bearing mirroring: ModelFactories.map only has
-// a CXCursor_TypedefDecl branch — a C++ `using` alias (CXCursor_TypeAliasDecl, here
-// Kind.TypeAlias) produces NO element on the libclang path, so it must not here either.
+// BRIDGE: the generated `Decl.asClassTemplateDecl()` dyn-cast is missing — the
+// ClassTemplateDecl -> RedeclarableTemplateDecl -> TemplateDecl chain doesn't survive
+// resolution (RedeclarableTemplateDecl is unbound), the same CastTargets gap as
+// TypedefType (TypeBuilder.asTypedefTypeOrNull; probe-confirmed on the brick-5
+// generation run). The gate is EXACTLY the class's static `classof`
+// (`getKind() == ClassTemplate`), and Decl is ClassTemplateDecl's address-identical
+// primary base, so the same-pointer re-view is the generated dyn-cast's semantics.
 private fun Decl.asClassTemplateDeclOrNull(): ClassTemplateDecl? =
     if (getKind() == Kind.ClassTemplate) ClassTemplateDecl(ptr, memScope) else null
 
+// Load-bearing mirroring, not a gap workaround: ModelFactories.map only has a
+// CXCursor_TypedefDecl branch — a C++ `using` alias (CXCursor_TypeAliasDecl, here
+// Kind.TypeAlias) produces NO element on the libclang path, so the kind gate must
+// exclude it (the generated asTypedefNameDecl() alone would catch both alias kinds).
 private fun Decl.asTypedefDeclOrNull(): TypedefNameDecl? =
     if (getKind() == Kind.Typedef) asTypedefNameDecl() else null
 

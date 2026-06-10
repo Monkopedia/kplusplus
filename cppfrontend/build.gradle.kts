@@ -155,16 +155,19 @@ kplusplus {
         "clang::TemplateParameterList",
         "clang::TemplateTypeParmDecl",
         "clang::TemplateTypeParmType",
-        // NEW for brick 5 (enums): an enum-typed leaf reaches its EnumDecl through
-        // EnumType::getDecl() (the Type-side dyn-cast is bridged by TypeClass check —
-        // TypeBuilder); EnumDecl carries getIntegerType() (the underlying type,
+        // NEW for brick 5 (enums): an enum-typed leaf reaches its EnumDecl through the
+        // already-bound Type::getAsTagDecl() + a kind-gated re-view (TypeBuilder).
+        // clang::EnumType is deliberately NOT bound: it declares no constructors of its
+        // own (only inherited `using TagType::TagType`), so no ctor cursor ever marks
+        // hasConstructor and krapper synthesizes a `new clang::EnumType()` default-
+        // construct wrapper that C++ rejects (implicitly deleted — generator gap noted
+        // on #44). EnumDecl carries getIntegerType() (the underlying type,
         // clang_getEnumDeclIntegerType's source) and its DeclContext holds the
         // EnumConstantDecls. llvm::APSInt is EnumConstantDecl::getInitVal()'s carrier;
         // only its OWN surface is needed (getExtValue — see TypeBuilder's value bridge),
         // so the heavy llvm::APInt base stays unbound.
         "clang::EnumDecl",
         "clang::EnumConstantDecl",
-        "clang::EnumType",
         "llvm::APSInt"
     )
     // Materialize the range returns the walk iterates. Brick 3 walks members through
