@@ -112,13 +112,4 @@ kplusplus {
     instantiate("std::vector<clang::Decl*>")
     instantiate("std::vector<clang::CXXMethodDecl*>")
     instantiate("std::vector<clang::CXXBaseSpecifier*>")
-    // ASTContext::adjustType(QualType, llvm::function_ref<QualType(QualType)>) has an
-    // un-modelable function_ref second arg. With QualType now bound its return resolves, so
-    // the method is no longer dropped-by-unresolved-return — and the function_ref param is
-    // mis-flagged omittable-default (the cursor-children default heuristic fires on the
-    // function_ref's type tokens), emitting an under-arity `adjustType(Old)` call that won't
-    // compile. Drop it explicitly until that heuristic is tightened (a krapper_gen follow-up).
-    fixup {
-        removeMethod("clang_ASTContext_adjust_type")
-    }
 }
