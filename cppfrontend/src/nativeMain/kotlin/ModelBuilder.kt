@@ -108,6 +108,16 @@ private class ModelBuilder {
     // identity (cppUsr) collapses namespace redeclarations the same way.
     private val namespaces = mutableMapOf<String, WrappedNamespace>()
 
+    // Redeclaration collapse for classes and class templates (#45 brick 3 — the std
+    // headers the forcing parse pulls in are full of forward declarations): the same
+    // canonical decl re-encountered maps to the SAME element, exactly like ModelFactories'
+    // USR-keyed elementLookup memo. Members attach only from the DEFINING redeclaration
+    // (a forward decl's pattern record SHARES DefinitionData with the definition, so
+    // reading bases()/members there would double-add — the cursor walk only ever sees a
+    // redecl's own children).
+    private val classes = mutableMapOf<String, WrappedClass>()
+    private val templates = mutableMapOf<String, WrappedTemplate>()
+
     // Walk one DeclContext (the TU or a namespace) and add its children to [parent].
     fun addContextDecls(context: DeclContext, parent: WrappedElement) {
         for (decl in context.decls()) {
@@ -125,7 +135,7 @@ private class ModelBuilder {
             // WrappedTemplate (ModelFactories.map's CXCursor_ClassTemplate branch).
             val classTemplate = decl.asClassTemplateDeclOrNull()
             if (classTemplate != null) {
-                buildTemplate(classTemplate)?.let { parent.addChild(it) }
+                addTemplate(classTemplate, decl, parent)
                 continue
             }
             // A ClassTemplateSpecializationDecl IS-A CXXRecordDecl, but libclang's cursor
@@ -139,7 +149,7 @@ private class ModelBuilder {
             }
             val record = decl.asCXXRecordDecl()
             if (record != null) {
-                parent.addChild(buildClass(record))
+                addClass(record, decl, parent)
                 continue
             }
             // Brick 5: a `typedef` is a WrappedTypedef element at ANY level — TU,
@@ -186,11 +196,23 @@ private class ModelBuilder {
     // built through the SAME paths as a plain class (mapAll's recursion reuses every
     // member branch on template children; the metadata side-effects land on the
     // WrappedTemplate via the shared `(parent as? WrappedTemplate)?.metadata` mirrors).
-    private fun buildTemplate(templateDecl: ClassTemplateDecl): WrappedTemplate? {
+    // Redeclarations collapse to ONE element (the memo); EVERY redeclaration's params
+    // re-walk through WrappedTemplate's merge machinery — mapAll resets templateArgCounter
+    // per template-cursor encounter, so repeat params land in the first params'
+    // `otherParams`, letting substitution key on ANY redecl's param name/usr — and the
+    // bases/members attach from the DEFINING redeclaration only.
+    private fun addTemplate(
+        templateDecl: ClassTemplateDecl,
+        decl: Decl,
+        parent: WrappedElement
+    ) {
         val record = templateDecl.getTemplatedDecl()
-            ?.let { CXXRecordDecl(it.ptr, templateDecl.memScope) } ?: return null
-        val name = record.asNamedDecl().getNameAsString() ?: error("template without a name")
-        val template = WrappedTemplate(name)
+            ?.let { CXXRecordDecl(it.ptr, templateDecl.memScope) } ?: return
+        val name = record.asNamedDecl().getNameAsString() ?: return
+        val template = templates.getOrPut(decl.cppUsr()) {
+            WrappedTemplate(name).also { parent.addChild(it) }
+        }
+        template.templateArgCounter = 0
         // getTemplateParameters() lives on TemplateDecl — ClassTemplateDecl's
         // address-identical primary base chain, so the same-pointer re-view is exact.
         // Each TYPE parameter mirrors ModelFactories' CXCursor_TemplateTypeParameter ->
@@ -199,26 +221,23 @@ private class ModelBuilder {
         val params = TemplateDecl(templateDecl.ptr, templateDecl.memScope)
             .getTemplateParameters()
             ?.let { TemplateParameterList(it.ptr, templateDecl.memScope) }
-            ?: return null
+            ?: return
         for (i in 0u until params.size()) {
             val param = params.getParam(i)
                 ?.let { NamedDecl(it.ptr, templateDecl.memScope) } ?: continue
             if (param.getKind() != Kind.TemplateTypeParm) continue
             template.addChild(
                 WrappedTemplateParam(
-                    param.getNameAsString() ?: error("template param without a name"),
+                    param.getNameAsString() ?: continue,
                     // The identity the dependent-T WrappedTemplateRef keys back to
                     // (TypeBuilder's TemplateTypeParmType branch reads the same decl).
                     Decl(param.ptr, templateDecl.memScope).cppUsr()
                 )
             )
         }
-        // The pattern record's bases/members go through the exact class construction
-        // path. hasDefinition guards a forward-declared template (definition-data reads).
-        if (record.hasDefinition()) {
+        if (templateDecl.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, template, template.metadata)
         }
-        return template
     }
 
     private fun addNamespace(decl: NamespaceDecl, parent: WrappedElement) {
@@ -233,15 +252,21 @@ private class ModelBuilder {
         addContextDecls(decl.asDeclContext(), namespace)
     }
 
-    private fun buildClass(record: CXXRecordDecl): WrappedClass {
-        val name = record.asNamedDecl().getNameAsString() ?: error("record without a name")
+    private fun addClass(record: CXXRecordDecl, decl: Decl, parent: WrappedElement) {
+        val name = record.asNamedDecl().getNameAsString() ?: return
         // ModelFactories' WrappedClass factory: name via wrapName (= the bare name for a
         // non-template class; template-args spelling is brick-4+) + the isAbstract flag.
-        // hasDefinition() guards a forward-declared record, whose definition-data
-        // accessors may not be read (libclang's isAbstract reads the definition too).
-        val cls = WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
-        addBasesAndMembers(record, cls, cls.metadata)
-        return cls
+        // hasDefinition() guards a never-defined record, whose definition-data accessors
+        // may not be read (DefinitionData is SHARED across redeclarations, so it holds
+        // even when the walk meets a forward declaration first). Redeclarations collapse
+        // to one element via the memo; members attach from the defining redecl only.
+        val cls = classes.getOrPut(decl.cppUsr()) {
+            WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
+                .also { parent.addChild(it) }
+        }
+        if (record.isThisDeclarationADefinition()) {
+            addBasesAndMembers(record, cls, cls.metadata)
+        }
     }
 
     // The shared class-body construction: bases + every member through the same branches,
