@@ -16,7 +16,11 @@
 import clang.CXXRecordDecl
 import clang.Decl
 import clang.EnumDecl
+import clang.NamedDecl
 import clang.QualType
+import clang.TagDecl
+import clang.TemplateDecl
+import clang.TemplateParameterList
 import clang.Type
 import clang.TypedefNameDecl
 import clang.TypedefType
@@ -245,8 +249,11 @@ fun buildWrappedType(type: QualType): WrappedType {
  *    CXCursor_TypedefDecl only; here they apply to either alias kind — a `using size_t =
  *    ...` is vanishingly rare and the name is the contract either way.)
  *  - referenceTypedefElement / pointerTypedefElement / assocTypedefElement reduce
- *    std-container member aliases whose underlyings are DEPENDENT trait expressions; they
- *    only fire on the std headers, so they ride with the std-scale brick (brick-6+).
+ *    std-container member aliases whose underlyings are DEPENDENT trait expressions —
+ *    [referenceTypedef] / [pointerTypedef] / [assocTypedef] below. pointerTypedefElement
+ *    runs for BOTH alias kinds on the libclang path (createForType's TypeAliasDecl block
+ *    exists for unique_ptr's `using pointer`); assocTypedefElement is only reached from
+ *    the CXCursor_TypedefDecl branches, hence the Kind.Typedef gate.
  *  - Everything else collapses to the underlying type, mirroring ResolverBuilderImpl
  *    .visit()'s CXCursor_TypedefDecl branch (recursive typedefDeclUnderlyingType walk) —
  *    which is also how an in-template `typedef T value_type` lands on the dependent
@@ -267,6 +274,10 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
         functionPointerTypedef(typedef)?.let { return it }
     }
     referenceTypedef(typedef)?.let { return it }
+    pointerTypedef(typedef)?.let { return it }
+    if (typedef.asDecl().getKind() == Kind.Typedef) {
+        assocTypedef(typedef)?.let { return it }
+    }
     val name = typedef.getNameAsString() ?: ""
     when (name) {
         "size_type" -> return WrappedTypeReference("size_t")
@@ -306,13 +317,105 @@ private fun referenceTypedef(typedef: TypedefNameDecl): WrappedType? {
     return referenceTo(if (isConstRef) const(elementType) else elementType)
 }
 
+/**
+ * TypeFactories.pointerTypedefElement (#46 Phase D): a smart pointer's `pointer` /
+ * `const_pointer` member alias whose underlying is a DEPENDENT trait expression
+ * (libstdc++ routes unique_ptr's through `__uniq_ptr_impl<...>::pointer`, which libclang
+ * reports as CXType_Unexposed) is rewritten to a pointer to the sibling `element_type`
+ * alias's underlying — what keeps unique_ptr's get()/release()/operator->() alive. Gates
+ * mirrored from the libclang reducer:
+ *  - only when the underlying is dependent AND not itself a concrete pointer/reference
+ *    shape (the Unexposed-kind test: a real `T*` pointer typedef — even a dependent
+ *    `_Tp*` — spells CXType_Pointer, NOT Unexposed, and must fall through);
+ *  - the `element_type` sibling may be EITHER alias kind (the libclang reducer's
+ *    `TypedefDecl || TypeAliasDecl` sibling filter — unique_ptr uses `using`).
+ * Unlike the other reducers, the libclang path runs this one for both alias KINDS of the
+ * reduced typedef too (createForType lines 147-149), so no Kind gate at the call site.
+ */
+private fun pointerTypedef(typedef: TypedefNameDecl): WrappedType? {
+    val name = typedef.getNameAsString()
+    val isConstPtr = name == "const_pointer"
+    if (name != "pointer" && !isConstPtr) return null
+    val underlying = typedef.getUnderlyingType().typePtr() ?: return null
+    if (!underlying.isDependentType() ||
+        underlying.isPointerType() || underlying.isReferenceType()
+    ) {
+        return null
+    }
+    val elementTypedef = siblingTypedef(typedef, "element_type", allowAlias = true)
+        ?: return null
+    val elementType = buildWrappedType(elementTypedef.getUnderlyingType())
+    if (elementType == UNRESOLVABLE) return null
+    return pointerTo(if (isConstPtr) const(elementType) else elementType)
+}
+
+/**
+ * TypeFactories.assocTypedefElement (#46 Phase D): associative containers' `key_type` /
+ * `mapped_type` / `value_type` member aliases that libclang leaves as unresolvable
+ * dependent expressions (unordered_map defines them through its `_Hashtable` base;
+ * set's `value_type` is a dependent self-reference of `_Key`) are rewritten to a
+ * [WrappedTemplateRef] of the enclosing template's corresponding TYPE parameter, so the
+ * existing param->concrete substitution engine maps them. Two container shapes,
+ * distinguished by sibling typedefs exactly like the libclang reducer:
+ *  - key→value map (`key_type` AND `mapped_type` present): key_type→param 0,
+ *    mapped_type→param 1;
+ *  - key-only set (`key_type`, NO `mapped_type`): key_type and value_type→param 0.
+ * The ref keys on the param's NAME (this front-end's in-template convention — the
+ * spelling member uniqueCNames bake; the libclang reducer keys the same param by USR,
+ * which the resolver accepts interchangeably, Parsing.typedAs). The dependent gate
+ * mirrors referenceTypedef/pointerTypedef's Unexposed equivalence; a concretely-resolved
+ * alias falls through to normal handling.
+ */
+private fun assocTypedef(typedef: TypedefNameDecl): WrappedType? {
+    val name = typedef.getNameAsString()
+    if (name != "key_type" && name != "mapped_type" && name != "value_type") return null
+    val underlying = typedef.getUnderlyingType().typePtr() ?: return null
+    if (!underlying.isDependentType() ||
+        underlying.isPointerType() || underlying.isReferenceType()
+    ) {
+        return null
+    }
+    fun hasTypedef(n: String) = siblingTypedef(typedef, n) != null
+    val isMap = hasTypedef("key_type") && hasTypedef("mapped_type")
+    val isKeyOnly = hasTypedef("key_type") && !hasTypedef("mapped_type")
+    val paramIndex = when {
+        isMap && name == "key_type" -> 0
+        isMap && name == "mapped_type" -> 1
+        isKeyOnly && (name == "key_type" || name == "value_type") -> 0
+        else -> return null
+    }
+    // The libclang reducer reads the params as SIBLINGS (the ClassTemplate cursor's
+    // children mix params and members); on the decl walk the typedef's context is the
+    // PATTERN record, whose described class template carries the parameter list.
+    val context = typedef.asDecl().getDeclContext() ?: return null
+    val record = with(Decl.Companion) { typedef.memScope.castFromDeclContext(context) }
+        ?.let { Decl(it.ptr, typedef.memScope) }?.asCXXRecordDecl() ?: return null
+    val params = record.getDescribedClassTemplate()
+        ?.let { TemplateDecl(it.ptr, typedef.memScope) }
+        ?.getTemplateParameters()
+        ?.let { TemplateParameterList(it.ptr, typedef.memScope) } ?: return null
+    val typeParams = (0u until params.size()).mapNotNull { i ->
+        params.getParam(i)?.let { NamedDecl(it.ptr, typedef.memScope) }
+            ?.takeIf { it.getKind() == Kind.TemplateTypeParm }
+    }
+    val param = typeParams.getOrNull(paramIndex) ?: return null
+    return WrappedTemplateRef(param.getNameAsString() ?: return null)
+}
+
 // The sibling typedef of [typedef]'s parent context with the given [name] (the
-// `semanticParent.children` walk of the libclang reducers). `typedef`-kind only,
-// mirroring the CXCursor_TypedefDecl filter.
-private fun siblingTypedef(typedef: TypedefNameDecl, name: String): TypedefNameDecl? {
+// `semanticParent.children` walk of the libclang reducers). `typedef`-kind only by
+// default, mirroring the CXCursor_TypedefDecl filter; [allowAlias] widens to `using`
+// aliases for the lookups whose libclang filter accepts both kinds (element_type).
+private fun siblingTypedef(
+    typedef: TypedefNameDecl,
+    name: String,
+    allowAlias: Boolean = false
+): TypedefNameDecl? {
     val context = typedef.asDecl().getDeclContext() ?: return null
     for (decl in context.decls()) {
-        if (decl == null || decl.getKind() != Kind.Typedef) continue
+        if (decl == null) continue
+        val kind = decl.getKind()
+        if (kind != Kind.Typedef && !(allowAlias && kind == Kind.TypeAlias)) continue
         val sibling = decl.asTypedefNameDecl() ?: continue
         if (sibling.getNameAsString() == name) return sibling
     }
@@ -386,6 +489,67 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
         buildWrappedType(enumDecl.getIntegerType()),
         constants
     )
+}
+
+/**
+ * WrappedTemplateParam.defaultType capture (#46 Phase D). The model derives a param's
+ * defaultType from its CHILDREN (the first WrappedType child as the base + every
+ * WrappedTemplateRef child as the args — WrappedTemplateParam.defaultType), and on the
+ * libclang path those children are CURSOR-WALK RESIDUE: ModelFactories.mapAll attaches
+ * whatever TypeRef/TemplateRef cursors appear under the TemplateTypeParameter cursor.
+ * Probed against the live libclang oracle (krapper_gen --dumpModels):
+ *  - `U = Alloc<T>`  -> [UNRESOLVABLE, tref("T")] — a TemplateRef cursor's type is
+ *    CXType_Invalid, so the child is the UNRESOLVABLE leaf (once; the memo dedups);
+ *  - `U = T` / `U = T*` -> [tref("T")] — only the TypeRef survives (the pointer is LOST);
+ *  - `U = Shape`     -> [tref("struct Shape")] — the TypeRef spells tag-keyword + name;
+ *  - `U = int`       -> no children (no default captured for a builtin).
+ * This walk reproduces those shapes structurally from the default's QualType
+ * (kppbridge::defaultArgType): template-specialization -> the UNRESOLVABLE leaf + its
+ * args recursed, pointer/reference -> recurse (the lossy collapse), template param ->
+ * tref(name), record/enum leaf -> tref("<tag-kind> <qualified>"), builtin -> nothing.
+ * Faithful-lossy by design: typedAs consumes defaultType through the SAME mapping either
+ * way, so emulating the residue is what byte-parity requires (a faithful rich decode is
+ * a Phase D tail item once parity is locked).
+ */
+fun defaultTypeResidue(default: QualType): List<WrappedType> {
+    val residue = mutableListOf<WrappedType>()
+    val seenRefs = mutableSetOf<String>()
+    var unresolvable = false
+    fun addRef(target: String) {
+        if (seenRefs.add(target)) residue.add(WrappedTemplateRef(target))
+    }
+    fun walk(type: QualType) {
+        val ty = type.typePtr() ?: return
+        val argCount = with(type.memScope) { numTemplateArgs(type) }
+        if (argCount >= 0) {
+            if (!unresolvable) {
+                unresolvable = true
+                residue.add(UNRESOLVABLE)
+            }
+            for (i in 0u until argCount.toUInt()) {
+                val arg = with(type.memScope) { templateArgAsType(type, i) }
+                if (arg.typePtr() != null) walk(arg)
+            }
+            return
+        }
+        if (ty.isPointerType() || ty.isReferenceType()) {
+            walk(ty.getPointeeType())
+            return
+        }
+        ty.asTemplateTypeParmType()?.let { parm ->
+            parm.getDecl()?.asNamedDecl()?.getNameAsString()?.let { addRef(it) }
+            return
+        }
+        val canonTy = type.getCanonicalType().typePtr() ?: return
+        canonTy.getAsTagDecl()?.let { tag ->
+            val kindName = TagDecl(tag.ptr, canonTy.memScope).getKindName() ?: return
+            val qualified = NamedDecl(tag.ptr, canonTy.memScope).getQualifiedNameAsString()
+                ?: return
+            addRef("$kindName $qualified")
+        }
+    }
+    walk(default)
+    return residue
 }
 
 // Leaf spelling, mirroring createForType's const-stripped spelling read (the constness is

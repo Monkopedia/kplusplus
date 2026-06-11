@@ -1,0 +1,7 @@
+# featuregenParity expected-state ledger (#46 Phase D).
+# One line per parity unit: <spec>=<identical|diff|fail>. A unit with no line is
+# expected byte-identical. The task fails only when a unit's verdict is WORSE than
+# recorded here (identical < diff < fail); improvements are reported so this ledger
+# ratchets toward all-identical as Phase D converges.
+#
+# (Populated from the first honest run — see the PR that landed featuregenParity.)

@@ -29,6 +29,7 @@ import clang.ParmVarDecl
 import clang.RecordDecl
 import clang.TemplateDecl
 import clang.TemplateParameterList
+import clang.TemplateTypeParmDecl
 import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
@@ -49,6 +50,7 @@ import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kppbridge.defaultArgText
+import kppbridge.defaultArgType
 
 // The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
@@ -223,6 +225,7 @@ private class ModelBuilder {
             .getTemplateParameters()
             ?.let { TemplateParameterList(it.ptr, templateDecl.memScope) }
             ?: return
+        var typeParamIndex = 0
         for (i in 0u until params.size()) {
             val param = params.getParam(i)
                 ?.let { NamedDecl(it.ptr, templateDecl.memScope) } ?: continue
@@ -235,6 +238,21 @@ private class ModelBuilder {
                     Decl(param.ptr, templateDecl.memScope).cppUsr()
                 )
             )
+            // defaultType capture (#46 Phase D): the model derives defaultType from the
+            // param element's children (TypeBuilder.defaultTypeResidue — the libclang
+            // cursor-walk residue, reproduced structurally). Attached to the CANONICAL
+            // instance (a re-walked redeclaration's params route into otherParams), so a
+            // default declared on a LATER redeclaration (basic_string is forward-declared
+            // default-less in <iosfwd> first) still lands — clang reports the inherited
+            // default on every subsequent redecl's param, mirroring how the libclang
+            // memo accumulates the residue cursors onto its one USR-keyed instance.
+            val canonical = template.templateArgs.getOrNull(typeParamIndex)
+            typeParamIndex++
+            if (canonical == null || canonical.children.isNotEmpty()) continue
+            val parmDecl = TemplateTypeParmDecl(param.ptr, templateDecl.memScope)
+            if (!parmDecl.hasDefaultArgument()) continue
+            val default = with(templateDecl.memScope) { defaultArgType(parmDecl) }
+            for (residue in defaultTypeResidue(default)) canonical.addChild(residue)
         }
         if (templateDecl.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, template, template.metadata)

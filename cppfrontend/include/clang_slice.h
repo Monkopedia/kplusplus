@@ -115,6 +115,19 @@ inline std::string templateBaseName(const clang::QualType &type) {
     return std::string();
 }
 
+// Phase D BRIDGE (#46): a template type parameter's default TYPE argument
+// (`typename _Alloc = std::allocator<_Tp>`). hasDefaultArgument() itself IS bound;
+// getDefaultArgument() returns a TemplateArgumentLoc (clang 19+), which isn't a bindable
+// surface yet — this helper unwraps it to the QualType the model decode consumes. A null
+// QualType signals "no default / not a type default" (mirroring templateArgAsType's
+// convention above).
+inline clang::QualType defaultArgType(const clang::TemplateTypeParmDecl *parm) {
+    if (!parm || !parm->hasDefaultArgument()) return clang::QualType();
+    const clang::TemplateArgument &arg = parm->getDefaultArgument().getArgument();
+    if (arg.getKind() != clang::TemplateArgument::Type) return clang::QualType();
+    return arg.getAsType();
+}
+
 inline std::string defaultArgText(clang::ParmVarDecl *parm) {
     if (!parm || !parm->hasDefaultArg()) {
         return std::string();
