@@ -589,18 +589,22 @@ fun main(args: Array<String>): Unit = memScoped {
         tParam != null && tParam.name == "T" && tParam.usr.startsWith("cpp:"),
         "got ${holder?.templateArgs}"
     )
+    // #45 brick 3 revision: dependent-T refs key on the param's NAME (the libclang
+    // in-template fallback every member use actually hits — and the spelling baked into
+    // uniqueCNames), not the cpp:<id> identity. typedAs maps name AND usr, so either
+    // key substitutes; the name is what output parity requires (TypeBuilder's TTPT branch).
     val valueField = holder?.fields?.singleOrNull()
     check(
-        "field 'T value': WrappedTemplateRef keyed to the param's usr (substitution contract)",
+        "field 'T value': WrappedTemplateRef keyed to the param's NAME (uniqueCName parity)",
         valueField != null && valueField.name == "value" &&
-            (valueField.type as? WrappedTemplateRef)?.target == tParam?.usr,
+            (valueField.type as? WrappedTemplateRef)?.target == "T",
         "got $valueField"
     )
     val getMethod = holder?.methods?.find { it.name == "get" }
     check(
         "T get() const: BARE WrappedTemplateRef return (G8: no const wrap on by-value)",
         getMethod != null && getMethod.isConst &&
-            (getMethod.returnType as? WrappedTemplateRef)?.target == tParam?.usr,
+            (getMethod.returnType as? WrappedTemplateRef)?.target == "T",
         "got ${getMethod?.returnType}"
     )
     val setArg = holder?.methods?.find { it.name == "set" }?.args?.singleOrNull()?.type
@@ -609,14 +613,14 @@ fun main(args: Array<String>): Unit = memScoped {
         "set(const T&): the dependent type nests structurally — &(const(WrappedTemplateRef))",
         setArg is WrappedModifiedType && setArg.modifier == "&" &&
             setBase?.modifier == "const" &&
-            (setBase?.baseType as? WrappedTemplateRef)?.target == tParam?.usr,
+            (setBase?.baseType as? WrappedTemplateRef)?.target == "T",
         "got $setArg"
     )
     val valueTypedef = holder?.children?.filterIsInstance<WrappedTypedef>()?.singleOrNull()
     check(
-        "in-template `typedef T value_type`: WrappedTypedef -> WrappedTemplateRef(param usr)",
+        "in-template `typedef T value_type`: WrappedTypedef -> WrappedTemplateRef(param name)",
         valueTypedef != null && valueTypedef.name == "value_type" &&
-            (valueTypedef.targetType as? WrappedTemplateRef)?.target == tParam?.usr,
+            (valueTypedef.targetType as? WrappedTemplateRef)?.target == "T",
         "got $valueTypedef"
     )
 

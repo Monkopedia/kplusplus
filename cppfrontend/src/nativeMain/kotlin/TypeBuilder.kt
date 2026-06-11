@@ -21,7 +21,6 @@ import clang.Type
 import clang.TypedefNameDecl
 import clang.TypedefType
 import clang.decl.Kind
-import clang.templateArgument.ArgKind
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
@@ -33,6 +32,9 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import kppbridge.numTemplateArgs
+import kppbridge.templateArgAsType
+import kppbridge.templateBaseName
 
 // STRUCTURAL type construction (#44 brick 4): decode a clang::QualType's type tree into the
 // same WrappedType shapes the libclang-C front-end produces, rule-for-rule against
@@ -127,27 +129,28 @@ fun buildWrappedType(type: QualType): WrappedType {
 
     // invoke lines 80-104: template arguments detected on the type itself OR its canonical
     // form (alias/elaborated sugar hides them) -> WrappedTemplateType(baseRef, args).
-    // Structurally, every template-specialization TYPE's canonical form is a record whose
-    // decl dyn-casts to ClassTemplateSpecializationDecl (type-decode probe, P5). Checked
-    // BEFORE the typedef handling for the same reason invoke checks it before
-    // createForType: an alias over a template type still collapses to the template shape.
+    // #45 brick 3: decoded through the CIndex GetTemplateArguments MIRROR (kppbridge):
+    // the sugared TemplateSpecializationType's WRITTEN args are preferred — exactly what
+    // clang_Type_getNumTemplateArguments reads, so `std::vector<Item*>` carries ONE arg
+    // (the defaulted allocator is NOT part of the libclang type, and the forcing key /
+    // tracker key depends on that spelling) — with the canonical specialization decl's
+    // full list as the fallback. The TST half also catches DEPENDENT specializations
+    // (`vector<_Tp, _Alloc>`, `allocator<_Tp>` inside a template's own member
+    // signatures), which have no canonical record and previously fell through to a
+    // canonical-spelling leaf ("vector<type-parameter-0-0,...>"). Checked BEFORE the
+    // typedef handling for the same reason invoke checks it before createForType: an
+    // alias over a template type still collapses to the template shape. A non-type
+    // argument decodes to a null QualType and is dropped (TypeFactories' CXType_Invalid
+    // filterNotNull).
     val canonical = type.getCanonicalType()
     val canonTy = canonical.typePtr()
-    val spec = canonTy?.asRecord()?.asClassTemplateSpecializationDecl()
-    if (spec != null) {
-        // Base ref: createForType(forTemplateBase=true) resolves the specialization decl
-        // (surfaced as a ClassDecl/StructDecl cursor) -> WrappedType(referencedDecl
-        // .fullyQualified); NamedDecl::getQualifiedNameAsString() is the Decl-side spelling
-        // of that same semantic-parent walk (template args are not part of either).
-        val baseName = spec.getQualifiedNameAsString() ?: return UNRESOLVABLE
-        val argList = spec.getTemplateArgs() ?: return UNRESOLVABLE
-        val args = (0u until argList.size()).mapNotNull { i ->
-            // TypeFactories keeps only TYPE arguments: getTemplateArgumentType yields
-            // CXType_Invalid for a value arg, and the invalid slot is dropped
-            // (filterNotNull) — the ArgKind.Type filter is that same rule decl-side.
-            val arg = argList.get(i) ?: return@mapNotNull null
-            if (arg.getKind() != ArgKind.Type) return@mapNotNull null
-            buildWrappedType(arg.getAsType())
+    val templateArgCount = with(type.memScope) { numTemplateArgs(type) }
+    if (templateArgCount > 0) {
+        val baseName = with(type.memScope) { templateBaseName(type) }
+            ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+        val args = (0u until templateArgCount.toUInt()).mapNotNull { i ->
+            val arg = with(type.memScope) { templateArgAsType(type, i) }
+            if (arg.typePtr() == null) null else buildWrappedType(arg)
         }
         return WrappedTemplateType(WrappedTypeReference(baseName), args).maybeConst(isConst)
     }
@@ -156,16 +159,22 @@ fun buildWrappedType(type: QualType): WrappedType {
         return buildTypedefTargetType(typedef).maybeConst(isConst)
     }
 
-    // Dependent template-parameter reference: createForType's CXCursor_TemplateTypeParameter
-    // branch (TypeFactories) -> WrappedTemplateRef(the param DECL's USR) — NOT the canonical
-    // `type-parameter-0-0` spelling and NOT the bare name `T`: the identity string ties the
-    // use back to the matching WrappedTemplateParam.usr so substitution can key on it. This
-    // front-end's identity is the same cpp:<canonical-id> convention (ModelBuilder.kt), so
-    // the ref and the param agree. Read off the SUGARED type: the canonical
+    // Dependent template-parameter reference -> WrappedTemplateRef keyed by the param's
+    // NAME. #45 brick 3 revision (was cpp:<id> identity): on the libclang path, every
+    // dependent use inside a ClassTemplate's member signatures hits TypeFactories'
+    // CXType_Unexposed/NoDeclFound fallback — WrappedTemplateRef(spelling), i.e. the
+    // BARE NAME ("_Tp") — because libclang does not resolve the dependent decl (the
+    // USR-keyed CXCursor_TemplateTypeParameter branch effectively never fires there).
+    // The name key is LOAD-BEARING for output parity: a member's pre-substitution
+    // spelling is baked into its uniqueCName (`...new__size_t_const_template__Tp_and`),
+    // so an identity key would leak a nondeterministic cpp:<id> into generated symbol
+    // names. Substitution accepts either key (Parsing.typedAs maps each param's name AND
+    // usr), so resolution is unaffected. Read off the SUGARED type: the canonical
     // TemplateTypeParmType carries no decl (TypeBase.h: `assert(!TTPDecl == Canon.isNull())`).
     ty.asTemplateTypeParmType()?.let { parm ->
         val decl = parm.getDecl() ?: return UNRESOLVABLE
-        return WrappedTemplateRef(decl.asDecl().cppUsr()).maybeConst(isConst)
+        val name = decl.asNamedDecl().getNameAsString() ?: return UNRESOLVABLE
+        return WrappedTemplateRef(name).maybeConst(isConst)
     }
 
     // ---- createForType leaf dispatch (post-visit, i.e. against the canonical type) ----
@@ -248,6 +257,7 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
     if (typedef.asDecl().getKind() == Kind.Typedef) {
         functionPointerTypedef(typedef)?.let { return it }
     }
+    referenceTypedef(typedef)?.let { return it }
     val name = typedef.getNameAsString() ?: ""
     when (name) {
         "size_type" -> return WrappedTypeReference("size_t")
@@ -255,6 +265,49 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
     }
     if (name in C_ALIAS_TYPEDEFS) return WrappedTypeReference(name)
     return buildWrappedType(typedef.getUnderlyingType())
+}
+
+/**
+ * TypeFactories.referenceTypedefElement (#45 brick 3): a std-container
+ * `reference`/`const_reference` member alias whose underlying is a DEPENDENT trait
+ * expression (libstdc++ routes it through `_Alloc_traits::reference`, which libclang
+ * reports as CXType_Unexposed and can't reduce) is rewritten to `value_type&` /
+ * `const value_type&` from the sibling `value_type` typedef's underlying — this is what
+ * keeps vector's at/operator[]/front/back accessors alive. Gates mirrored:
+ *  - only when the underlying is dependent AND not itself a concrete reference/pointer
+ *    shape (libclang's Unexposed-kind test: a dependent `_Tp&` spells as
+ *    CXType_LValueReference, NOT Unexposed, and must fall through);
+ *  - only when the sibling element type is NOT a template specialization (associative
+ *    containers' `value_type = pair<const Key, T>` stays opaque — const members).
+ */
+private fun referenceTypedef(typedef: TypedefNameDecl): WrappedType? {
+    val name = typedef.getNameAsString()
+    val isConstRef = name == "const_reference"
+    if (name != "reference" && !isConstRef) return null
+    val underlying = typedef.getUnderlyingType().typePtr() ?: return null
+    if (!underlying.isDependentType() ||
+        underlying.isReferenceType() || underlying.isPointerType()
+    ) {
+        return null
+    }
+    val valueTypedef = siblingTypedef(typedef, "value_type") ?: return null
+    val elementType = buildWrappedType(valueTypedef.getUnderlyingType())
+    if (elementType == UNRESOLVABLE) return null
+    if (elementType is WrappedTemplateType) return null
+    return referenceTo(if (isConstRef) const(elementType) else elementType)
+}
+
+// The sibling typedef of [typedef]'s parent context with the given [name] (the
+// `semanticParent.children` walk of the libclang reducers). `typedef`-kind only,
+// mirroring the CXCursor_TypedefDecl filter.
+private fun siblingTypedef(typedef: TypedefNameDecl, name: String): TypedefNameDecl? {
+    val context = typedef.asDecl().getDeclContext() ?: return null
+    for (decl in context.decls()) {
+        if (decl == null || decl.getKind() != Kind.Typedef) continue
+        val sibling = decl.asTypedefNameDecl() ?: continue
+        if (sibling.getNameAsString() == name) return sibling
+    }
+    return null
 }
 
 // TypeFactories.isCFunctionPointerCompatible, verbatim: only plain native scalars, void,

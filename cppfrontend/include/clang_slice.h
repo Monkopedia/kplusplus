@@ -60,6 +60,61 @@ inline clang::ASTUnit *buildASTWithArgs(const char *code, const char *filename,
     return clang::tooling::buildASTFromCodeWithArgs(code, args, filename).release();
 }
 
+// brick-3 BRIDGE (#45, instantiation forcing): mirror libclang's GetTemplateArguments
+// (CXType.cpp) — the template-argument read that PREFERS the sugared
+// TemplateSpecializationType's WRITTEN arguments (so `std::vector<Item*>` carries ONE
+// arg, not the canonical two with the defaulted allocator) and falls back to the
+// canonical specialization decl's full list. The TST half also catches DEPENDENT
+// specializations (`vector<_Tp, _Alloc>` inside the template's own member signatures),
+// which have no canonical record at all. TemplateName / ArrayRef<TemplateArgument>
+// aren't bindable surfaces yet, hence the bridge. -1 = not a template specialization.
+inline int numTemplateArgs(const clang::QualType &type) {
+    if (type.isNull()) return -1;
+    if (const auto *spec = type->getAs<clang::TemplateSpecializationType>())
+        return (int)spec->template_arguments().size();
+    if (const auto *record = type->getAsCXXRecordDecl())
+        if (const auto *decl =
+                llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record))
+            return (int)decl->getTemplateArgs().size();
+    return -1;
+}
+
+// args[index] when it is a TYPE argument; a null QualType otherwise — mirroring
+// clang_Type_getTemplateArgumentAsType's CXType_Invalid for value/template args,
+// which TypeFactories drops via filterNotNull.
+inline clang::QualType templateArgAsType(const clang::QualType &type, unsigned index) {
+    if (const auto *spec = type->getAs<clang::TemplateSpecializationType>()) {
+        auto args = spec->template_arguments();
+        if (index < args.size() && args[index].getKind() == clang::TemplateArgument::Type)
+            return args[index].getAsType();
+        return clang::QualType();
+    }
+    if (const auto *record = type->getAsCXXRecordDecl())
+        if (const auto *decl =
+                llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record)) {
+            const auto &args = decl->getTemplateArgs();
+            if (index < args.size() &&
+                args[index].getKind() == clang::TemplateArgument::Type)
+                return args[index].getAsType();
+        }
+    return clang::QualType();
+}
+
+// The specialization's TEMPLATE name, qualified — the decl-side equivalent of
+// createForType(forTemplateBase=true)'s referencedDecl.fullyQualified (libclang's
+// clang_getTypeDeclaration resolves a TST to its ClassTemplateDecl and a resolved
+// specialization to its ClassTemplateSpecializationDecl; both spell the "::"-joined
+// semantic-parent chain).
+inline std::string templateBaseName(const clang::QualType &type) {
+    if (type.isNull()) return std::string();
+    if (const auto *spec = type->getAs<clang::TemplateSpecializationType>())
+        if (const auto *decl = spec->getTemplateName().getAsTemplateDecl())
+            return decl->getQualifiedNameAsString();
+    if (const auto *record = type->getAsCXXRecordDecl())
+        return record->getQualifiedNameAsString();
+    return std::string();
+}
+
 inline std::string defaultArgText(clang::ParmVarDecl *parm) {
     if (!parm || !parm->hasDefaultArg()) {
         return std::string();

@@ -185,7 +185,12 @@ kplusplus {
         // buildASTFromCode with REAL driver args ('\n'-joined; -resource-dir + -std), the
         // smallest bridge until std::vector<std::string> params are bindable (see
         // clang_slice.h).
-        "kppbridge::buildASTWithArgs"
+        "kppbridge::buildASTWithArgs",
+        // NEW for #45 brick 3: the CIndex GetTemplateArguments mirror — written-args
+        // preference + dependent-specialization decode (see clang_slice.h).
+        "kppbridge::numTemplateArgs",
+        "kppbridge::templateArgAsType",
+        "kppbridge::templateBaseName"
     )
     // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation
     // emits invalid Kotlin for four of llvm::APSInt's C++ operators —
@@ -366,42 +371,119 @@ val handoffInstGenerate = tasks.register<Exec>("handoffInstGenerate") {
     )
 }
 
+// The libclang baseline ALSO dumps each parse's ModelIo tree (--dumpModels): the main
+// bag.h parse and the KrapperForce forcing re-parse, exactly the two payloads the cpp
+// path consumes — the ORACLE for the file-handoff flow.
 val handoffInstBaseline = tasks.register<Exec>("handoffInstBaseline") {
     dependsOn(handoffInstEmit, ":krapper_gen:linkReleaseExecutableNative")
     val outDir = File(handoffInstDir, "out_libclang")
     doFirst { outDir.mkdirs() }
-    commandLine(listOf(krapperGenKexe.absolutePath) + instGenerateArgs(outDir))
+    commandLine(
+        listOf(
+            krapperGenKexe.absolutePath,
+            "--dumpModels",
+            File(handoffInstDir, "oracle_models").absolutePath
+        ) + instGenerateArgs(outDir)
+    )
+}
+
+// THE FLOW PROOF: feed the libclang-dumped models back through --frontend=cpp
+// --forcingModel. Output must be byte-identical to the in-process libclang run — this
+// isolates the file-handoff instantiation flow (fresh instances, no cursor->element
+// memo, resolveForcing over loaded trees) from cppfrontend model-construction fidelity.
+val handoffOracleGenerate = tasks.register<Exec>("handoffOracleGenerate") {
+    dependsOn(handoffInstBaseline)
+    val outDir = File(handoffInstDir, "out_oracle_cpp")
+    doFirst { outDir.mkdirs() }
+    commandLine(
+        listOf(
+            krapperGenKexe.absolutePath,
+            "--frontend",
+            "cpp",
+            "--parsedModel",
+            File(handoffInstDir, "oracle_models/model_0_bag.json").absolutePath,
+            "--forcingModel",
+            "std::vector<Item*>=" + File(
+                handoffInstDir,
+                "oracle_models/model_1_KrapperForce_std_vector_ItemPtr.json"
+            ).absolutePath
+        ) + instGenerateArgs(outDir)
+    )
 }
 
 tasks.register("handoffInstDiff") {
-    dependsOn(handoffInstGenerate, handoffInstBaseline)
+    dependsOn(handoffInstGenerate, handoffInstBaseline, handoffOracleGenerate)
     doLast {
         val libclang = File(handoffInstDir, "out_libclang")
-        val cpp = File(handoffInstDir, "out_cpp")
         fun files(dir: File) = dir.walkTopDown().filter { it.isFile }
             .map { it.relativeTo(dir).path }.toSortedSet()
+
+        // ---- Gate 1 (byte): the oracle run. Same models as the in-process libclang
+        // run (its own dumps), so the file-handoff flow must reproduce it exactly —
+        // path-modulo: the .def bakes the output dir's absolute path.
+        val oracle = File(handoffInstDir, "out_oracle_cpp")
         val names = files(libclang)
-        check(names == files(cpp)) {
-            "handoffInstDiff: file sets differ — only-libclang=${names - files(cpp)} " +
-                "only-cpp=${files(cpp) - names}"
+        check(names == files(oracle)) {
+            "handoffInstDiff[oracle]: file sets differ — only-libclang=" +
+                "${names - files(oracle)} only-cpp=${files(oracle) - names}"
         }
         val diffs = names.filter { rel ->
-            // The .def bakes the output dir's absolute path (compilerOpts/libraryPaths);
-            // normalize it on both sides. Everything else must match byte-for-byte.
             fun read(dir: File) = File(dir, rel).readBytes().toString(Charsets.UTF_8)
                 .replace(dir.absolutePath, "@OUT@")
             if (rel.endsWith(".def")) {
-                read(libclang) != read(cpp)
+                read(libclang) != read(oracle)
             } else {
-                !File(libclang, rel).readBytes().contentEquals(File(cpp, rel).readBytes())
+                !File(libclang, rel).readBytes().contentEquals(File(oracle, rel).readBytes())
             }
         }
         check(diffs.isEmpty()) {
-            "handoffInstDiff: cross-front-end divergence in: $diffs (compare " +
-                "$libclang vs $cpp)"
+            "handoffInstDiff[oracle]: file-handoff flow diverged from the in-process " +
+                "run in: $diffs (compare $libclang vs $oracle)"
         }
         println(
-            "handoffInstDiff: byte-identical (path-modulo .def) across ${names.size} files"
+            "handoffInstDiff[oracle]: byte-identical (path-modulo .def) across " +
+                "${names.size} files"
+        )
+
+        // ---- Gate 2 (functional): the cppfrontend-model run. The C++-AST front-end's
+        // std-template model is deliberately MORE faithful than libclang's lossy one
+        // (no "_E*"/"_Pointer" Unexposed-spelling artifacts, no order-dependent
+        // visit() collapse), and member uniqueCNames bake those pre-substitution
+        // spellings — so byte-parity here would mean emulating libclang's lossiness
+        // bug-for-bug, which the bootstrap exists to delete. The gate is functional:
+        // the SAME file set (the specialization's bindings materialized, nothing
+        // extra), the recovered range accessor, the core container surface, and the
+        // wrapper COMPILED (writeTo's CppCompiler step already failed the generate
+        // task otherwise). Spelling deltas are tracked on #45.
+        val cpp = File(handoffInstDir, "out_cpp")
+        check(names == files(cpp)) {
+            "handoffInstDiff[functional]: file sets differ — only-libclang=" +
+                "${names - files(cpp)} only-cpp=${files(cpp) - names}"
+        }
+        val bag = File(cpp, "src/root_Bag.kt").readText()
+        check(bag.contains("fun items(): Vector__Item_P")) {
+            "handoffInstDiff[functional]: Bag::items() was not recovered by pass-3 " +
+                "forcing on the cpp path"
+        }
+        val vector = File(cpp, "src/std_Vector__Item_P.kt").readText()
+        val expectedSurface = listOf(
+            "fun size(): size_t",
+            "fun push_back(",
+            "fun at(",
+            "operator fun get(",
+            "fun front(): Item?",
+            "fun back(): Item?",
+            "fun empty(): Boolean",
+            "fun clear(): Unit"
+        )
+        val missing = expectedSurface.filter { !vector.contains(it) }
+        check(missing.isEmpty()) {
+            "handoffInstDiff[functional]: vector specialization is missing core " +
+                "surface: $missing"
+        }
+        println(
+            "handoffInstDiff[functional]: cppfrontend-model run materialized the " +
+                "specialization + recovered items() (same file set, core surface present)"
         )
     }
 }
