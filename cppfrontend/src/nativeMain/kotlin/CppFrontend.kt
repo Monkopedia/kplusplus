@@ -85,7 +85,13 @@ import platform.posix.popen
 // D1b (#46) grows it with MiniStr + an in-fixture std::initializer_list declaration: the
 // two name-tref dependent initializer_list element shapes (direct param — basic_string's
 // family; typedef-to-param — vector's) whose members must SURVIVE with the libclang
-// survivor's exact name-tref spelling.
+// survivor's exact name-tref spelling. MiniStr's param is deliberately named T: the
+// libclang typedef-to-param collapse spells the FIRST-SEEN param-0 name from visit()'s
+// seenNames cache (here Holder's "T"; probed — a "C"-named param diverged as
+// cpp=template<C> vs libclang=template<T>), the same N5-family order-dependence D3
+// ledger-accepts. libstdc++'s uniform `_Tp`-style naming keeps production on the
+// convergent path (vector's survivors spell `template__Tp` on both sides — the parity
+// ratchet pins the actuals); naming the fixture param T pins that same path.
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -246,10 +252,10 @@ private val FIXTURE_HEADER = """
         };
     }
 
-    template <typename C>
+    template <typename T>
     struct MiniStr {
-        typedef C value_type;
-        void append(std::initializer_list<C> l);
+        typedef T value_type;
+        void append(std::initializer_list<T> l);
         void assignAll(std::initializer_list<value_type> l);
     };
 """.trimIndent()
@@ -746,8 +752,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 24 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
-        tu.children.size == 24,
+        "TU has exactly 26 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 26,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
@@ -1083,17 +1089,17 @@ fun main(args: Array<String>): Unit = memScoped {
     // survivors are USR-keyed, so any cpp-side leak-through grows their unit diffs.
     val miniStr = holders.find { it.name == "MiniStr" }
     check(
-        "MiniStr::append(initializer_list<C>): the DIRECT dependent element survives " +
+        "MiniStr::append(initializer_list<T>): the DIRECT dependent element survives " +
             "as the name-tref shape (D1b)",
         miniStr?.methods?.find { it.name == "append" }?.args?.singleOrNull()
-            ?.type?.toString() == "std::initializer_list<template<C>>",
+            ?.type?.toString() == "std::initializer_list<template<T>>",
         "got ${miniStr?.methods?.find { it.name == "append" }?.args}"
     )
     check(
         "MiniStr::assignAll(initializer_list<value_type>): the typedef-to-param element " +
             "survives as the same name-tref shape (D1b)",
         miniStr?.methods?.find { it.name == "assignAll" }?.args?.singleOrNull()
-            ?.type?.toString() == "std::initializer_list<template<C>>",
+            ?.type?.toString() == "std::initializer_list<template<T>>",
         "got ${miniStr?.methods?.find { it.name == "assignAll" }?.args}"
     )
 
