@@ -121,16 +121,35 @@ private class ModelBuilder {
     private val classes = mutableMapOf<String, WrappedClass>()
     private val templates = mutableMapOf<String, WrappedTemplate>()
 
-    // Walk one DeclContext (the TU or a namespace) and add its children to [parent].
-    fun addContextDecls(context: DeclContext, parent: WrappedElement) {
+    // Walk one DeclContext (the TU, a namespace, or a linkage-spec block) and add its
+    // children to [parent]. [attach] mirrors libclang's LinkageSpecDecl semantics (D2,
+    // #46): mapAll's `map(parentCursor) ?: return` skips every edge whose parent cursor
+    // is a linkage spec (no map branch), so an `extern "C"/"C++" { ... }` block's DIRECT
+    // children are never attached as model children — but the walk still DESCENDS, and
+    // anything one level deeper attaches to its own mapped parent (members of `extern
+    // "C++" { namespace std { ... } }` land on the memoized nm(std); a record defined
+    // inside `extern "C" { ... }` gets its members on the USR-memoized class element,
+    // which is visible only if some NON-linkage-spec redeclaration attached it — exactly
+    // how glibc's `struct _IO_FILE` binds: forward decl at TU scope, definition inside
+    // extern "C"). With attach=false: namespaces/classes/templates are created DETACHED
+    // (memo only) and their members walked; functions and typedefs — which have no
+    // deeper attachment — produce nothing.
+    fun addContextDecls(context: DeclContext, parent: WrappedElement, attach: Boolean = true) {
         for (decl in context.decls()) {
             if (decl == null) continue
             // Skip implicit decls (the builtin TU members like __int128_t,
             // __builtin_va_list) — libclang's cursor walk never surfaces them.
             if (decl.isImplicit()) continue
+            if (decl.getKind() == Kind.LinkageSpec) {
+                val specContext = with(Decl.Companion) {
+                    decl.memScope.castToDeclContext(decl)
+                } ?: continue
+                addContextDecls(specContext, parent, attach = false)
+                continue
+            }
             val namespace = decl.asNamespaceDecl()
             if (namespace != null) {
-                addNamespace(namespace, parent)
+                addNamespace(namespace, parent, attach)
                 continue
             }
             // Brick 5: a `template <typename T> class` is a ClassTemplateDecl (NOT a
@@ -138,7 +157,7 @@ private class ModelBuilder {
             // WrappedTemplate (ModelFactories.map's CXCursor_ClassTemplate branch).
             val classTemplate = decl.asClassTemplateDeclOrNull()
             if (classTemplate != null) {
-                addTemplate(classTemplate, decl, parent)
+                addTemplate(classTemplate, decl, parent, attach)
                 continue
             }
             // A ClassTemplateSpecializationDecl IS-A CXXRecordDecl, but libclang's cursor
@@ -152,20 +171,23 @@ private class ModelBuilder {
             }
             val record = decl.asCXXRecordDecl()
             if (record != null) {
-                addClass(record, decl, parent)
+                addClass(record, decl, parent, attach)
                 continue
             }
             // Brick 5: a `typedef` is a WrappedTypedef element at ANY level — TU,
             // namespace, class, template (ModelFactories.map's CXCursor_TypedefDecl
             // branch is level-agnostic); a `using` alias produces no element (no
             // CXCursor_TypeAliasDecl branch) — the Kind.Typedef gate mirrors that split.
+            // A typedef or free function DIRECTLY inside a linkage spec has no deeper
+            // structure that could attach via the memo, so under attach=false both
+            // produce nothing — exactly libclang's skipped LinkageSpec->child edge.
             val typedef = decl.asTypedefDeclOrNull()
             if (typedef != null) {
-                buildTypedef(typedef)?.let { parent.addChild(it) }
+                if (attach) buildTypedef(typedef)?.let { parent.addChild(it) }
                 continue
             }
             val function = decl.asFunctionDecl()
-            if (function != null && decl.asCXXMethodDecl() == null) {
+            if (function != null && decl.asCXXMethodDecl() == null && attach) {
                 // A deleted free function: libclang surfaces `= delete` as
                 // CXAvailability_NotAvailable and filters the decl out
                 // (ModelFactories.map's availability check).
@@ -207,14 +229,14 @@ private class ModelBuilder {
     private fun addTemplate(
         templateDecl: ClassTemplateDecl,
         decl: Decl,
-        parent: WrappedElement
+        parent: WrappedElement,
+        attach: Boolean
     ) {
         val record = templateDecl.getTemplatedDecl()
             ?.let { CXXRecordDecl(it.ptr, templateDecl.memScope) } ?: return
         val name = record.asNamedDecl().getNameAsString() ?: return
-        val template = templates.getOrPut(decl.cppUsr()) {
-            WrappedTemplate(name).also { parent.addChild(it) }
-        }
+        val template = templates.getOrPut(decl.cppUsr()) { WrappedTemplate(name) }
+        attachIfNew(template, parent, attach)
         template.templateArgCounter = 0
         // getTemplateParameters() lives on TemplateDecl — ClassTemplateDecl's
         // address-identical primary base chain, so the same-pointer re-view is exact.
@@ -259,19 +281,32 @@ private class ModelBuilder {
         }
     }
 
-    private fun addNamespace(decl: NamespaceDecl, parent: WrappedElement) {
+    private fun addNamespace(decl: NamespaceDecl, parent: WrappedElement, attach: Boolean) {
         val name = decl.asNamedDecl().getNameAsString() ?: error("namespace without a name")
         // An anonymous namespace has an empty spelling; its members have TU-internal
         // linkage and can't cross the C ABI, so it is skipped transitively
         // (ModelFactories.map's CXCursor_Namespace branch).
         if (name.isEmpty()) return
-        val namespace = namespaces.getOrPut(decl.asDecl().cppUsr()) {
-            WrappedNamespace(name).also { parent.addChild(it) }
-        }
+        val namespace = namespaces.getOrPut(decl.asDecl().cppUsr()) { WrappedNamespace(name) }
+        // Attach at the first sighting outside a linkage spec — including an element
+        // created DETACHED inside one earlier (libclang's lazy `parent.addChild` on the
+        // first edge whose parent cursor maps).
+        attachIfNew(namespace, parent, attach)
+        // Members of a linkage-spec-wrapped namespace block DO attach: they are one
+        // level below the skipped edge (their parent is the namespace element).
         addContextDecls(decl.asDeclContext(), namespace)
     }
 
-    private fun addClass(record: CXXRecordDecl, decl: Decl, parent: WrappedElement) {
+    private fun attachIfNew(element: WrappedElement, parent: WrappedElement, attach: Boolean) {
+        if (attach && element.parent == null) parent.addChild(element)
+    }
+
+    private fun addClass(
+        record: CXXRecordDecl,
+        decl: Decl,
+        parent: WrappedElement,
+        attach: Boolean
+    ) {
         // An ANONYMOUS record is spelled by its typedef name when one exists (`typedef
         // struct { ... } max_align_t;` — libclang's cursor-spelling rule, which is how
         // max_align_t binds on that path); a truly anonymous record (libclang spells
@@ -289,8 +324,8 @@ private class ModelBuilder {
         // to one element via the memo; members attach from the defining redecl only.
         val cls = classes.getOrPut(decl.cppUsr()) {
             WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
-                .also { parent.addChild(it) }
         }
+        attachIfNew(cls, parent, attach)
         if (record.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, cls, cls.metadata)
         }
