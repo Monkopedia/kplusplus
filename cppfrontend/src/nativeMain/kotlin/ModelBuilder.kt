@@ -26,6 +26,7 @@ import clang.FunctionDecl
 import clang.NamedDecl
 import clang.NamespaceDecl
 import clang.ParmVarDecl
+import clang.RecordDecl
 import clang.TemplateDecl
 import clang.TemplateParameterList
 import clang.TranslationUnitDecl
@@ -253,7 +254,15 @@ private class ModelBuilder {
     }
 
     private fun addClass(record: CXXRecordDecl, decl: Decl, parent: WrappedElement) {
-        val name = record.asNamedDecl().getNameAsString() ?: return
+        // An ANONYMOUS record is spelled by its typedef name when one exists (`typedef
+        // struct { ... } max_align_t;` — libclang's cursor-spelling rule, which is how
+        // max_align_t binds on that path); a truly anonymous record (libclang spells
+        // "(unnamed struct at <file:line>)", never bindable) is skipped — an empty name
+        // would crash WrappedClass.type ("Empty type").
+        val name = record.asNamedDecl().getNameAsString()?.takeIf { it.isNotEmpty() }
+            ?: RecordDecl(record.ptr, record.memScope).getTypedefNameForAnonDecl()
+                ?.getNameAsString()?.takeIf { it.isNotEmpty() }
+            ?: return
         // ModelFactories' WrappedClass factory: name via wrapName (= the bare name for a
         // non-template class; template-args spelling is brick-4+) + the isAbstract flag.
         // hasDefinition() guards a never-defined record, whose definition-data accessors
