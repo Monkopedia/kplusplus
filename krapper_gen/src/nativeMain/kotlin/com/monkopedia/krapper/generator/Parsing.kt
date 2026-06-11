@@ -80,6 +80,7 @@ import com.monkopedia.krapper.generator.model.filterRecursive
 import com.monkopedia.krapper.generator.model.forEachRecursive
 import com.monkopedia.krapper.generator.model.freeFunctionQualifiedName
 import com.monkopedia.krapper.generator.model.parentClass
+import com.monkopedia.krapper.generator.model.serialized
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -92,6 +93,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedNamespace
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlin.math.min
+import kotlin.system.exitProcess
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.DeferScope
@@ -112,6 +114,13 @@ import platform.posix.system
 import platform.posix.write
 
 typealias ElementFilter = WrappedElement.() -> Boolean
+
+// Golden-test dump path (#44 brick 7), set by KrapperGen --dumpParsedModel before the run.
+// When non-null, [parseHeader] writes the parsed (pre-resolution, pre-rewrite) WrappedTU
+// as canonical SerializedElement JSON to this path and exits the process — parse-only
+// mode, used by :cppfrontend:goldenCompare. A CLI-scoped global rather than a KrapperConfig
+// field so the ksrpc service schema (:slice) is untouched by a debug-only flag.
+var dumpParsedModelPath: String? = null
 
 fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
     return when (this) {
@@ -556,6 +565,18 @@ suspend fun DeferScope.parseHeader(
             }
         }
     Log.i("Reduced ${tu.children.size}")
+    // Golden-test dump (#44 brick 7, armed by krapper_gen --dumpParsedModel): project the
+    // PARSED tree through the canonical SerializedElement DTO and exit (parse-only mode).
+    // The hook sits HERE — after the multi-file reduce completes the tree, but BEFORE the
+    // pre-resolution rewrites below (rewriteViewReturns/rewriteUniquePtrReturns are
+    // krapper-specific marshalling baked onto the tree, not parse output — the C++-AST
+    // front-end does not perform them, so the golden compare must see the tree without
+    // them).
+    dumpParsedModelPath?.let { path ->
+        File(path).writeText(Json.encodeToString(tu.serialized()))
+        Log.i("Dumped parsed model to $path (parse-only mode, exiting)")
+        exitProcess(0)
+    }
     // T1.10: bake view-return rewrites (e.g. llvm::StringRef -> std::string via `.str()`)
     // into the parsed tree BEFORE resolution. ParsedResolver.resolve re-reads classes from
     // this TU (not the findClasses() result), so the rewrite must live on the tree itself.

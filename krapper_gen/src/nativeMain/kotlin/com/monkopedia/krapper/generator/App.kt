@@ -156,6 +156,15 @@ class KrapperGen : CliktCommand() {
             "Fatal / translation-unit-level errors (missing include, unattributable) abort " +
             "regardless."
     ).flag()
+    val dumpParsedModel by option(
+        "--dumpParsedModel",
+        help = "Debug/golden-test flag (#44 brick 7): parse the headers, project the PARSED " +
+            "(pre-resolution, pre-rewrite) WrappedTU through the canonical " +
+            "SerializedElement DTO (:krapper_model ModelSerializer) and write it as JSON " +
+            "to the given path, then EXIT without resolving or generating (parse-only " +
+            "mode). :cppfrontend:goldenCompare diffs this libclang front-end's parse " +
+            "output against the C++-AST front-end's."
+    )
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -168,6 +177,10 @@ class KrapperGen : CliktCommand() {
         if (serviceMode) {
             return runService()
         }
+        // Golden-test dump (#44 brick 7): arm the parse-only hook in Parsing.kt. The
+        // process exits inside parseHeader right after the JSON is written, so the
+        // resolution/generation flow below never runs with the flag set.
+        dumpParsedModelPath = dumpParsedModel
         runBlocking {
             val service = KrapperServiceImpl()
             val resolvedModule = moduleName
