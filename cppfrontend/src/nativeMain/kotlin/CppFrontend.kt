@@ -247,17 +247,23 @@ private val FIXTURE_HEADER = """
 
     // Guarded with libstdc++'s own include guard: the generated wrapper #includes this
     // fixture BEFORE its <vector>/<string> boilerplate (handoffGenerate's compile step),
-    // so defining _INITIALIZER_LIST here makes the real header a no-op there — layout-
-    // compatible (pointer + length), and nothing on that path INSTANTIATES an
-    // initializer_list member (MiniStr is a never-instantiated template, so the stl
-    // headers' ilist-taking declarations are never bodied). Standalone parses (BOTH
-    // front-ends, the same bytes) see this declaration — the macro is never defined there.
+    // so defining _INITIALIZER_LIST here makes the real header a no-op there. The class
+    // must then be REAL-equivalent enough for the stl headers compiled after it:
+    // layout-compatible (pointer + length) and carrying begin()/end()/size(), which
+    // vector<bool>'s inline bodies call on the CONCRETE initializer_list<bool> (checked
+    // at parse, no instantiation needed). The param is named T for the same seenNames
+    // reason as MiniStr's. Standalone parses (BOTH front-ends, the same bytes) see this
+    // declaration — the macro is never defined there.
     #ifndef _INITIALIZER_LIST
     #define _INITIALIZER_LIST
     namespace std {
-        template <typename E> class initializer_list {
-            const E* items;
+        template <typename T> class initializer_list {
+            const T* items;
             unsigned long len;
+        public:
+            constexpr unsigned long size() const noexcept { return len; }
+            constexpr const T* begin() const noexcept { return items; }
+            constexpr const T* end() const noexcept { return items + len; }
         };
     }
     #endif
