@@ -68,6 +68,19 @@ val ErrorPolicy.policy: CodeGenerationPolicy
 typealias ErrorPolicy = com.monkopedia.krapper.ErrorPolicy
 typealias ReferencePolicy = com.monkopedia.krapper.ReferencePolicy
 
+/** Which parser front-end produces the parse-output model (#45 brick 2). */
+enum class Frontend {
+    /** The libclang-C reducer: parse --header in-process (the historical path). */
+    LIBCLANG,
+
+    /**
+     * THE HANDOFF: skip the libclang parse and load the WrappedTU from --parsedModel —
+     * the full-fidelity ModelIo JSON emitted by the cppfrontend binary (the front-end
+     * built on kplusplus-generated libclang-cpp bindings).
+     */
+    CPP
+}
+
 class KrapperGen : CliktCommand() {
     val header by option(
         "-h",
@@ -174,6 +187,22 @@ class KrapperGen : CliktCommand() {
             "--frontend=cpp handoff format. Also enabled by KRAPPER_ROUNDTRIP_MODEL=1 " +
             "in the environment (which reaches service-mode runs too)."
     ).flag()
+    val frontend by option(
+        "--frontend",
+        help = "Which front-end produces the parse-output model (#45 brick 2): " +
+            "'libclang' (default — parse --header in-process with the libclang-C " +
+            "reducer) or 'cpp' (SKIP the libclang parse and load the WrappedTU from " +
+            "--parsedModel, the full-fidelity ModelIo JSON emitted by the cppfrontend " +
+            "binary). With cpp, --header is NOT parsed — it still supplies the " +
+            "#include list for the generated C++ wrapper. --instantiate is not yet " +
+            "supported with cpp (instantiation forcing re-parses synthesized headers " +
+            "through libclang)."
+    ).enum<Frontend>().default(Frontend.LIBCLANG)
+    val parsedModel by option(
+        "--parsedModel",
+        help = "Path to the ModelIo JSON WrappedTU to load when --frontend=cpp " +
+            "(required in that mode; ignored otherwise)."
+    )
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -191,6 +220,20 @@ class KrapperGen : CliktCommand() {
         // resolution/generation flow below never runs with the flag set.
         dumpParsedModelPath = dumpParsedModel
         if (roundTripModel) roundTripParsedModel = true
+        // THE HANDOFF (#45 brick 2): arm the cpp-front-end hook in Parsing.kt. The
+        // pipeline below is otherwise unchanged — parseHeader returns a ParsedResolver
+        // over the LOADED tree instead of a libclang parse, and resolution+codegen run
+        // exactly as the --roundTripModel oracle proved they can on a decoded model.
+        if (frontend == Frontend.CPP) {
+            require(instantiate.isEmpty()) {
+                "--frontend=cpp does not support --instantiate yet: instantiation " +
+                    "forcing synthesizes a forcing header and re-parses it through " +
+                    "libclang (IndexedServiceImpl.requestInstantiation), which the cpp " +
+                    "front-end path skips. Scoped out of #45 brick 2."
+            }
+            cppParsedModelPath = parsedModel
+                ?: error("--frontend=cpp requires --parsedModel <path>")
+        }
         runBlocking {
             val service = KrapperServiceImpl()
             val resolvedModule = moduleName

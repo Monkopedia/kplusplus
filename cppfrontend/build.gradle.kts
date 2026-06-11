@@ -255,3 +255,50 @@ tasks.register<Exec>("goldenCompare") {
         File(goldenDir, "libclang.json").absolutePath
     )
 }
+
+// ---- #45 brick 2: THE HANDOFF (Phase C) ----
+// The first time generated-bindings-parsed C++ flows through krapper_gen's REAL pipeline:
+//   goldenEmit       — the cppfrontend binary parses the fixture with the Clang C++ AST
+//                      and writes model.json (full-fidelity ModelIo JSON) next to the
+//                      compare projection;
+//   handoffGenerate  — krapper_gen --frontend=cpp loads that model (libclang parse
+//                      SKIPPED), runs resolution + codegen, emits the Kotlin bindings +
+//                      C++ wrapper for the fixture, and COMPILES the wrapper against
+//                      fixture.h (writeTo's CppCompiler step — clang++ -c; a non-zero
+//                      exit fails the task), proving the handed-off model carries
+//                      everything the real pipeline consumes.
+// --instantiate is scoped out on this path (forcing re-parses synthesized headers
+// through libclang); the fixture needs no instantiations. Gated with the module
+// (-PenableClang), like the golden tasks above.
+val handoffDir = layout.buildDirectory.dir("handoff").get().asFile
+
+tasks.register<Exec>("handoffGenerate") {
+    dependsOn(goldenEmit, ":krapper_gen:linkReleaseExecutableNative")
+    doFirst { handoffDir.mkdirs() }
+    commandLine(
+        krapperGenKexe.absolutePath,
+        "-h",
+        File(goldenDir, "fixture.h").absolutePath,
+        // Same standard pin as goldenDump: the wrapper compile must match the parse.
+        "--std",
+        "c++17",
+        "--frontend",
+        "cpp",
+        "--parsedModel",
+        File(goldenDir, "model.json").absolutePath,
+        "-o",
+        handoffDir.absolutePath,
+        "fixture"
+    )
+    doLast {
+        // The run already failed on any resolve/codegen/compile error; assert the
+        // artifacts the next phase consumes actually materialized.
+        val expected = listOf("fixture.h", "fixture.cc", "fixture.def", "libfixture.a")
+        val missing = expected.filter { !File(handoffDir, it).exists() }
+        check(missing.isEmpty()) { "handoffGenerate: missing generated artifact(s): $missing" }
+        val kotlinFiles = File(handoffDir, "src").walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }.toList()
+        check(kotlinFiles.isNotEmpty()) { "handoffGenerate: no Kotlin bindings generated" }
+        println("handoffGenerate: generated " + (expected + kotlinFiles.map { it.name }))
+    }
+}

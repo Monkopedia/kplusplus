@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import clang.tooling.buildASTFromCode
+import com.monkopedia.krapper.generator.model.ModelIo
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedConstructor
@@ -206,7 +207,16 @@ fun main(args: Array<String>): Unit = memScoped {
         // front-end just consumed (buildASTFromCode above) — the one-source guarantee.
         writeFile("$dir/fixture.h", FIXTURE_HEADER + "\n")
         writeFile("$dir/cpp.json", Json.encodeToString(tu.serialized()))
-        println("cppfrontend: golden emit -> $dir/fixture.h + $dir/cpp.json")
+        // #45 brick 2 (THE HANDOFF): alongside the lossy-by-design compare projection
+        // above, emit the FULL-fidelity ModelIo round-trip JSON — the --frontend=cpp
+        // handoff format krapper_gen loads to run resolution+codegen on this tree.
+        // ModelIo's encoder is DAG-aware (Def/Ref), so any element/type instances this
+        // front-end shares across use sites encode as back-references, exactly like a
+        // libclang-built tree's interned types.
+        writeFile("$dir/model.json", ModelIo.encodeToString(tu))
+        println(
+            "cppfrontend: golden emit -> $dir/fixture.h + $dir/cpp.json + $dir/model.json"
+        )
         return@memScoped
     }
 
