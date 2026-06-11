@@ -524,8 +524,11 @@ tasks.register("featuregenParity") {
         // Byte-compare the two outputs: same file set, every file identical (the .def
         // path-modulo — it bakes the output dir's absolute path; .a excluded — derived
         // from the compared .cc). On divergence, a unified diff per file lands under
-        // diffs/<unit>/ for the worklist analysis.
-        fun diffUnit(unit: String, libclang: File, cpp: File): Pair<String, String> {
+        // diffs/<unit>/ for the worklist analysis. Third element: the diff-line count,
+        // ratcheted per-unit against the ledger's `diff:<N>` bound (D2 brick) so an
+        // intra-diff regression — more divergence while staying in the diff class —
+        // fails the task just like a class regression.
+        fun diffUnit(unit: String, libclang: File, cpp: File): Triple<String, String, Int> {
             fun files(dir: File) = dir.walkTopDown()
                 .filter { it.isFile && it.extension != "a" }
                 .map { it.relativeTo(dir).path }.toSortedSet()
@@ -560,15 +563,17 @@ tasks.register("featuregenParity") {
                 }
             }
             return if (notes.isEmpty() && diffFiles == 0) {
-                "identical" to "byte-identical (path-modulo .def) across ${a.size} files"
+                Triple("identical", "byte-identical (path-modulo .def) across ${a.size} files", 0)
             } else {
-                "diff" to (
-                    notes + "$diffLines diff line(s) across $diffFiles file(s)"
-                    ).joinToString("; ")
+                Triple(
+                    "diff",
+                    (notes + "$diffLines diff line(s) across $diffFiles file(s)").joinToString("; "),
+                    diffLines
+                )
             }
         }
 
-        data class Verdict(val unit: String, val cls: String, val detail: String)
+        data class Verdict(val unit: String, val cls: String, val detail: String, val lines: Int)
         val verdicts = mutableListOf<Verdict>()
         val units = specs.map { it to listOf(it) } + ("ALL" to specs)
         for ((unit, instSpecs) in units) {
@@ -580,13 +585,14 @@ tasks.register("featuregenParity") {
             if (libExit != 0) {
                 verdicts += Verdict(
                     unit, "fail",
-                    "LIBCLANG BASELINE failed (exit $libExit — infra, see $libLog)"
+                    "LIBCLANG BASELINE failed (exit $libExit — infra, see $libLog)",
+                    0
                 )
                 continue
             }
             val missing = instSpecs.filter { (forcingPaths[it] ?: "EMIT_FAILED") == "EMIT_FAILED" }
             if (missing.isNotEmpty()) {
-                verdicts += Verdict(unit, "fail", "cppfrontend model emit failed for $missing")
+                verdicts += Verdict(unit, "fail", "cppfrontend model emit failed for $missing", 0)
                 continue
             }
             val cppLog = File(logsDir, "${paritySlug(unit)}_cpp.log")
@@ -599,11 +605,11 @@ tasks.register("featuregenParity") {
             )
             if (cppExit != 0) {
                 val tail = cppLog.readLines().lastOrNull { it.isNotBlank() }.orEmpty()
-                verdicts += Verdict(unit, "fail", "cpp generation failed (exit $cppExit): $tail")
+                verdicts += Verdict(unit, "fail", "cpp generation failed (exit $cppExit): $tail", 0)
                 continue
             }
-            val (cls, detail) = diffUnit(unit, outLib, outCpp)
-            verdicts += Verdict(unit, cls, detail)
+            val (cls, detail, lines) = diffUnit(unit, outLib, outCpp)
+            verdicts += Verdict(unit, cls, detail, lines)
         }
 
         // Scoreboard + the regression gate against the committed expected-state ledger.
@@ -624,14 +630,30 @@ tasks.register("featuregenParity") {
         val report = buildString {
             appendLine("featuregenParity scoreboard (${verdicts.size} units):")
             for (v in verdicts) {
-                val exp = expected[v.unit] ?: "identical"
+                // A `diff` expectation may carry a line bound (`diff:<N>`): the unit
+                // regresses if it diverges MORE than recorded, and an improvement
+                // (fewer lines) prompts the ledger ratchet — same discipline as the
+                // class ranking, one level finer.
+                val expEntry = expected[v.unit] ?: "identical"
+                val exp = expEntry.substringBefore(':')
+                val expLines = expEntry.substringAfter(':', "").toIntOrNull()
                 val marker = when {
                     (rank[v.cls] ?: 2) > (rank[exp] ?: 0) -> {
                         regressions++
                         "REGRESSION (expected $exp)"
                     }
 
-                    (rank[v.cls] ?: 2) < (rank[exp] ?: 0) -> "IMPROVED (expected $exp — ratchet the ledger)"
+                    (rank[v.cls] ?: 2) < (rank[exp] ?: 0) ->
+                        "IMPROVED (expected $exp — ratchet the ledger)"
+
+                    v.cls == "diff" && expLines != null && v.lines > expLines -> {
+                        regressions++
+                        "REGRESSION (${v.lines} diff lines > ledger bound $expLines)"
+                    }
+
+                    v.cls == "diff" && expLines != null && v.lines < expLines ->
+                        "IMPROVED (${v.lines} < $expLines diff lines — ratchet the ledger)"
+
                     else -> "as expected"
                 }
                 appendLine("  [${v.cls.uppercase().padEnd(9)}] ${v.unit} — ${v.detail} [$marker]")

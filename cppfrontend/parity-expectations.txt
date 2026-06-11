@@ -1,41 +1,60 @@
 # featuregenParity expected-state ledger (#46 Phase D).
-# One line per parity unit: <spec>=<identical|diff|fail>. A unit with no line is
-# expected byte-identical. The task fails only when a unit's verdict is WORSE than
-# recorded here (identical < diff < fail); improvements are reported so this ledger
-# ratchets toward all-identical as Phase D converges.
+# One line per parity unit: <spec>=<identical|diff[:<maxDiffLines>]|fail>. A unit with no
+# line is expected byte-identical. The task fails when a unit's verdict is WORSE than
+# recorded here (identical < diff < fail), or when a `diff:<N>` unit diverges by MORE
+# than N diff lines; improvements are reported so this ledger ratchets toward
+# all-identical as Phase D converges.
 #
-# State as of the first full attempt (the brick that landed featuregenParity):
-# EVERY unit generates + compiles end-to-end on --frontend=cpp (0 fail), with
-# categorized diffs vs the libclang baseline. The divergence families (full
-# breakdown on issue #46):
+# State after the D2 convergence brick. EVERY unit still generates + compiles end-to-end
+# on --frontend=cpp (0 fail). Remaining divergence families (full breakdown on #46):
 #   D1 initializer_list materialization (libclang's order-dependent visit() collapse
 #      RESOLVES initializer_list at featuregen scale; the cpp front-end's documented
 #      deterministic UNRESOLVABLE rule drops the ilist ctors/assign/insert overloads
-#      and the std_Initializer_list__* bindings) — ~half the diff lines.
-#   D2 incidental INCLUDE_MISSING std surface (std::abs/wcschr/wcspbrk/wcsrchr/
-#      wcsstr/wmemchr/get_new_handler/set_new_handler + _IO_FILE bind on the
-#      libclang side only; __convert_from_v + __locale_struct on the cpp side only).
+#      and the std_Initializer_list__* bindings) — now the dominant share of the
+#      remaining diff lines (132 of Box<int>'s 174 featuregen.cc +/- lines; D2b 37, D4 5).
+#   D2 RESOLVED for the incidental-surface half (D2a): ModelBuilder now traverses
+#      LinkageSpecDecl with libclang's attach semantics, so the extern "C++"-wrapped
+#      std functions (std::abs/wcschr/wcspbrk/wcsrchr/wcsstr/wmemchr/get_new_handler/
+#      set_new_handler/div/__aligned_storage_default_alignment, __gnu_cxx::div/
+#      __is_null_pointer) and glibc's extern "C"-defined _IO_FILE members parse
+#      identically on both front-ends (root__IO_FILE.kt converged; Box<int> 955 -> 336).
+#      LEDGER-ACCEPTED residue (D2b) — libclang reference-spelling artifacts break its
+#      OWN INCLUDE_MISSING lookups where the cpp path resolves correctly:
+#       * std::__convert_from_v's __cloc arg leaf is spelled `struct __locale_struct`
+#         by libclang (the __c_locale typedef collapse keeps the elaborated keyword;
+#         USR c:c++locale.h@2318) and misses the class map key `__locale_struct`, so
+#         libclang silently DROPS the function ("Missing type const struct
+#         __locale_struct*&"); the cpp leaf is `__locale_struct`, resolves, and emits
+#         the function + root___locale_struct.kt (every unit, ~40 lines).
+#       * std::__exception_ptr::exception_ptr is misnamed `exception_ptr::exception_ptr`
+#         by the libclang walk (out-of-line-member spelling artifact in
+#         bits/exception_ptr.h), so libclang's lookup for std::current_exception/
+#         rethrow_exception's return type fails and both functions + the class are
+#         dropped; the cpp path binds them (+ std::type_info via __cxa_exception_type)
+#         — std::unique_ptr<int> and ALL only (<memory> pulls <exception>).
+#      Mirroring either spelling would be bug-for-bug lossiness emulation (the same
+#      reasoning as D4 / handoffInstDiff gate 2): accepted as diff, not converged.
 #   D3 dependent member-alias spellings baked into uniqueCNames of SURVIVING members
 #      (set::insert's `template<c:...stl_set.h@...>` USR-tref vs the cpp drop;
 #      unordered_map's `typename _Hashtable::hasher` vs `unresolveable`).
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
-Box<Box<int>>=diff
-Box<Point>=diff
-Box<int>=diff
-Pair2<int, double>=diff
-std::map<int, double>=diff
-std::map<int, int>=diff
-std::pair<int, int>=diff
-std::set<int>=diff
-std::unique_ptr<int>=diff
-std::unordered_map<int, int>=diff
-std::unordered_set<int>=diff
-std::vector<Point>=diff
-std::vector<Thing*>=diff
-std::vector<double>=diff
-std::vector<int>=diff
-std::vector<std::__cxx11::basic_string<char>>=diff
-std::vector<std::vector<int>>=diff
-ALL=diff
+Box<Box<int>>=diff:336
+Box<Point>=diff:336
+Box<int>=diff:336
+Pair2<int, double>=diff:336
+std::map<int, double>=diff:368
+std::map<int, int>=diff:368
+std::pair<int, int>=diff:336
+std::set<int>=diff:414
+std::unique_ptr<int>=diff:533
+std::unordered_map<int, int>=diff:376
+std::unordered_set<int>=diff:419
+std::vector<Point>=diff:482
+std::vector<Thing*>=diff:405
+std::vector<double>=diff:482
+std::vector<int>=diff:445
+std::vector<std::__cxx11::basic_string<char>>=diff:450
+std::vector<std::vector<int>>=diff:522
+ALL=diff:1383
