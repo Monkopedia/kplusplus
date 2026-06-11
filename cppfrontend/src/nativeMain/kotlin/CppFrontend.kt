@@ -716,8 +716,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 21 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
-        tu.children.size == 21,
+        "TU has exactly 22 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 22,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
