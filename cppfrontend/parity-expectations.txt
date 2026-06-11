@@ -5,13 +5,30 @@
 # than N diff lines; improvements are reported so this ledger ratchets toward
 # all-identical as Phase D converges.
 #
-# State after the D3 convergence brick. EVERY unit still generates + compiles end-to-end
+# State after the D1a convergence brick. EVERY unit still generates + compiles end-to-end
 # on --frontend=cpp (0 fail). Remaining divergence families (full breakdown on #46):
-#   D1 initializer_list materialization (libclang's order-dependent visit() collapse
-#      RESOLVES initializer_list at featuregen scale; the cpp front-end's documented
-#      deterministic UNRESOLVABLE rule drops the ilist ctors/assign/insert overloads
-#      and the std_Initializer_list__* bindings) — now the dominant share of the
-#      remaining diff lines (132 of Box<int>'s 174 featuregen.cc +/- lines; D2b 37, D4 5).
+#   D1 initializer_list materialization — decomposed + partially converged (D1a brick):
+#      D1a CONVERGED: a CONCRETE element (DefaultArgs::sumIlist's initializer_list<int>)
+#          decodes faithfully, the member survives, and INCLUDE_MISSING materializes
+#          std_Initializer_list__Int byte-identically (-49 diff lines in EVERY unit).
+#          Required the LOSSY-COLLAPSE mirror: a typedef over a DEPENDENT pointer/
+#          reference shape (`typedef const _E* const_iterator`) collapses to libclang's
+#          bare-NAME spelling leaf (never a substitutable tref), so the materialized
+#          class's begin()/end() drop exactly like the live oracle.
+#      D1b remaining: dependent-element member overloads whose libclang spelling is a
+#          NAME tref (basic_string's `std_initializer_list_template__CharT` ctor/op=/
+#          +=/append/assign, vector's `template__Tp` ctor/op=/assign, + the per-element
+#          std_Initializer_list__* materializations they imply) — the same name-tref
+#          convention this front-end uses, so mirrorable deterministically; now the
+#          dominant remaining share (~110/unit basic_string + ~50/vector unit).
+#      D1c remaining: set/unordered_set's surviving overloads spell the element by the
+#          param's USR (`template_c_stl_set_h_3743` = c:stl_set.h@3743 — a header BYTE
+#          OFFSET): libclang's assocTypedefElement keys its reconstructed value_type
+#          tref by param USR where this front-end deliberately keys by NAME. Mirroring
+#          means synthesizing file@offset USRs into symbol names (decision brick).
+#      D1d downstream: the disambiguation-suffix renames on UNRELATED members
+#          (set::insert(const value_type&) -> `__const_template_c_stl_set_h_3743_and`)
+#          have no independent fix — they collapse into D1b+D1c.
 #   D2 RESOLVED for the incidental-surface half (D2a): ModelBuilder now traverses
 #      LinkageSpecDecl with libclang's attach semantics, so the extern "C++"-wrapped
 #      std functions (std::abs/wcschr/wcspbrk/wcsrchr/wcsstr/wmemchr/get_new_handler/
@@ -58,21 +75,21 @@
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
-Box<Box<int>>=diff:336
-Box<Point>=diff:336
-Box<int>=diff:336
-Pair2<int, double>=diff:336
-std::map<int, double>=diff:368
-std::map<int, int>=diff:368
-std::pair<int, int>=diff:336
-std::set<int>=diff:414
-std::unique_ptr<int>=diff:533
-std::unordered_map<int, int>=diff:376
-std::unordered_set<int>=diff:419
-std::vector<Point>=diff:482
-std::vector<Thing*>=diff:405
-std::vector<double>=diff:482
-std::vector<int>=diff:445
-std::vector<std::__cxx11::basic_string<char>>=diff:450
-std::vector<std::vector<int>>=diff:522
-ALL=diff:1375
+Box<Box<int>>=diff:287
+Box<Point>=diff:287
+Box<int>=diff:287
+Pair2<int, double>=diff:287
+std::map<int, double>=diff:319
+std::map<int, int>=diff:319
+std::pair<int, int>=diff:287
+std::set<int>=diff:365
+std::unique_ptr<int>=diff:484
+std::unordered_map<int, int>=diff:327
+std::unordered_set<int>=diff:370
+std::vector<Point>=diff:433
+std::vector<Thing*>=diff:356
+std::vector<double>=diff:433
+std::vector<int>=diff:396
+std::vector<std::__cxx11::basic_string<char>>=diff:401
+std::vector<std::vector<int>>=diff:473
+ALL=diff:1326
