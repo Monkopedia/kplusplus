@@ -5,7 +5,7 @@
 # than N diff lines; improvements are reported so this ledger ratchets toward
 # all-identical as Phase D converges.
 #
-# State after the D2 convergence brick. EVERY unit still generates + compiles end-to-end
+# State after the D3 convergence brick. EVERY unit still generates + compiles end-to-end
 # on --frontend=cpp (0 fail). Remaining divergence families (full breakdown on #46):
 #   D1 initializer_list materialization (libclang's order-dependent visit() collapse
 #      RESOLVES initializer_list at featuregen scale; the cpp front-end's documented
@@ -34,9 +34,27 @@
 #         — std::unique_ptr<int> and ALL only (<memory> pulls <exception>).
 #      Mirroring either spelling would be bug-for-bug lossiness emulation (the same
 #      reasoning as D4 / handoffInstDiff gate 2): accepted as diff, not converged.
-#   D3 dependent member-alias spellings baked into uniqueCNames of SURVIVING members
-#      (set::insert's `template<c:...stl_set.h@...>` USR-tref vs the cpp drop;
-#      unordered_map's `typename _Hashtable::hasher` vs `unresolveable`).
+#   D3 dependent member-alias spellings baked into uniqueCNames of SURVIVING members —
+#      CONVERGED on the cpp side to the deterministic rule (D3 brick): a DependentNameType
+#      member alias no reducer claims keeps its WRITTEN `typename <qual>::<name>` spelling
+#      as a WrappedTypename leaf, '<'-truncated exactly like TypeFactories' else-branch
+#      (goldenCompare's MiniHash shapes pin both qualifier forms against the live oracle).
+#      That is libclang's UNCACHED default, so unordered_set<int>'s (size_t, const hasher&,
+#      const key_equal&, const allocator_type&) ctor converges in the ALL unit (1383->1375).
+#      LEDGER-ACCEPTED residue: libclang's remaining spellings of the SAME aliases are
+#      PROVEN parse-context-dependent (the seenNames cache, N5) — the same ctor spells
+#      `typename_EXP__Hashtable_*` x3 under the ALL worklist, `typename hasher` +
+#      `template__Equal`/`template__Alloc` in its own single-spec unit, and yet another
+#      variant (`allocator_type` name leaf) under a minimal two-include header. A spelling
+#      that changes with unrelated parse content is not a convergence target; the cpp
+#      spelling is the stable member of the family (the Phase E reference). Affected:
+#      unordered_map<int,int> ALL+unit, unordered_set<int> unit (the cpp side spells the
+#      deterministic typename forms either way).
+#      D1-ENTANGLED (deferred with D1): the USR-tref overload suffixes (set::insert's
+#      `template_c_stl_set_h_3743` vs the cpp name-tref `template<_Key>`) only surface
+#      because the initializer_list insert/ctor/assign overloads survive on libclang and
+#      force disambiguation; cpp's single survivor needs no suffix. Converging D1 will
+#      expose them as the residual name-vs-USR tref-key spelling choice.
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
@@ -57,4 +75,4 @@ std::vector<double>=diff:482
 std::vector<int>=diff:445
 std::vector<std::__cxx11::basic_string<char>>=diff:450
 std::vector<std::vector<int>>=diff:522
-ALL=diff:1383
+ALL=diff:1375
