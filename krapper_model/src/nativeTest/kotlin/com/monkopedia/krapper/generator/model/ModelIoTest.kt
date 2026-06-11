@@ -177,6 +177,9 @@ class ModelIoTest {
         assertEquals("std::vector<int*>", vec.toString())
         val enum = assertIs<WrappedEnumType>(args[3].type)
         assertEquals(listOf(WrappedEnumConstant("RED", 1)), enum.constants)
+        // Identity preservation: both `int` uses were ONE interned instance in the
+        // original model, so the DAG encode (def/ref) must restore them as ONE instance.
+        assertSame(args[0].type, enum.underlying)
 
         val ctor = cls.children.filterIsInstance<WrappedConstructor>().single()
         assertTrue(ctor.isCopyConstructor)

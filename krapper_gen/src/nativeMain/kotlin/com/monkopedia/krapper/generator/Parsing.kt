@@ -589,26 +589,33 @@ suspend fun DeferScope.parseHeader(
         Log.i("Dumped parsed model to $path (parse-only mode, exiting)")
         exitProcess(0)
     }
+    // Round-trip oracle (#45 brick 1): serialize the parsed model to JSON, deserialize
+    // it back, and hand the rest of the pipeline THE DESERIALIZED TREE. Placed at the
+    // same point as the --dumpParsedModel golden hook — post-reduce, BEFORE the
+    // pre-resolution rewrites below — because the rewrites REPLACE method children with
+    // copies (rewriteMethods): running them after the swap lets them act on the restored
+    // tree, so the cursor->element memo (remapped to the restored instances by
+    // remapMemoized) and the live tree stay aligned exactly as in a non-flag run. The
+    // rewrite-produced fields (returnsPairSecond/returnViaMemberCall/rangeElementType)
+    // are still covered by the schema — they're serialized whenever set (e.g. by the
+    // instantiation-time rewrite passes feeding later parses through shared elements).
+    val model = if (roundTripParsedModel) {
+        val json = ModelIo.encodeToString(tu)
+        val restored = ModelIo.decodeFromString(json)
+        WrappedElement.remapMemoized(tu, restored)
+        Log.i("Round-tripped parsed model through ModelIo JSON (${json.length} chars)")
+        restored
+    } else {
+        tu
+    }
     // T1.10: bake view-return rewrites (e.g. llvm::StringRef -> std::string via `.str()`)
     // into the parsed tree BEFORE resolution. ParsedResolver.resolve re-reads classes from
     // this TU (not the findClasses() result), so the rewrite must live on the tree itself.
-    rewriteViewReturns(tu)
+    rewriteViewReturns(model)
     // T1.7e: a by-value `std::unique_ptr<T>` return -> raw `T*` (ownership transferred via
     // `.release()`). Same pre-resolution baking rationale as rewriteViewReturns.
-    rewriteUniquePtrReturns(tu)
-    // Round-trip oracle (#45 brick 1): serialize the parsed model to JSON, deserialize
-    // it back, and hand RESOLUTION THE DESERIALIZED TREE. Placed AFTER the pre-resolution
-    // rewrites above (unlike the --dumpParsedModel golden hook) because the rewrites bake
-    // krapper-specific state (returnsPairSecond/returnViaMemberCall/rangeElementType +
-    // rewritten return types) onto the tree before resolution consumes it — round-tripping
-    // post-rewrite covers those fields too, maximizing what the oracle proves.
-    if (roundTripParsedModel) {
-        val json = ModelIo.encodeToString(tu)
-        val restored = ModelIo.decodeFromString(json)
-        Log.i("Round-tripped parsed model through ModelIo JSON (${json.length} chars)")
-        return ParsedResolver(restored)
-    }
-    return ParsedResolver(tu)
+    rewriteUniquePtrReturns(model)
+    return ParsedResolver(model)
 }
 
 private fun DeferScope.parseHeader(
