@@ -40,6 +40,7 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
+import com.monkopedia.krapper.generator.model.ForcingHeader
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -168,35 +169,12 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     override suspend fun requestInstantiation(req: InstantiationRequest) {
         val target = "${req.base}<${req.args.joinToString(", ")}>"
         requested.add(target)
-        val forceName = "KrapperForce_" + target
-            .replace("::", "_")
-            .replace("<", "_")
-            .replace(">", "")
-            .replace(", ", "_")
-            .replace(" ", "")
-            // A pointer/reference template arg (e.g. std::vector<Thing*>, from the T1.3
-            // range materialization) would otherwise leak `*`/`&` into the struct's
-            // identifier and the temp filename — both illegal — crashing the parse with
-            // `expected unqualified-id`. Map them to a token instead. The forcing struct's
-            // `value` member still uses the real `$target` (Thing*), so the instantiation
-            // is unaffected.
-            .replace("*", "Ptr")
-            .replace("&", "Ref")
-        val forcingContent = buildString {
-            // Every type in the instantiation must be declared, not just the
-            // outer base — previously only stdHeaderFor(req.base) was included,
-            // so std::vector<std::string> failed (basic_string undeclared).
-            // Include std headers TARGETED to the types named in `target`
-            // (scanning, so nested element types are covered) plus the
-            // consumer's own headers (for user element types like a wrapped
-            // struct in std::vector<Point>). Targeted rather than a blanket
-            // bundle: a broad include drags unrelated system structs in under
-            // INCLUDE_MISSING (e.g. <sys/timex.h>'s `timex`), which then
-            // generate invalid wrappers.
-            for (stdHeader in stdHeadersFor(target)) appendLine("#include $stdHeader")
-            for (userHeader in request.headers) appendLine("#include \"$userHeader\"")
-            appendLine("struct $forceName { $target value; };")
-        }
+        // The forcing struct's name + header content are SHARED with the cpp front-end
+        // (ForcingHeader, :krapper_model): the cppfrontend binary synthesizes the same
+        // bytes for its forcing parse, so both paths force the same specialization from
+        // the same translation unit.
+        val forceName = ForcingHeader.forceName(target)
+        val forcingContent = ForcingHeader.contentFor(target, request.headers)
         forcingHeaders[forceName] = forcingContent
         // #45 brick 3: with --frontend=cpp the forcing-parse tree was already produced by
         // the cppfrontend binary (which synthesizes the SAME forcing header and parses it
@@ -289,36 +267,6 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
             }
             ).dedupClassesLastWins()
-    }
-
-    // The std headers needed to declare the types named in an instantiation
-    // target string. Scans for type tokens so nested element types are covered
-    // (e.g. std::vector<std::string> -> <vector> + <string>). Targeted, not a
-    // blanket include, so unrelated system types aren't dragged in under
-    // INCLUDE_MISSING.
-    private fun stdHeadersFor(target: String): List<String> =
-        STD_TYPE_HEADERS.filter { (token, _) -> target.contains(token) }
-            .map { it.second }
-            .distinct()
-
-    private companion object {
-        // token (as it appears in a canonical type string) -> std header.
-        // "basic_string" matches std::__cxx11::basic_string (canonical std::string).
-        val STD_TYPE_HEADERS = listOf(
-            "basic_string" to "<string>",
-            "vector" to "<vector>",
-            "unordered_map" to "<unordered_map>",
-            "unordered_set" to "<unordered_set>",
-            "map" to "<map>",
-            "set" to "<set>",
-            "list" to "<list>",
-            "deque" to "<deque>",
-            "pair" to "<utility>",
-            "tuple" to "<tuple>",
-            "unique_ptr" to "<memory>",
-            "shared_ptr" to "<memory>",
-            "weak_ptr" to "<memory>"
-        )
     }
 
     override suspend fun writeTo(output: String) {

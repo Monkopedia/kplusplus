@@ -15,6 +15,7 @@
 #include <clang/Lex/Lexer.h>
 
 #include <string>
+#include <vector>
 
 // brick-6 BRIDGE (#44, documented): the libclang front-end recovers a parameter default's
 // VALUE as source text — ModelFactories.defaultValue tokenizes the default sub-expression
@@ -33,6 +34,32 @@
 // "nullptr", "Palette()"); a spaced default (`= Palette ( )`) diverges — Phase C
 // normalizer entry: compare default values with whitespace stripped.
 namespace kppbridge {
+// brick-3 BRIDGE (#45, instantiation forcing): the forcing-parse fixture #includes std
+// headers (<vector>), which clang::tooling can only resolve with real driver arguments —
+// at minimum `-resource-dir` (the tool name "clang-tool" defeats the relative resource-dir
+// computation) and the language standard. The bound `buildASTFromCode(code, filename)`
+// overload takes no args, and the args-taking overload's `const std::vector<std::string>&`
+// parameter is not a bindable surface yet (the std::vector<std::string> instantiation +
+// the by-value-vector marshalling). Until it is, this inline helper is the smallest
+// bridge: args arrive '\n'-joined in one string (no escaping — driver args never contain
+// newlines), and the returned ASTUnit* transfers ownership via .release(), exactly the
+// raw-pointer contract the unique_ptr-return rewrite gives the bound buildASTFromCode.
+inline clang::ASTUnit *buildASTWithArgs(const char *code, const char *filename,
+                                        const char *joinedArgs) {
+    std::vector<std::string> args;
+    std::string current;
+    for (const char *c = joinedArgs; *c; ++c) {
+        if (*c == '\n') {
+            if (!current.empty()) args.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(*c);
+        }
+    }
+    if (!current.empty()) args.push_back(current);
+    return clang::tooling::buildASTFromCodeWithArgs(code, args, filename).release();
+}
+
 inline std::string defaultArgText(clang::ParmVarDecl *parm) {
     if (!parm || !parm->hasDefaultArg()) {
         return std::string();

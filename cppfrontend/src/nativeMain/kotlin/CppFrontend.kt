@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import clang.tooling.buildASTFromCode
+import com.monkopedia.krapper.generator.model.ForcingHeader
 import com.monkopedia.krapper.generator.model.ModelIo
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -36,9 +37,17 @@ import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlin.system.exitProcess
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.MemScope
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.toKString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kppbridge.buildASTWithArgs
+import platform.posix.fgets
+import platform.posix.pclose
+import platform.posix.popen
 
 // The brick-3 fixture "header" (#44 construction depth): exercises the full decl/class/
 // member construction contract — access filtering (public kept, private/protected filtered
@@ -166,6 +175,37 @@ private val FIXTURE_HEADER = """
     };
 """.trimIndent()
 
+// #45 brick 3: the INSTANTIATION-FORCING fixture — a SIBLING of FIXTURE_HEADER (extending
+// it would put all of <vector> under the golden compare's full-tree diff). Mirrors
+// featuregen's RangeHolder shape reduced to its essence: an element class (Item) and an
+// owner (Bag) whose range accessor returns a std::vector specialization that only an
+// `--instantiate "std::vector<Item*>"` request materializes. On the main resolve
+// (IGNORE_MISSING) `items()` DROPS — the container isn't bound yet — and is recovered by
+// resolveForcing's pass 3, exactly the libclang flow this fixture cross-checks. The
+// include guard matters: the generated wrapper #includes bag.h both directly and through
+// the re-materialized KrapperForce_*.h.
+private val FORCING_FIXTURE_HEADER = """
+    #pragma once
+    #include <vector>
+
+    struct Item {
+        int id;
+        Item() : id(0) {}
+        Item(int id_) : id(id_) {}
+        int getId() const { return id; }
+    };
+
+    struct Bag {
+        Bag();
+        void add(Item* t);
+        int count() const;
+        std::vector<Item*> items() const;
+    };
+""".trimIndent()
+
+// The fixture's instantiation requests — one per `--instantiate` the generate step makes.
+private val FORCING_TARGETS = listOf("std::vector<Item*>")
+
 private var failures = 0
 
 private fun check(name: String, pass: Boolean, detail: String = "") {
@@ -188,6 +228,11 @@ fun main(args: Array<String>): Unit = memScoped {
         val cpp = args.getOrNull(1) ?: fail("--golden-compare <cpp.json> <libclang.json>")
         val libclang = args.getOrNull(2) ?: fail("--golden-compare <cpp.json> <libclang.json>")
         goldenCompare(cpp, libclang)
+    }
+    if (args.firstOrNull() == "--handoff-emit") {
+        val dir = args.getOrNull(1) ?: fail("--handoff-emit <dir>")
+        handoffEmit(dir)
+        return@memScoped
     }
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
     // from it, and a ".h" parses as C (where `int area() const` is ill-formed and Shape is a
@@ -827,6 +872,65 @@ fun main(args: Array<String>): Unit = memScoped {
     if (failures > 0) fail("$failures self-check(s) failed")
     println("cppfrontend: ALL SELF-CHECKS PASSED")
 }
+
+/**
+ * #45 brick 3 — INSTANTIATION-FORCING HANDOFF EMIT. The cpp front-end's half of the
+ * `--frontend=cpp --instantiate` flow:
+ *  1. write the forcing fixture (bag.h) so krapper_gen consumes the same bytes;
+ *  2. parse it (the BASE model: the args-bearing parse, since the fixture #includes
+ *     <vector>) -> bag_model.json (--parsedModel);
+ *  3. for each instantiation target, synthesize the SAME forcing header the libclang path
+ *     synthesizes (ForcingHeader, :krapper_model), parse it as a SEPARATE translation
+ *     unit, and emit its model -> <forceName>.json (--forcingModel).
+ * Identity note: each payload is self-contained — cpp:<id> identities are per-ASTContext
+ * (Decl::getID() is NOT stable across buildASTFromCode calls), but nothing references
+ * identity ACROSS payloads; krapper_gen's forcing flow merges the trees by structural
+ * identity (type-string keys: alreadyBoundKeys / tracker maps / last-wins dedup), the same
+ * keys the libclang path's USR memo collapses to one instance.
+ */
+private fun MemScope.handoffEmit(dir: String) {
+    val fixturePath = "$dir/bag.h"
+    writeFile(fixturePath, FORCING_FIXTURE_HEADER + "\n")
+    // The std-header-bearing parses need real driver arguments: the tooling driver can't
+    // compute its resource dir (its "binary" is the virtual "clang-tool"), so the builtin
+    // headers (<stddef.h> etc., behind <vector>) only resolve with an explicit
+    // -resource-dir; system C++ headers are found by the driver's normal GCC detection.
+    // c++17 pins the same standard the generate step parses/compiles under.
+    val parseArgs = "-std=c++17\n-resource-dir=" + commandOutput("clang++ -print-resource-dir")
+    val baseTu = parseToWrappedTU(FORCING_FIXTURE_HEADER, "bag.cc", parseArgs)
+    writeFile("$dir/bag_model.json", ModelIo.encodeToString(baseTu))
+    val emitted = mutableListOf("bag.h", "bag_model.json")
+    for (target in FORCING_TARGETS) {
+        val forceName = ForcingHeader.forceName(target)
+        val content = ForcingHeader.contentFor(target, listOf(fixturePath))
+        val forcingTu = parseToWrappedTU(content, "$forceName.cc", parseArgs)
+        writeFile("$dir/$forceName.json", ModelIo.encodeToString(forcingTu))
+        emitted.add("$forceName.json")
+    }
+    println("cppfrontend: handoff-emit -> $dir/{${emitted.joinToString(", ")}}")
+}
+
+// Parse [code] with the '\n'-joined driver [args] (kppbridge.buildASTWithArgs — see
+// clang_slice.h) and construct the WrappedTU. The virtual filename must spell a C++
+// extension (same rule as the buildASTFromCode call in main).
+private fun MemScope.parseToWrappedTU(code: String, filename: String, args: String) =
+    buildWrappedTU(
+        buildASTWithArgs(code, filename, args)
+            ?.getASTContext()
+            ?.getTranslationUnitDecl()
+            ?: fail("buildASTWithArgs failed for $filename")
+    )
+
+// First line of [cmd]'s stdout (popen), trimmed. Used for `clang++ -print-resource-dir`.
+private fun commandOutput(cmd: String): String = memScoped {
+    val fp = popen(cmd, "r") ?: fail("popen failed: $cmd")
+    val buffer = allocArray<ByteVar>(BUFFER_SIZE)
+    val line = fgets(buffer, BUFFER_SIZE, fp)?.toKString().orEmpty().trim()
+    pclose(fp)
+    if (line.isEmpty()) fail("no output from: $cmd") else line
+}
+
+private const val BUFFER_SIZE = 1024
 
 private fun printElements(elements: List<WrappedElement>, indent: String) {
     for (child in elements) {
