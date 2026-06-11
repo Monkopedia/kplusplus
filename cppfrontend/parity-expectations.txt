@@ -34,16 +34,25 @@
 #          typedef-to-param collapse spells the FIRST-SEEN param-0 name from the
 #          seenNames cache, the N5-family order-dependence; libstdc++'s uniform _Tp
 #          naming keeps production convergent, and these ratchet numbers pin it).
-#      D1c remaining: set/unordered_set's surviving overloads spell the element by the
-#          param's USR (`template_c_stl_set_h_3743` = c:stl_set.h@3743 — a header BYTE
-#          OFFSET): libclang's assocTypedefElement keys its reconstructed value_type
-#          tref by param USR where this front-end deliberately keys by NAME. Mirroring
-#          means synthesizing file@offset USRs into symbol names (decision brick).
-#          Post-D1b these are the ONLY initializer_list diff lines left (set 161,
-#          unordered_set 166, + their ALL share).
-#      D1d downstream: the disambiguation-suffix renames on UNRELATED members
-#          (set::insert(const value_type&) -> `__const_template_c_stl_set_h_3743_and`)
-#          have no independent fix — they collapse into D1c.
+#      D1c LEDGER-ACCEPTED (D1c brick, #46): set/unordered_set's surviving overloads
+#          spell the element by the param's USR — libclang's assocTypedefElement keys
+#          the reconstructed value_type tref by WrappedTemplateRef(param.usr), and for
+#          these params clang_getCursorUSR falls back to USRGeneration's printLoc form
+#          `c:<header basename>@<byte offset>`. Exemplars VERIFIED against the dumps and
+#          the installed libstdc++ (gcc 16.1.1): `template_c_stl_set_h_3743` = byte 3743
+#          of bits/stl_set.h = the `_Key` param of `template<typename _Key, ...> class
+#          set`; `template_c_unordered_set_h_3824` = byte 3824 of bits/unordered_set.h =
+#          unordered_set's `_Value` param. Mirroring is REJECTED: (a) not cheap — the
+#          cpp front-end keys identity on Decl::getID() and its binding surface has NO
+#          SourceLocation/SourceManager family at all; mirroring needs that whole new
+#          surface PLUS a byte-exact reimplementation of USRGeneration's printLoc
+#          fallback (when it fires and how it prints); (b) maximally version-fragile —
+#          the offsets are libstdc++ header BYTES, so any upstream edit above the
+#          template (a comment, whitespace) renames every generated symbol; Phase E
+#          makes cpp the stable reference, and a name-keyed tref is exactly the spelling
+#          the reference should keep. 46 lines in set, 43 in unordered_set (+ the same
+#          in ALL). D1d (the `__const_template_c_stl_set_h_3743_and` disambiguation
+#          renames on UNRELATED members) collapses into this accept.
 #   D2 RESOLVED for the incidental-surface half (D2a): ModelBuilder now traverses
 #      LinkageSpecDecl with libclang's attach semantics, so the extern "C++"-wrapped
 #      std functions (std::abs/wcschr/wcspbrk/wcsrchr/wcsstr/wmemchr/get_new_handler/
@@ -90,6 +99,22 @@
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
+#   O1 forcing-round std-function ORDER (identified by the D1c endpoint sweep — the
+#      last family, the ONLY one that was uncited): in each instantiation ROUND's
+#      emitted "std Functions" block, the cpp path places set/get_new_handler before
+#      the wcs* group while libclang keeps base order. Mechanism: ForcingHeader
+#      prepends the target's std includes (e.g. `#include <vector>`) BEFORE the user
+#      header, so in the forcing TU <new> materializes lexically before <cwchar> —
+#      BOTH front-ends parse that same flipped TU, but libclang's session-scoped USR
+#      memo (elementLookup, one Index across base + forcing parses) collapses the std
+#      namespace onto the element ALREADY populated by the base parse (first-seen
+#      order wins), while the cpp path's per-payload forcing model keeps the forcing
+#      TU's own lexical order. Spec-dependent on the cpp side today (<vector>/<set>/
+#      <map>/<memory> prepends flip it; <string>-first and non-std specs don't), so
+#      libclang's first-seen order is the SPEC-INVARIANT member of the family — this
+#      is a convergence target (mirror the memo's first-seen ordering when loading a
+#      forcing model), NOT an accept. 32 lines in each flipped unit (vector x5,
+#      map x2, set, unordered_set, unordered_map, unique_ptr), 352 in ALL.
 Box<Box<int>>=diff:83
 Box<Point>=diff:83
 Box<int>=diff:83
