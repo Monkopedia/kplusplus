@@ -497,6 +497,82 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
 }
 
 /**
+ * T1.3 RANGE-RETURN mirror (#46 Phase D; ModelFactories.rangeVectorReturn +
+ * extractRangeReturn + elementOfIterator): a method returning `llvm::iterator_range<It>`
+ * (featuregen's RangeHolder::items, and every Clang `decls()`-style accessor) is
+ * materialized at MODEL CONSTRUCTION into a `std::vector<Elem*>` return — a real
+ * template type that resolves through the existing vector-instantiation path — with the
+ * element spelling recorded for CppWriter's materialization loop
+ * (WrappedMethod.rangeElementType). Matching + extraction mirror the libclang factory
+ * rule-for-rule, off the CANONICAL return (seeing through the `using X_range = ...`
+ * member aliases): the iterator is the range's first template argument, and the element
+ * is what `*it` dereferences to — pointer iterator (peel one level, two for `Elem**`),
+ * a `value_type` member alias (either alias kind), or the iterator's own first template
+ * argument — stripped to the bare class name. Returns null for any non-range return
+ * (normal construction applies; an unextractable element drops the method the same way
+ * the libclang path does).
+ */
+fun rangeVectorReturn(returnType: QualType): Pair<WrappedType, String>? {
+    val canonical = returnType.getCanonicalType()
+    val spelling = canonical.getAsString() ?: return null
+    if (!spelling.contains("iterator_range<")) return null
+    if (with(returnType.memScope) { numTemplateArgs(canonical) } < 1) return null
+    val iterator = with(returnType.memScope) { templateArgAsType(canonical, 0u) }
+    val element = elementOfIterator(iterator) ?: return null
+    return WrappedTemplateType(
+        WrappedTypeReference("std::vector"),
+        listOf(pointerTo(WrappedTypeReference(element)))
+    ) to element
+}
+
+// ModelFactories.elementOfIterator, structurally: pointer iterator -> the (doubly-)peeled
+// pointee; class iterator -> the `value_type` alias's canonical underlying; else the
+// iterator's own first template argument.
+private fun elementOfIterator(iterator: QualType): String? {
+    val canon = iterator.getCanonicalType()
+    val ty = canon.typePtr() ?: return null
+    if (ty.isPointerType()) {
+        val pointee = ty.getPointeeType().getCanonicalType()
+        val pointeeTy = pointee.typePtr() ?: return null
+        val element = if (pointeeTy.isPointerType()) {
+            pointeeTy.getPointeeType().getCanonicalType()
+        } else {
+            pointee
+        }
+        return stripDecoration(element.getAsString())
+    }
+    ty.asRecord()?.let { record ->
+        for (decl in record.asDeclContext().decls()) {
+            if (decl == null) continue
+            val kind = decl.getKind()
+            if (kind != Kind.Typedef && kind != Kind.TypeAlias) continue
+            val alias = decl.asTypedefNameDecl() ?: continue
+            if (alias.getNameAsString() != "value_type") continue
+            return stripDecoration(alias.getUnderlyingType().getCanonicalType().getAsString())
+        }
+    }
+    if (with(iterator.memScope) { numTemplateArgs(canon) } >= 1) {
+        val arg = with(iterator.memScope) { templateArgAsType(canon, 0u) }
+        return stripDecoration(arg.getAsString())
+    }
+    return null
+}
+
+// ModelFactories.stripDecoration, verbatim: reduce a spelling to its bare class name.
+private fun stripDecoration(spelling: String?): String? {
+    var s = (spelling ?: return null).trim()
+    if (s.isEmpty()) return null
+    while (true) {
+        val before = s
+        if (s.startsWith("const ")) s = s.substring("const ".length).trim()
+        if (s.endsWith("*") || s.endsWith("&")) s = s.dropLast(1).trim()
+        if (s.endsWith("const")) s = s.dropLast("const".length).trim()
+        if (s == before) break
+    }
+    return s.ifEmpty { null }
+}
+
+/**
  * WrappedTemplateParam.defaultType capture (#46 Phase D). The model derives a param's
  * defaultType from its CHILDREN (the first WrappedType child as the base + every
  * WrappedTemplateRef child as the args — WrappedTemplateParam.defaultType), and on the

@@ -374,9 +374,22 @@ private class ModelBuilder {
             buildTypedef(typedef)?.let { parent.addChild(it) }
             return
         }
+        // NESTED record (#46 Phase D): a class nested in a PLAIN class binds as a
+        // WrappedClass child (`Outer::Inner` — ModelFactories.map's ClassDecl/StructDecl
+        // branch applies at any level); a class nested in a class TEMPLATE produces NO
+        // element (featuregen's T-typename rows: `Wrapper<T>::Inner` must NOT bind —
+        // matching the libclang tree, which carries no class under a template).
+        if (parent is WrappedClass &&
+            decl.getKind() != Kind.ClassTemplateSpecialization &&
+            decl.getKind() != Kind.ClassTemplatePartialSpecialization
+        ) {
+            decl.asCXXRecordDecl()?.let { record ->
+                addClass(record, decl, parent)
+                return
+            }
+        }
         // Anything else (static data members, nested enums) falls through
-        // ModelFactories.map's `else -> return null` and is dropped; nested record decls
-        // are brick-6+ (together with the nested-in-class-template skip).
+        // ModelFactories.map's `else -> return null` and is dropped.
     }
 
     // Mirror of the metadata side-effects ModelFactories.map records for a member it
@@ -462,10 +475,15 @@ private class ModelBuilder {
     private fun buildMethod(method: CXXMethodDecl): WrappedMethod {
         val name = method.asNamedDecl().getNameAsString() ?: error("method without a name")
         val isConst = method.isConst()
+        // T1.3 mirror (#46): an `iterator_range<It>` return is materialized into
+        // `std::vector<Elem*>` at construction, exactly like ModelFactories.WrappedMethod
+        // (see TypeBuilder.rangeVectorReturn). The G8 const rule never applies to it
+        // (the materialized vector is a by-value template type).
+        val range = rangeVectorReturn(method.getReturnType())
         // Mirror the libclang front-end's return-const rule (ModelFactories.WrappedMethod):
         // a `const` method's constness only carries to a pointer/reference return; const on
         // a by-value return is meaningless for the temporary and breaks the Holder path (G8).
-        val returnType = buildWrappedType(method.getReturnType()).let {
+        val returnType = range?.first ?: buildWrappedType(method.getReturnType()).let {
             if (isConst && (it.isPointer || it.isReference)) WrappedType.const(it) else it
         }
         // ModelFactories.WrappedMethod: STATIC for a static member (or a non-class-parent
@@ -474,6 +492,7 @@ private class ModelBuilder {
         return WrappedMethod(name, returnType, methodType).also {
             it.isConst = isConst
             it.isVirtual = method.isVirtual()
+            it.rangeElementType = range?.second
             it.addArgs(method.asFunctionDecl())
         }
     }
