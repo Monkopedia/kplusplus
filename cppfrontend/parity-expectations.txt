@@ -4,4 +4,38 @@
 # recorded here (identical < diff < fail); improvements are reported so this ledger
 # ratchets toward all-identical as Phase D converges.
 #
-# (Populated from the first honest run — see the PR that landed featuregenParity.)
+# State as of the first full attempt (the brick that landed featuregenParity):
+# EVERY unit generates + compiles end-to-end on --frontend=cpp (0 fail), with
+# categorized diffs vs the libclang baseline. The divergence families (full
+# breakdown on issue #46):
+#   D1 initializer_list materialization (libclang's order-dependent visit() collapse
+#      RESOLVES initializer_list at featuregen scale; the cpp front-end's documented
+#      deterministic UNRESOLVABLE rule drops the ilist ctors/assign/insert overloads
+#      and the std_Initializer_list__* bindings) — ~half the diff lines.
+#   D2 incidental INCLUDE_MISSING std surface (std::abs/wcschr/wcspbrk/wcsrchr/
+#      wcsstr/wmemchr/get_new_handler/set_new_handler + _IO_FILE bind on the
+#      libclang side only; __convert_from_v + __locale_struct on the cpp side only).
+#   D3 dependent member-alias spellings baked into uniqueCNames of SURVIVING members
+#      (set::insert's `template<c:...stl_set.h@...>` USR-tref vs the cpp drop;
+#      unordered_map's `typename _Hashtable::hasher` vs `unresolveable`).
+#   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
+#      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
+#      path keeps it and emits dispose()/owned() (correct-by-construction).
+Box<Box<int>>=diff
+Box<Point>=diff
+Box<int>=diff
+Pair2<int, double>=diff
+std::map<int, double>=diff
+std::map<int, int>=diff
+std::pair<int, int>=diff
+std::set<int>=diff
+std::unique_ptr<int>=diff
+std::unordered_map<int, int>=diff
+std::unordered_set<int>=diff
+std::vector<Point>=diff
+std::vector<Thing*>=diff
+std::vector<double>=diff
+std::vector<int>=diff
+std::vector<std::__cxx11::basic_string<char>>=diff
+std::vector<std::vector<int>>=diff
+ALL=diff
