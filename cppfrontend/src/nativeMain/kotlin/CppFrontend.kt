@@ -82,6 +82,16 @@ import platform.posix.popen
 // scopes — unordered_map's and set's shapes, assocTypedefElement), and DefBox/DefPair
 // (defaulted template params — the cursor-walk residue WrappedTemplateParam.defaultType
 // reads; expected shapes pinned against the libclang oracle for this exact fixture).
+// D1b (#46) grows it with MiniStr + an in-fixture std::initializer_list declaration: the
+// two name-tref dependent initializer_list element shapes (direct param — basic_string's
+// family; typedef-to-param — vector's) whose members must SURVIVE with the libclang
+// survivor's exact name-tref spelling. MiniStr's param is deliberately named T: the
+// libclang typedef-to-param collapse spells the FIRST-SEEN param-0 name from visit()'s
+// seenNames cache (here Holder's "T"; probed — a "C"-named param diverged as
+// cpp=template<C> vs libclang=template<T>), the same N5-family order-dependence D3
+// ledger-accepts. libstdc++'s uniform `_Tp`-style naming keeps production on the
+// convergent path (vector's survivors spell `template__Tp` on both sides — the parity
+// ratchet pins the actuals); naming the fixture param T pins that same path.
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -234,6 +244,36 @@ private val FIXTURE_HEADER = """
 
     template <typename T, typename U = T>
     struct DefPair {};
+
+    // Guarded with libstdc++'s own include guard: the generated wrapper #includes this
+    // fixture BEFORE its <vector>/<string> boilerplate (handoffGenerate's compile step),
+    // so defining _INITIALIZER_LIST here makes the real header a no-op there. The class
+    // must then be REAL-equivalent enough for the stl headers compiled after it:
+    // layout-compatible (pointer + length) and carrying begin()/end()/size(), which
+    // vector<bool>'s inline bodies call on the CONCRETE initializer_list<bool> (checked
+    // at parse, no instantiation needed). The param is named T for the same seenNames
+    // reason as MiniStr's. Standalone parses (BOTH front-ends, the same bytes) see this
+    // declaration — the macro is never defined there.
+    #ifndef _INITIALIZER_LIST
+    #define _INITIALIZER_LIST
+    namespace std {
+        template <typename T> class initializer_list {
+            const T* items;
+            unsigned long len;
+        public:
+            constexpr unsigned long size() const noexcept { return len; }
+            constexpr const T* begin() const noexcept { return items; }
+            constexpr const T* end() const noexcept { return items + len; }
+        };
+    }
+    #endif
+
+    template <typename T>
+    struct MiniStr {
+        typedef T value_type;
+        void append(std::initializer_list<T> l);
+        void assignAll(std::initializer_list<value_type> l);
+    };
 """.trimIndent()
 
 // #45 brick 3: the INSTANTIATION-FORCING fixture — a SIBLING of FIXTURE_HEADER (extending
@@ -645,10 +685,11 @@ fun main(args: Array<String>): Unit = memScoped {
     val holders = tu.children.filterIsInstance<WrappedTemplate>()
     val holder = holders.find { it.name == "Holder" }
     check(
-        "TU contains the 12 WrappedTemplates in source order (Holder + the Phase D shapes)",
+        "TU contains the 13 WrappedTemplates in source order (Holder + the Phase D shapes)",
         holders.map { it.name } == listOf(
             "Holder", "PtrTrait", "SmartPtr", "MapTraits", "MiniMap",
-            "SetTraits", "MiniSet", "HashTraits", "MiniHash", "DefAlloc", "DefBox", "DefPair"
+            "SetTraits", "MiniSet", "HashTraits", "MiniHash", "DefAlloc", "DefBox",
+            "DefPair", "MiniStr"
         ),
         "got ${holders.map { it.name }}"
     )
@@ -727,8 +768,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 24 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
-        tu.children.size == 24,
+        "TU has exactly 26 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 26,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
@@ -1052,6 +1093,30 @@ fun main(args: Array<String>): Unit = memScoped {
             ?.toString() == "template<T><template<T>>",
         "got ${holders.find { it.name == "DefPair" }?.templateArgs
             ?.map { "${it.name}=${it.defaultType}" }}"
+    )
+    // D1b (#46): a dependent initializer_list element that is a bare ref to an enclosing
+    // template param — written DIRECTLY (basic_string's ctor/op=/op+=/append/assign shape)
+    // or through a plain TYPEDEF-TO-PARAM (vector's `typedef _Tp value_type` shape) —
+    // decodes faithfully as the NAME-tref the libclang survivor spells
+    // (`std::initializer_list<template<_CharT>>` in the live oracle's --dumpParsedModel),
+    // so the member survives with a converging uniqueCName. The negative half of the
+    // discrimination (assoc-reduced D1c elements + non-tref dependent shapes stay
+    // UNRESOLVABLE) is pinned by the parity ratchet: set/unordered_set's libclang
+    // survivors are USR-keyed, so any cpp-side leak-through grows their unit diffs.
+    val miniStr = holders.find { it.name == "MiniStr" }
+    check(
+        "MiniStr::append(initializer_list<T>): the DIRECT dependent element survives " +
+            "as the name-tref shape (D1b)",
+        miniStr?.methods?.find { it.name == "append" }?.args?.singleOrNull()
+            ?.type?.toString() == "std::initializer_list<template<T>>",
+        "got ${miniStr?.methods?.find { it.name == "append" }?.args}"
+    )
+    check(
+        "MiniStr::assignAll(initializer_list<value_type>): the typedef-to-param element " +
+            "survives as the same name-tref shape (D1b)",
+        miniStr?.methods?.find { it.name == "assignAll" }?.args?.singleOrNull()
+            ?.type?.toString() == "std::initializer_list<template<T>>",
+        "got ${miniStr?.methods?.find { it.name == "assignAll" }?.args}"
     )
 
     check("JSON is non-empty", json.length > 2)

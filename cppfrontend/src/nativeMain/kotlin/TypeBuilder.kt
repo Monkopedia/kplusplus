@@ -158,19 +158,35 @@ fun buildWrappedType(type: QualType): WrappedType {
     if (templateArgCount > 0) {
         val baseName = with(type.memScope) { templateBaseName(type) }
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
-        // std::initializer_list (D1a, #46): a CONCRETE use (`initializer_list<int>` —
-        // featuregen's DefaultArgs::sumIlist) is an ordinary template specialization on
-        // the libclang path — the member survives and INCLUDE_MISSING materializes the
-        // std_Initializer_list__Int binding — so it decodes faithfully here too. A
-        // DEPENDENT element (`initializer_list<_CharT>` / `<value_type>` inside a
-        // template's own member signatures) stays UNRESOLVABLE by construction: those
-        // members survive on libclang only through its order-dependent visit() collapse
-        // (name-tref on basic_string/vector, USR-tref on set/unordered_set — the
-        // D1b/D1c residue in parity-expectations.txt), and this front-end's documented
-        // deterministic rule drops them instead of emulating the cache.
+        // std::initializer_list (D1a/D1b, #46): a CONCRETE use (`initializer_list<int>`
+        // — featuregen's DefaultArgs::sumIlist) is an ordinary template specialization
+        // on the libclang path — the member survives and INCLUDE_MISSING materializes
+        // the std_Initializer_list__Int binding — so it decodes faithfully here too.
+        // D1b: a DEPENDENT element that is a bare reference to one of the ENCLOSING
+        // template's own params — written directly (`initializer_list<_CharT>`,
+        // basic_string's ctor/op=/op+=/append/assign) or through a plain
+        // typedef-to-param (`initializer_list<value_type>` over vector's
+        // `typedef _Tp value_type`) — ALSO decodes faithfully: libclang's survivor
+        // spells exactly the NAME tref this front-end's in-template convention
+        // produces (`std::initializer_list<template<_CharT>>`, proven by the live
+        // oracle's --dumpParsedModel), so the member sets + uniqueCNames converge
+        // deterministically (the args fall through to the normal decode below). Every
+        // OTHER dependent element stays UNRESOLVABLE by construction:
+        //  - an ASSOC-REDUCED member alias (set/unordered_set's key-only `value_type`,
+        //    [assocTypedef]) is keyed by the param's USR on the libclang side
+        //    (`template_c_stl_set_h_3743` — assocTypedefElement), a spelling this
+        //    front-end deliberately does not synthesize (the D1c decision brick in
+        //    parity-expectations.txt);
+        //  - non-tref dependent shapes (map's `value_type` = `pair<const _Key, _Tp>`,
+        //    unordered_map's `typename _Hashtable::value_type`) drop here where
+        //    libclang drops them at resolution / the shared
+        //    dropMistypedInitializerListMembers pass — same final output either way.
         if (baseName == "std::initializer_list") {
             val element = with(type.memScope) { templateArgAsType(type, 0u) }
-            if (element.typePtr()?.isDependentType() != false) return UNRESOLVABLE
+            val elementTy = element.typePtr() ?: return UNRESOLVABLE
+            if (elementTy.isDependentType() && !isEnclosingParamIlistElement(elementTy)) {
+                return UNRESOLVABLE
+            }
         }
         val args = (0u until templateArgCount.toUInt()).map { i ->
             val arg = with(type.memScope) { templateArgAsType(type, i) }
@@ -277,6 +293,23 @@ fun buildWrappedType(type: QualType): WrappedType {
     // uniqueCNames and broke the wrapper compile (#46 Phase D finding).
     if (spelling.contains("type-parameter-")) return UNRESOLVABLE
     return WrappedTypeReference(spelling).maybeConst(isConst)
+}
+
+// D1b's discrimination (#46): a dependent initializer_list ELEMENT qualifies for the
+// faithful decode only when it is a bare NAME-tref of an enclosing template param —
+// the family whose libclang survivor spelling matches this front-end's own name-keying:
+//  - the param written directly (TemplateTypeParmType — basic_string's `_CharT`);
+//  - a typedef that the assoc reducer does NOT claim and whose reduction collapses to a
+//    bare tref (vector's `typedef _Tp value_type` — libclang's visit() lands on the same
+//    name via the Unexposed-param fallback). The [assocTypedef] exclusion is the exact
+//    D1b/D1c fault line: an assoc-reduced alias reduces to a name-tref HERE but to a
+//    USR-keyed tref on the libclang side (assocTypedefElement), so its survivor
+//    uniqueCNames can never converge without USR synthesis — it keeps dropping.
+private fun isEnclosingParamIlistElement(elementTy: Type): Boolean {
+    if (elementTy.asTemplateTypeParmType() != null) return true
+    val typedef = elementTy.asTypedefTypeOrNull()?.getDecl() ?: return false
+    if (assocTypedef(typedef) != null) return false
+    return buildTypedefTargetType(typedef) is WrappedTemplateRef
 }
 
 /**
