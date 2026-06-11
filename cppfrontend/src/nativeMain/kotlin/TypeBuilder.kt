@@ -208,10 +208,16 @@ fun buildWrappedType(type: QualType): WrappedType {
     // across parse contexts: `typename _Hashtable::hasher` under featuregen's header,
     // `_Equal`/`allocator_type` leaks in minimal parses). This front-end always emits
     // the typename leaf — the stable spelling, matching libclang's uncached case.
+    // One createForType string step is load-bearing here: the spelling is TRUNCATED at
+    // the first '<' before wrapping, so a template-id qualifier collapses to its bare
+    // name (`typename HashTraits<H>::hash_fn` -> `typename!<HashTraits>`) while the
+    // bare-typedef qualifier of the unordered containers survives whole
+    // (`typename _Hashtable::hasher` -> `typename!<_Hashtable::hasher>`) — both pinned
+    // against the live oracle by goldenCompare's MiniHash shapes.
     if (ty.isDependentType()) {
         val written = type.getUnqualifiedType().getAsString()?.trim()
         if (written != null && written.startsWith("typename ")) {
-            return WrappedType(written).maybeConst(isConst)
+            return WrappedType(written.substringBefore('<')).maybeConst(isConst)
         }
     }
 

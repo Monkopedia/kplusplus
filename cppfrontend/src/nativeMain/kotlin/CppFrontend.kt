@@ -217,8 +217,11 @@ private val FIXTURE_HEADER = """
 
     template <typename K, typename H>
     struct MiniHash {
+        typedef HashTraits<H> traits_type;
         typedef typename HashTraits<H>::hash_fn hasher;
+        typedef typename traits_type::hash_fn key_equal;
         void rehash(const hasher& h);
+        void requal(const key_equal& q);
     };
 
     template <typename T> struct DefAlloc {};
@@ -1014,19 +1017,24 @@ fun main(args: Array<String>): Unit = memScoped {
     // deterministic mirror of TypeFactories' `WrappedType(spelling)` else-branch
     // (the libclang cache's order-dependent remappings are ledger-accepted, D3).
     val miniHash = holders.find { it.name == "MiniHash" }
+    val miniHashTypedefs = miniHash?.children?.filterIsInstance<WrappedTypedef>().orEmpty()
     check(
-        "MiniHash's dependent `hasher` alias keeps the WRITTEN typename spelling",
-        miniHash?.children?.filterIsInstance<WrappedTypedef>()
-            ?.find { it.name == "hasher" }?.targetType
-            ?.toString() == "typename!<HashTraits<H>::hash_fn>",
-        "got ${miniHash?.children?.filterIsInstance<WrappedTypedef>()
-            ?.map { "${it.name}=${it.targetType}" }}"
+        "MiniHash's dependent aliases keep the WRITTEN typename spelling, '<'-truncated " +
+            "(template-id qualifier collapses; bare-typedef qualifier survives whole)",
+        miniHashTypedefs.find { it.name == "hasher" }?.targetType
+            ?.toString() == "typename!<HashTraits>" &&
+            miniHashTypedefs.find { it.name == "key_equal" }?.targetType
+            ?.toString() == "typename!<traits_type::hash_fn>",
+        "got ${miniHashTypedefs.map { "${it.name}=${it.targetType}" }}"
     )
     check(
-        "MiniHash::rehash(const hasher&) arg carries the typename leaf (not unresolveable)",
+        "MiniHash::rehash/requal args carry the typename leaves (not unresolveable)",
         miniHash?.methods?.find { it.name == "rehash" }?.args?.singleOrNull()
-            ?.type?.toString() == "const typename!<HashTraits<H>::hash_fn>&",
-        "got ${miniHash?.methods?.find { it.name == "rehash" }?.args}"
+            ?.type?.toString() == "const typename!<HashTraits>&" &&
+            miniHash?.methods?.find { it.name == "requal" }?.args?.singleOrNull()
+            ?.type?.toString() == "const typename!<traits_type::hash_fn>&",
+        "got rehash=${miniHash?.methods?.find { it.name == "rehash" }?.args} " +
+            "requal=${miniHash?.methods?.find { it.name == "requal" }?.args}"
     )
     // WrappedTemplateParam.defaultType: the cursor-walk residue shapes, pinned against
     // the libclang oracle (see TypeBuilder.defaultTypeResidue).
