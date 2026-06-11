@@ -718,9 +718,19 @@ tasks.register("handoffInstDiff") {
         // wrapper COMPILED (writeTo's CppCompiler step already failed the generate
         // task otherwise). Spelling deltas are tracked on #45.
         val cpp = File(handoffInstDir, "out_cpp")
-        check(names == files(cpp)) {
+        // D1b (#46): the cpp model resolves std::initializer_list<Item*> DIRECTLY (its
+        // faithful in-model initializer_list class), so vector's surviving ilist
+        // ctor/op=/assign members materialize the specialization's binding on this
+        // path; the libclang model only reaches that class through INCLUDE_MISSING's
+        // re-parse — OFF on this default-policy flow — so its members drop. Production
+        // INCLUDE_MISSING proves the two CONVERGE byte-identically (featuregenParity:
+        // every std_Initializer_list__* file-set gap closed); this gate accepts the
+        // cpp-side faithfulness surplus, the same rationale as the spelling deltas.
+        val cppOnly = files(cpp) - names
+        val unexplained = cppOnly.filter { !it.startsWith("src/std_Initializer_list__") }
+        check((names - files(cpp)).isEmpty() && unexplained.isEmpty()) {
             "handoffInstDiff[functional]: file sets differ — only-libclang=" +
-                "${names - files(cpp)} only-cpp=${files(cpp) - names}"
+                "${names - files(cpp)} unexplained-only-cpp=$unexplained"
         }
         val bag = File(cpp, "src/root_Bag.kt").readText()
         check(bag.contains("fun items(): Vector__Item_P")) {
