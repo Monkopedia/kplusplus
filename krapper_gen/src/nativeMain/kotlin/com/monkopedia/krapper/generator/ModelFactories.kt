@@ -26,6 +26,7 @@ import clang.CXCursorKind.CXCursor_TypedefDecl
 import clang.CXType
 import clang.CXTypeKind.CXType_Pointer
 import clang.CX_CXXAccessSpecifier
+import com.monkopedia.krapper.generator.model.ElementIdentity
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.RangeReturn
 import com.monkopedia.krapper.generator.model.WrappedArgument
@@ -41,6 +42,7 @@ import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
+import com.monkopedia.krapper.generator.model.forEachIdentityPair
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -70,6 +72,26 @@ private var droppedUsrs: Set<String> = emptySet()
  * [mapAll]. */
 fun WrappedElement.Companion.setDroppedUsrs(usrs: Set<String>) {
     droppedUsrs = usrs
+}
+
+/**
+ * Round-trip oracle support (#45 brick 1): after `--roundTripModel` replaces a parsed
+ * tree with its deserialized copy, point every [elementLookup] memo entry that referenced
+ * an element of the ORIGINAL tree at its RESTORED counterpart. The memo is what carries
+ * element identity ACROSS parses (a class re-encountered in a later forcing header is the
+ * same instance, and resolution mutates it in place — metadata, synthetic children,
+ * dedup), so without the remap the post-round-trip parses would keep building on the
+ * abandoned originals and the run would diverge from a non-flag run for reasons that have
+ * nothing to do with serialization fidelity.
+ */
+fun WrappedElement.Companion.remapMemoized(original: WrappedElement, restored: WrappedElement) {
+    val replacements = HashMap<ElementIdentity, WrappedElement>()
+    forEachIdentityPair(original, restored) { old, new ->
+        replacements[ElementIdentity(old)] = new
+    }
+    for (entry in elementLookup.entries) {
+        replacements[ElementIdentity(entry.value)]?.let { entry.setValue(it) }
+    }
 }
 
 fun WrappedElement.Companion.mapAll(

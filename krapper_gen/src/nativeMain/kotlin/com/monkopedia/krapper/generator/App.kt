@@ -165,6 +165,15 @@ class KrapperGen : CliktCommand() {
             "mode). :cppfrontend:goldenCompare diffs this libclang front-end's parse " +
             "output against the C++-AST front-end's."
     )
+    val roundTripModel by option(
+        "--roundTripModel",
+        help = "Debug/oracle flag (#45 brick 1): after each parse, serialize the full " +
+            "WrappedTU through the ModelIo round-trip JSON, deserialize it back, and run " +
+            "resolution+generation on the DESERIALIZED model. Output should be " +
+            "byte-identical to a run without the flag — the verification gate for the " +
+            "--frontend=cpp handoff format. Also enabled by KRAPPER_ROUNDTRIP_MODEL=1 " +
+            "in the environment (which reaches service-mode runs too)."
+    ).flag()
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -181,6 +190,7 @@ class KrapperGen : CliktCommand() {
         // process exits inside parseHeader right after the JSON is written, so the
         // resolution/generation flow below never runs with the flag set.
         dumpParsedModelPath = dumpParsedModel
+        if (roundTripModel) roundTripParsedModel = true
         runBlocking {
             val service = KrapperServiceImpl()
             val resolvedModule = moduleName
