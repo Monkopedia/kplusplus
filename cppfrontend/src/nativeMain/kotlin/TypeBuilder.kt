@@ -216,7 +216,7 @@ fun buildWrappedType(type: QualType): WrappedType {
         // getQualifiedNameAsString suppresses `__cxx11`, breaking the std::string
         // template-element match — see clang_slice.h).
         val qualified = with(canonTy.memScope) { qualifiedName(record.asNamedDecl()) }
-            .takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+            ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
@@ -475,7 +475,7 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
 // Qualified the same inline-namespace-preserving way as the record leaf.
 private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
     val qualified = with(enumDecl.memScope) { qualifiedName(enumDecl.asNamedDecl()) }
-        .takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+        ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
     // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
     // missing name dropping just that constant (TypeFactories' mapNotNull).
     val constants = enumDecl.asDeclContext().decls()
