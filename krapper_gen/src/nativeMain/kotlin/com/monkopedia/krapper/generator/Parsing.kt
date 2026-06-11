@@ -134,6 +134,17 @@ var dumpParsedModelPath: String? = null
 var roundTripParsedModel: Boolean =
     getenv("KRAPPER_ROUNDTRIP_MODEL")?.toKString() == "1"
 
+// THE HANDOFF (#45 brick 2), set by KrapperGen --frontend=cpp --parsedModel <path>.
+// When non-null, [parseHeader] SKIPS the libclang parse entirely and instead loads the
+// WrappedTU from this path — the full-fidelity ModelIo JSON the cppfrontend binary
+// emitted from the Clang C++ AST (on kplusplus-generated bindings). The loaded tree
+// enters the pipeline at the exact post-parse point the --roundTripModel oracle proved
+// (brick 1): the pre-resolution rewrites below run on it, then ParsedResolver wraps it.
+// CLI-scoped global (same rationale as [dumpParsedModelPath]): the ksrpc service schema
+// stays untouched. The libclang cinterop remains LINKED into the binary — flip/deletion
+// is Phase E; what matters here is the cpp path never CALLS it.
+var cppParsedModelPath: String? = null
+
 fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
     return when (this) {
         is AndFilter -> {
@@ -563,6 +574,20 @@ suspend fun DeferScope.parseHeader(
     // diagnostics abort. See [handleDiagnostics].
     strictDiagnostics: Boolean = false
 ): Resolver {
+    // THE HANDOFF (#45 brick 2): with --frontend=cpp the model was already produced by
+    // the cppfrontend binary; decode it and skip the libclang parse below entirely. No
+    // cursor->element memo exists on this path (nothing was parsed in-process), and no
+    // memo is needed: the CLI forbids --instantiate with this front-end (instantiation
+    // forcing re-parses synthesized headers with libclang — see KrapperGen.run), so no
+    // later parse ever needs to rediscover these instances. The pre-resolution rewrites
+    // run on the loaded tree exactly as they do on a --roundTripModel restored tree.
+    cppParsedModelPath?.let { path ->
+        val restored = ModelIo.decodeFromString(File(path).readText())
+        Log.i("cpp front-end handoff: loaded parsed model from $path (libclang parse skipped)")
+        rewriteViewReturns(restored)
+        rewriteUniquePtrReturns(restored)
+        return ParsedResolver(restored)
+    }
     val builder = ResolverBuilderImpl()
     val tu = file.map {
         parseHeader(index, it, builder, includePaths, args, debug, strictDiagnostics)
