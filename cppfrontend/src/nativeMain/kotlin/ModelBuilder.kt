@@ -288,13 +288,19 @@ private class ModelBuilder {
     ) {
         for (base in record.bases()) {
             if (base == null) continue
+            // ModelFactories.map's TOP access filter applies to base specifiers too: a
+            // protected/private base (std::vector : protected _Vector_base) never becomes
+            // a WrappedBase on the libclang path. Load-bearing for forcing (#45 brick 3):
+            // keeping the dependent _Vector_base would hard-fail the specialization's
+            // INCLUDE reference-expansion (the unresolvable-primary-base rule).
+            if (base.getAccessSpecifier() != AccessSpecifier.AS_public) continue
             // ModelFactories.map's CXCursor_CXXBaseSpecifier branch: the base's type built
             // through the CXType factory (structural buildWrappedType here, brick 4),
             // isPublic from the access specifier, isVirtualBase from `virtual` inheritance.
             parent.addChild(
                 WrappedBase(
                     buildWrappedType(base.getType()),
-                    isPublic = base.getAccessSpecifier() == AccessSpecifier.AS_public,
+                    isPublic = true,
                     isVirtualBase = base.isVirtual()
                 )
             )
