@@ -245,12 +245,22 @@ private val FIXTURE_HEADER = """
     template <typename T, typename U = T>
     struct DefPair {};
 
+    // Guarded with libstdc++'s own include guard: the generated wrapper #includes this
+    // fixture BEFORE its <vector>/<string> boilerplate (handoffGenerate's compile step),
+    // so defining _INITIALIZER_LIST here makes the real header a no-op there — layout-
+    // compatible (pointer + length), and nothing on that path INSTANTIATES an
+    // initializer_list member (MiniStr is a never-instantiated template, so the stl
+    // headers' ilist-taking declarations are never bodied). Standalone parses (BOTH
+    // front-ends, the same bytes) see this declaration — the macro is never defined there.
+    #ifndef _INITIALIZER_LIST
+    #define _INITIALIZER_LIST
     namespace std {
         template <typename E> class initializer_list {
             const E* items;
             unsigned long len;
         };
     }
+    #endif
 
     template <typename T>
     struct MiniStr {
