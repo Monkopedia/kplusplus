@@ -158,15 +158,20 @@ fun buildWrappedType(type: QualType): WrappedType {
     if (templateArgCount > 0) {
         val baseName = with(type.memScope) { templateBaseName(type) }
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
-        // std::initializer_list is compiler magic the C boundary can never marshal (a
-        // Kotlin caller cannot construct one), so it is UNRESOLVABLE by construction —
-        // members taking one drop in resolution (or have the defaulted arg omitted),
-        // matching the libclang path, where the same members drop because that
-        // front-end's `initializer_list<value_type>` spelling keeps the alias-name leaf
-        // its order-dependent visit() collapse can't resolve. This front-end's faithful
-        // decode (value_type -> the substituted element type) would otherwise
-        // MATERIALIZE initializer_list<Item*> as a useless extra binding.
-        if (baseName == "std::initializer_list") return UNRESOLVABLE
+        // std::initializer_list (D1a, #46): a CONCRETE use (`initializer_list<int>` —
+        // featuregen's DefaultArgs::sumIlist) is an ordinary template specialization on
+        // the libclang path — the member survives and INCLUDE_MISSING materializes the
+        // std_Initializer_list__Int binding — so it decodes faithfully here too. A
+        // DEPENDENT element (`initializer_list<_CharT>` / `<value_type>` inside a
+        // template's own member signatures) stays UNRESOLVABLE by construction: those
+        // members survive on libclang only through its order-dependent visit() collapse
+        // (name-tref on basic_string/vector, USR-tref on set/unordered_set — the
+        // D1b/D1c residue in parity-expectations.txt), and this front-end's documented
+        // deterministic rule drops them instead of emulating the cache.
+        if (baseName == "std::initializer_list") {
+            val element = with(type.memScope) { templateArgAsType(type, 0u) }
+            if (element.typePtr()?.isDependentType() != false) return UNRESOLVABLE
+        }
         val args = (0u until templateArgCount.toUInt()).map { i ->
             val arg = with(type.memScope) { templateArgAsType(type, i) }
             if (arg.typePtr() == null) UNRESOLVABLE else buildWrappedType(arg)
@@ -324,7 +329,28 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
         "difference_type" -> return WrappedTypeReference("ptrdiff_t")
     }
     if (name in C_ALIAS_TYPEDEFS) return WrappedTypeReference(name)
-    return buildWrappedType(typedef.getUnderlyingType())
+    // LOSSY-COLLAPSE mirror (D1a, #46): a typedef whose followed underlying is a
+    // DEPENDENT pointer/reference shape (initializer_list's `typedef const _E*
+    // const_iterator`, allocator's `typedef _Tp* pointer`) collapses on the libclang
+    // path to createForType's `else -> WrappedType(spelling)` — visit() returns the
+    // underlying POINTER type (kind CXType_Pointer, not Unexposed, decl NoDeclFound),
+    // so the spelling parses into pointerTo/referenceTo of a bare NAME leaf ("_E"),
+    // never a substitutable WrappedTemplateRef — and every member using the alias
+    // drops at resolution (initializer_list<int>'s begin()/end() in the live
+    // featuregen oracle: "Couldn't resolve return: const _E*"). The structural decode
+    // below would produce pointerTo(const(tref(_E))) instead, which SUBSTITUTES and
+    // would surface begin()/end() libclang never binds. Concrete underlyings keep the
+    // structural path (identical result, no spelling parse). A chained alias falls
+    // through to the recursion (asTypedefTypeOrNull), matching visit()'s follow.
+    val underlying = typedef.getUnderlyingType()
+    val underTy = underlying.typePtr()
+    if (underTy != null && underTy.asTypedefTypeOrNull() == null && underTy.isDependentType() &&
+        (underTy.isPointerType() || underTy.isReferenceType())
+    ) {
+        val spelling = underlying.getAsString()?.trim() ?: return UNRESOLVABLE
+        return WrappedType(spelling.removePrefix("const ").substringBefore('<').trim())
+    }
+    return buildWrappedType(underlying)
 }
 
 /**
