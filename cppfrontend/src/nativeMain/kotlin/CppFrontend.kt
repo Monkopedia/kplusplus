@@ -75,6 +75,13 @@ import platform.posix.popen
 // carries the five default-arg value shapes (int literal, negative, enum constant,
 // nullptr, constructed) plus a multi-default trailing run (configure). Expected
 // defaultValue strings are the libclang token-join contract (ModelFactories.defaultValue).
+// Phase D (#46) grows it with the REMAINING typedef-reducer mirrors and defaultType:
+// SmartPtr (a dependent `pointer` alias + `using element_type` — unique_ptr's shape,
+// pointerTypedefElement), RawHolder (a CONCRETE pointer typedef that must NOT be
+// rewritten), MiniMap/MiniSet (dependent key_type/mapped_type/value_type through trait
+// scopes — unordered_map's and set's shapes, assocTypedefElement), and DefBox/DefPair
+// (defaulted template params — the cursor-walk residue WrappedTemplateParam.defaultType
+// reads; expected shapes pinned against the libclang oracle for this exact fixture).
 private val FIXTURE_HEADER = """
     void freeFunction(int);
 
@@ -173,6 +180,49 @@ private val FIXTURE_HEADER = """
         void blend(Palette p = Palette());
         void configure(int a, int b = 1, Shape* c = nullptr);
     };
+
+    template <typename T> struct PtrTrait { typedef T type; };
+
+    template <typename T>
+    struct SmartPtr {
+        using element_type = T;
+        typedef typename PtrTrait<T>::type pointer;
+        pointer get() const;
+    };
+
+    struct RawHolder {
+        typedef int* pointer;
+        pointer raw();
+    };
+
+    template <typename K, typename V> struct MapTraits { typedef K key; typedef V mapped; };
+
+    template <typename K, typename V>
+    struct MiniMap {
+        typedef typename MapTraits<K, V>::key key_type;
+        typedef typename MapTraits<K, V>::mapped mapped_type;
+        mapped_type& at(const key_type& k);
+    };
+
+    template <typename K> struct SetTraits { typedef K stored; };
+
+    template <typename K>
+    struct MiniSet {
+        typedef typename SetTraits<K>::stored key_type;
+        typedef typename SetTraits<K>::stored value_type;
+        void insert(const value_type& v);
+    };
+
+    template <typename T> struct DefAlloc {};
+
+    template <typename T, typename A = DefAlloc<T>>
+    struct DefBox {
+        T item;
+        A alloc() const;
+    };
+
+    template <typename T, typename U = T>
+    struct DefPair {};
 """.trimIndent()
 
 // #45 brick 3: the INSTANTIATION-FORCING fixture — a SIBLING of FIXTURE_HEADER (extending
@@ -232,6 +282,17 @@ fun main(args: Array<String>): Unit = memScoped {
     if (args.firstOrNull() == "--handoff-emit") {
         val dir = args.getOrNull(1) ?: fail("--handoff-emit <dir>")
         handoffEmit(dir)
+        return@memScoped
+    }
+    if (args.firstOrNull() == "--parity-emit") {
+        // --parity-emit <dir> <header> <std> [spec...] — Phase D (#46), see parityEmit.
+        val usage = "--parity-emit <dir> <header> <std> [spec...]"
+        parityEmit(
+            args.getOrNull(1) ?: fail(usage),
+            args.getOrNull(2) ?: fail(usage),
+            args.getOrNull(3) ?: fail(usage),
+            args.drop(4)
+        )
         return@memScoped
     }
     // The virtual filename must spell a C++ extension: buildASTFromCode infers the language
@@ -573,14 +634,17 @@ fun main(args: Array<String>): Unit = memScoped {
     val holders = tu.children.filterIsInstance<WrappedTemplate>()
     val holder = holders.find { it.name == "Holder" }
     check(
-        "TU contains exactly one WrappedTemplate: Holder",
-        holders.size == 1 && holder != null,
+        "TU contains the 10 WrappedTemplates in source order (Holder + the Phase D shapes)",
+        holders.map { it.name } == listOf(
+            "Holder", "PtrTrait", "SmartPtr", "MapTraits", "MiniMap",
+            "SetTraits", "MiniSet", "DefAlloc", "DefBox", "DefPair"
+        ),
         "got ${holders.map { it.name }}"
     )
     check(
-        "no WrappedClass shadows Holder (implicit specialization never surfaced)",
+        "no WrappedClass shadows a template (implicit specialization never surfaced)",
         tu.children.filterIsInstance<WrappedClass>().map { it.name }.sorted() ==
-            listOf("Dispatcher", "Palette", "Scene", "Shape"),
+            listOf("Dispatcher", "Palette", "RawHolder", "Scene", "Shape"),
         "got ${tu.children.filterIsInstance<WrappedClass>().map { it.name }}"
     )
     val tParam = holder?.templateArgs?.singleOrNull()
@@ -652,8 +716,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 12 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
-        tu.children.size == 12,
+        "TU has exactly 22 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 22,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
@@ -871,6 +935,89 @@ fun main(args: Array<String>): Unit = memScoped {
             dMethods.find { it.name == "onEvent" }?.args?.none { it.hasDefault } == true
     )
 
+    // -- Phase D (#46): the remaining typedef-reducer mirrors + defaultType capture.
+    // pointerTypedefElement: a DEPENDENT `pointer` alias (unique_ptr's shape — the
+    // underlying routes through a trait scope) reduces to element_type* so get()
+    // survives; the `using element_type` sibling is found through the dual-kind filter.
+    val smartPtr = holders.find { it.name == "SmartPtr" }
+    val smartPointerTypedef = smartPtr?.children?.filterIsInstance<WrappedTypedef>()
+        ?.find { it.name == "pointer" }
+    check(
+        "SmartPtr's dependent `pointer` typedef reduces to element_type*: *(template<T>)",
+        (smartPointerTypedef?.targetType as? WrappedModifiedType)?.let {
+            it.modifier == "*" && (it.baseType as? WrappedTemplateRef)?.target == "T"
+        } == true,
+        "got ${smartPointerTypedef?.targetType}"
+    )
+    check(
+        "SmartPtr::get() survives: const-method pointer return gains the G8 outer const",
+        smartPtr?.methods?.find { it.name == "get" }
+            ?.returnType?.toString() == "const template<T>*",
+        "got ${smartPtr?.methods?.find { it.name == "get" }?.returnType}"
+    )
+    // The negative gate: a CONCRETE pointer typedef must fall through to normal collapse.
+    val rawHolder = tu.children.filterIsInstance<WrappedClass>().find { it.name == "RawHolder" }
+    check(
+        "RawHolder's CONCRETE `typedef int* pointer` is NOT rewritten: collapses to 'int*'",
+        rawHolder?.children?.filterIsInstance<WrappedTypedef>()?.singleOrNull()
+            ?.targetType?.toString() == "int*",
+        "got ${rawHolder?.children?.filterIsInstance<WrappedTypedef>()}"
+    )
+    // assocTypedefElement, key→value shape (unordered_map's): dependent key_type/
+    // mapped_type reduce to the enclosing template's params 0/1.
+    val miniMap = holders.find { it.name == "MiniMap" }
+    val miniMapTypedefs = miniMap?.children?.filterIsInstance<WrappedTypedef>().orEmpty()
+    check(
+        "MiniMap's dependent key_type/mapped_type reduce to params 0/1 (assoc map shape)",
+        (miniMapTypedefs.find { it.name == "key_type" }?.targetType as? WrappedTemplateRef)
+            ?.target == "K" &&
+            (miniMapTypedefs.find { it.name == "mapped_type" }?.targetType as? WrappedTemplateRef)
+                ?.target == "V",
+        "got ${miniMapTypedefs.map { "${it.name}=${it.targetType}" }}"
+    )
+    val atMethod = miniMap?.methods?.find { it.name == "at" }
+    check(
+        "MiniMap::at survives: 'template<V>&' return, 'const template<K>&' arg",
+        atMethod?.returnType?.toString() == "template<V>&" &&
+            atMethod?.args?.singleOrNull()?.type?.toString() == "const template<K>&",
+        "got ret=${atMethod?.returnType} args=${atMethod?.args}"
+    )
+    // assocTypedefElement, key-only shape (set's): key_type AND the self-referential
+    // value_type both reduce to param 0.
+    val miniSet = holders.find { it.name == "MiniSet" }
+    val miniSetTypedefs = miniSet?.children?.filterIsInstance<WrappedTypedef>().orEmpty()
+    check(
+        "MiniSet's dependent key_type AND value_type reduce to the key param (key-only shape)",
+        (miniSetTypedefs.find { it.name == "key_type" }?.targetType as? WrappedTemplateRef)
+            ?.target == "K" &&
+            (miniSetTypedefs.find { it.name == "value_type" }?.targetType as? WrappedTemplateRef)
+                ?.target == "K",
+        "got ${miniSetTypedefs.map { "${it.name}=${it.targetType}" }}"
+    )
+    check(
+        "MiniSet::insert(const value_type&) arg carries the reduced shape",
+        miniSet?.methods?.find { it.name == "insert" }?.args?.singleOrNull()
+            ?.type?.toString() == "const template<K>&",
+        "got ${miniSet?.methods?.find { it.name == "insert" }?.args}"
+    )
+    // WrappedTemplateParam.defaultType: the cursor-walk residue shapes, pinned against
+    // the libclang oracle (see TypeBuilder.defaultTypeResidue).
+    val defBox = holders.find { it.name == "DefBox" }
+    check(
+        "DefBox param T carries NO default; param A captures 'unresolveable<template<T>>'",
+        defBox?.templateArgs?.getOrNull(0)?.defaultType == null &&
+            defBox?.templateArgs?.getOrNull(1)?.defaultType
+            ?.toString() == "unresolveable<template<T>>",
+        "got ${defBox?.templateArgs?.map { "${it.name}=${it.defaultType}" }}"
+    )
+    check(
+        "DefPair param U = T: defaultType is the self-residue 'template<T><template<T>>'",
+        holders.find { it.name == "DefPair" }?.templateArgs?.getOrNull(1)?.defaultType
+            ?.toString() == "template<T><template<T>>",
+        "got ${holders.find { it.name == "DefPair" }?.templateArgs
+            ?.map { "${it.name}=${it.defaultType}" }}"
+    )
+
     check("JSON is non-empty", json.length > 2)
 
     if (failures > 0) fail("$failures self-check(s) failed")
@@ -912,6 +1059,44 @@ private fun MemScope.handoffEmit(dir: String) {
         emitted.add("$forceName.json")
     }
     println("cppfrontend: handoff-emit -> $dir/{${emitted.joinToString(", ")}}")
+}
+
+/**
+ * Phase D entry (#46) — FEATUREGEN PARITY EMIT: the cpp front-end's half of
+ * :cppfrontend:featuregenParity, generalizing handoffEmit from the fixed bag fixture to
+ * an ARBITRARY user header + instantiation specs (featuregen's strings_feature.h + its
+ * 17-spec worklist). One invocation per payload, so a crash on one spec's parse never
+ * takes the others down (the gradle task records it as a per-spec emit failure):
+ *  - no specs: parse [headerPath]'s bytes (the base model) -> base_model.json, print
+ *    `PARITY_BASE <path>`;
+ *  - per spec: synthesize the SAME ForcingHeader the libclang path synthesizes
+ *    (#include-ing [headerPath] by the same path string krapper_gen gets via --header),
+ *    parse it, emit <forceName>.json, print `PARITY_MODEL <spec>=<path>` — the line the
+ *    gradle task turns into krapper_gen's --forcingModel argument.
+ * [std] pins the SAME standard featuregen's sync parses under (krapper_gen's default).
+ */
+private fun MemScope.parityEmit(
+    dir: String,
+    headerPath: String,
+    std: String,
+    specs: List<String>
+) {
+    val parseArgs = "-std=$std\n-resource-dir=" + commandOutput("clang++ -print-resource-dir")
+    if (specs.isEmpty()) {
+        val baseTu = parseToWrappedTU(readFile(headerPath), "parity_base.cc", parseArgs)
+        val path = "$dir/base_model.json"
+        writeFile(path, ModelIo.encodeToString(baseTu))
+        println("PARITY_BASE $path")
+        return
+    }
+    for (spec in specs) {
+        val forceName = ForcingHeader.forceName(spec)
+        val content = ForcingHeader.contentFor(spec, listOf(headerPath))
+        val tu = parseToWrappedTU(content, "$forceName.cc", parseArgs)
+        val path = "$dir/$forceName.json"
+        writeFile(path, ModelIo.encodeToString(tu))
+        println("PARITY_MODEL $spec=$path")
+    }
 }
 
 // Parse [code] with the '\n'-joined driver [args] (kppbridge.buildASTWithArgs — see

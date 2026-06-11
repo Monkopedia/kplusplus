@@ -181,6 +181,13 @@ kplusplus {
         // Lexer::getSourceText over ParmVarDecl::getDefaultArgRange() (see clang_slice.h
         // for why Lexer/SourceManager/LangOptions aren't bound wholesale yet).
         "kppbridge::defaultArgText",
+        // NEW for Phase D (#46): WrappedTemplateParam.defaultType capture — the
+        // TemplateArgumentLoc unwrap for TemplateTypeParmDecl::getDefaultArgument()
+        // (see clang_slice.h).
+        "kppbridge::defaultArgType",
+        // NEW for Phase D (#46): inline-namespace-preserving qualified names
+        // (std::__cxx11::basic_string — see clang_slice.h).
+        "kppbridge::qualifiedName",
         // NEW for #45 brick 3 (instantiation forcing): the forcing-parse entry point —
         // buildASTFromCode with REAL driver args ('\n'-joined; -resource-dir + -std), the
         // smallest bridge until std::vector<std::string> params are bindable (see
@@ -409,6 +416,239 @@ val handoffOracleGenerate = tasks.register<Exec>("handoffOracleGenerate") {
             ).absolutePath
         ) + instGenerateArgs(outDir)
     )
+}
+
+// ---- Phase D entry (#46): FEATUREGEN PARITY ----
+// The first full featuregen parity attempt under --frontend=cpp: for EACH of featuregen's
+// instantiation requests (krapped/requested.txt + the build's seeded instantiate() calls —
+// the same worklist kplusplusSync hands krapper_gen), generate featuregen's bindings
+// through BOTH front-ends and diff: the libclang baseline vs --frontend=cpp over
+// cppfrontend-emitted models, with an IDENTICAL CLI tail so the diff isolates the
+// front-end swap. One unit per spec (header + that single instantiation — per-spec
+// failure isolation) plus the ALL unit (every spec at once, the real sync's shape).
+// Verdicts: identical (byte-identical, path-modulo .def) / diff (N lines, the categorized
+// worklist) / fail (generation failed). The task exits nonzero only on REGRESSION against
+// parity-expectations.txt (the committed expected-state ledger, like a test-skip list —
+// CI-able while Phase D converges); improvements are reported so the ledger ratchets.
+val parityDir = layout.buildDirectory.dir("parity").get().asFile
+val parityHeader = rootProject.layout.projectDirectory
+    .file("featuregen/src/cppMain/include/strings_feature.h").asFile
+val parityManifest = rootProject.layout.projectDirectory
+    .file("featuregen/krapped/requested.txt").asFile
+val parityExpectations = layout.projectDirectory.file("parity-expectations.txt").asFile
+
+// featuregen's seeded instantiate() calls (featuregen/build.gradle.kts kplusplus{}) — the
+// manifest only carries the compiler-plugin-requested specs, seeds are build config.
+val paritySeeds = listOf(
+    "Box<int>",
+    "Box<Point>",
+    "Box<Box<int>>",
+    "Pair2<int, double>",
+    "std::unique_ptr<int>",
+    "std::vector<Thing*>"
+)
+
+// The same merge the gradle plugin's kplusplusSync performs: manifest + seeds, deduped,
+// sorted (the deterministic instantiation order).
+fun paritySpecs(): List<String> = (
+    parityManifest.readLines().map { it.trim() }.filter { it.isNotEmpty() } + paritySeeds
+    ).distinct().sorted()
+
+fun runLogged(args: List<String>, log: File): Int {
+    log.parentFile.mkdirs()
+    return ProcessBuilder(args)
+        .redirectErrorStream(true)
+        .redirectOutput(log)
+        .start()
+        .waitFor()
+}
+
+fun paritySlug(unit: String) = unit.replace(Regex("[^A-Za-z0-9]+"), "_").trim('_')
+
+val parityEmit = tasks.register("parityEmit") {
+    dependsOn("linkReleaseExecutableKlinker")
+    doLast {
+        val modelsDir = File(parityDir, "models").apply { mkdirs() }
+        val logsDir = File(parityDir, "logs")
+        // One binary invocation per payload: a crash on one spec's parse (expected while
+        // Phase D converges) never takes the other models down.
+        fun emit(specs: List<String>, log: File): Int = runLogged(
+            listOf(
+                cppfrontendBinary.absolutePath, "--parity-emit",
+                modelsDir.absolutePath, parityHeader.absolutePath, "c++14"
+            ) + specs,
+            log
+        )
+        check(emit(emptyList(), File(logsDir, "emit_base.log")) == 0) {
+            "parityEmit: base model emit failed (see $logsDir/emit_base.log)"
+        }
+        val map = StringBuilder()
+        for ((i, spec) in paritySpecs().withIndex()) {
+            val log = File(logsDir, "emit_$i.log")
+            val line = if (emit(listOf(spec), log) == 0) {
+                log.readLines().firstOrNull { it.startsWith("PARITY_MODEL ") }
+                    ?.removePrefix("PARITY_MODEL ")
+            } else {
+                null
+            }
+            map.appendLine(line ?: "$spec=EMIT_FAILED")
+        }
+        File(parityDir, "forcing_map.txt").writeText(map.toString())
+        println("parityEmit: base + ${paritySpecs().size} forcing model(s) under $modelsDir")
+    }
+}
+
+tasks.register("featuregenParity") {
+    dependsOn(parityEmit, ":krapper_gen:linkReleaseExecutableNative")
+    doLast {
+        val specs = paritySpecs()
+        val forcingPaths = File(parityDir, "forcing_map.txt").readLines()
+            .filter { it.isNotEmpty() }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+        val baseModel = File(parityDir, "models/base_model.json")
+        val logsDir = File(parityDir, "logs")
+        val diffsDir = File(parityDir, "diffs").apply { deleteRecursively() }
+
+        // The featuregen CLI tail, mirroring kplusplusSync's invocation (module name,
+        // INCLUDE_MISSING, krapper.featuregen package, --header) — identical on both
+        // sides so the diff isolates the front-end swap.
+        fun genArgs(outDir: File, instSpecs: List<String>) = listOf(
+            krapperGenKexe.absolutePath, "featuregen",
+            "-r", "INCLUDE_MISSING",
+            "-p", "krapper.featuregen",
+            "-c", "clang++",
+            "-o", outDir.absolutePath
+        ) + instSpecs.flatMap { listOf("--instantiate", it) } +
+            listOf("--header", parityHeader.absolutePath)
+
+        // Byte-compare the two outputs: same file set, every file identical (the .def
+        // path-modulo — it bakes the output dir's absolute path; .a excluded — derived
+        // from the compared .cc). On divergence, a unified diff per file lands under
+        // diffs/<unit>/ for the worklist analysis.
+        fun diffUnit(unit: String, libclang: File, cpp: File): Pair<String, String> {
+            fun files(dir: File) = dir.walkTopDown()
+                .filter { it.isFile && it.extension != "a" }
+                .map { it.relativeTo(dir).path }.toSortedSet()
+            val a = files(libclang)
+            val b = files(cpp)
+            val notes = mutableListOf<String>()
+            if (a != b) notes += "file sets differ: only-libclang=${a - b} only-cpp=${b - a}"
+            var diffLines = 0
+            var diffFiles = 0
+            for (rel in a intersect b) {
+                fun read(dir: File) =
+                    File(dir, rel).readText().replace(dir.absolutePath, "@OUT@")
+                val ta = read(libclang)
+                val tb = read(cpp)
+                if (ta == tb) continue
+                diffFiles++
+                val diffFile = File(diffsDir, "${paritySlug(unit)}/$rel.diff")
+                diffFile.parentFile.mkdirs()
+                val tmpA = File(diffFile.parentFile, "a.tmp").apply { writeText(ta) }
+                val tmpB = File(diffFile.parentFile, "b.tmp").apply { writeText(tb) }
+                val proc = ProcessBuilder(
+                    "diff", "-u", tmpA.absolutePath, tmpB.absolutePath
+                ).redirectErrorStream(true).start()
+                val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+                proc.waitFor()
+                tmpA.delete()
+                tmpB.delete()
+                diffFile.writeText(out)
+                diffLines += out.lineSequence().count {
+                    (it.startsWith("+") && !it.startsWith("+++")) ||
+                        (it.startsWith("-") && !it.startsWith("---"))
+                }
+            }
+            return if (notes.isEmpty() && diffFiles == 0) {
+                "identical" to "byte-identical (path-modulo .def) across ${a.size} files"
+            } else {
+                "diff" to (
+                    notes + "$diffLines diff line(s) across $diffFiles file(s)"
+                    ).joinToString("; ")
+            }
+        }
+
+        data class Verdict(val unit: String, val cls: String, val detail: String)
+        val verdicts = mutableListOf<Verdict>()
+        val units = specs.map { it to listOf(it) } + ("ALL" to specs)
+        for ((unit, instSpecs) in units) {
+            val unitDir = File(parityDir, "out/${paritySlug(unit)}")
+            val outLib = File(unitDir, "libclang").apply { deleteRecursively(); mkdirs() }
+            val outCpp = File(unitDir, "cpp").apply { deleteRecursively(); mkdirs() }
+            val libLog = File(logsDir, "${paritySlug(unit)}_libclang.log")
+            val libExit = runLogged(genArgs(outLib, instSpecs), libLog)
+            if (libExit != 0) {
+                verdicts += Verdict(
+                    unit, "fail",
+                    "LIBCLANG BASELINE failed (exit $libExit — infra, see $libLog)"
+                )
+                continue
+            }
+            val missing = instSpecs.filter { (forcingPaths[it] ?: "EMIT_FAILED") == "EMIT_FAILED" }
+            if (missing.isNotEmpty()) {
+                verdicts += Verdict(unit, "fail", "cppfrontend model emit failed for $missing")
+                continue
+            }
+            val cppLog = File(logsDir, "${paritySlug(unit)}_cpp.log")
+            val cppExit = runLogged(
+                genArgs(outCpp, instSpecs) + listOf(
+                    "--frontend", "cpp",
+                    "--parsedModel", baseModel.absolutePath
+                ) + instSpecs.flatMap { listOf("--forcingModel", "$it=${forcingPaths[it]}") },
+                cppLog
+            )
+            if (cppExit != 0) {
+                val tail = cppLog.readLines().lastOrNull { it.isNotBlank() }.orEmpty()
+                verdicts += Verdict(unit, "fail", "cpp generation failed (exit $cppExit): $tail")
+                continue
+            }
+            val (cls, detail) = diffUnit(unit, outLib, outCpp)
+            verdicts += Verdict(unit, cls, detail)
+        }
+
+        // Scoreboard + the regression gate against the committed expected-state ledger.
+        val rank = mapOf("identical" to 0, "diff" to 1, "fail" to 2)
+        val expected = if (parityExpectations.exists()) {
+            parityExpectations.readLines().mapNotNull { line ->
+                val t = line.trim()
+                if (t.isEmpty() || t.startsWith("#")) {
+                    null
+                } else {
+                    t.substringBeforeLast('=').trim() to t.substringAfterLast('=').trim()
+                }
+            }.toMap()
+        } else {
+            emptyMap()
+        }
+        var regressions = 0
+        val report = buildString {
+            appendLine("featuregenParity scoreboard (${verdicts.size} units):")
+            for (v in verdicts) {
+                val exp = expected[v.unit] ?: "identical"
+                val marker = when {
+                    (rank[v.cls] ?: 2) > (rank[exp] ?: 0) -> {
+                        regressions++
+                        "REGRESSION (expected $exp)"
+                    }
+
+                    (rank[v.cls] ?: 2) < (rank[exp] ?: 0) -> "IMPROVED (expected $exp — ratchet the ledger)"
+                    else -> "as expected"
+                }
+                appendLine("  [${v.cls.uppercase().padEnd(9)}] ${v.unit} — ${v.detail} [$marker]")
+            }
+            appendLine(
+                "totals: ${verdicts.count { it.cls == "identical" }} identical / " +
+                    "${verdicts.count { it.cls == "diff" }} diff / " +
+                    "${verdicts.count { it.cls == "fail" }} fail " +
+                    "(of ${verdicts.size}; unit diffs under $diffsDir, logs under $logsDir)"
+            )
+        }
+        File(parityDir, "report.txt").writeText(report)
+        println(report)
+        check(regressions == 0) {
+            "featuregenParity: $regressions regression(s) vs $parityExpectations"
+        }
+    }
 }
 
 tasks.register("handoffInstDiff") {
