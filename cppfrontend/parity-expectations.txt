@@ -5,9 +5,9 @@
 # than N diff lines; improvements are reported so this ledger ratchets toward
 # all-identical as Phase D converges.
 #
-# State after the D1a convergence brick. EVERY unit still generates + compiles end-to-end
+# State after the D1b convergence brick. EVERY unit still generates + compiles end-to-end
 # on --frontend=cpp (0 fail). Remaining divergence families (full breakdown on #46):
-#   D1 initializer_list materialization — decomposed + partially converged (D1a brick):
+#   D1 initializer_list materialization — decomposed, D1a+D1b converged:
 #      D1a CONVERGED: a CONCRETE element (DefaultArgs::sumIlist's initializer_list<int>)
 #          decodes faithfully, the member survives, and INCLUDE_MISSING materializes
 #          std_Initializer_list__Int byte-identically (-49 diff lines in EVERY unit).
@@ -15,20 +15,35 @@
 #          reference shape (`typedef const _E* const_iterator`) collapses to libclang's
 #          bare-NAME spelling leaf (never a substitutable tref), so the materialized
 #          class's begin()/end() drop exactly like the live oracle.
-#      D1b remaining: dependent-element member overloads whose libclang spelling is a
-#          NAME tref (basic_string's `std_initializer_list_template__CharT` ctor/op=/
-#          +=/append/assign, vector's `template__Tp` ctor/op=/assign, + the per-element
-#          std_Initializer_list__* materializations they imply) — the same name-tref
-#          convention this front-end uses, so mirrorable deterministically; now the
-#          dominant remaining share (~110/unit basic_string + ~50/vector unit).
+#      D1b CONVERGED: a dependent element that is a bare NAME-tref of an enclosing
+#          template param — written directly (basic_string's
+#          `std_initializer_list_template__CharT` ctor/op=/+=/append/assign) or through
+#          a plain typedef-to-param (vector's `template__Tp` ctor/op=/assign over
+#          `typedef _Tp value_type`) — decodes faithfully (TypeBuilder's
+#          isEnclosingParamIlistElement gate): the libclang survivor spells exactly this
+#          front-end's name-tref convention, so member sets + uniqueCNames converge and
+#          INCLUDE_MISSING materializes every per-element std_Initializer_list__* class
+#          byte-identically (Char/Wchar_t/Int/Double/Point/Thing_P/Vector_int_/
+#          Basic_string_char_ — the only-libclang file-set gap is GONE in all 18 units;
+#          -204 to -318 diff lines per unit, ALL 1326 -> 697). The discrimination is
+#          exact: an ASSOC-REDUCED alias (assocTypedef — set/unordered_set's key-only
+#          value_type) and non-tref dependent shapes (map's pair value_type,
+#          unordered_map's _Hashtable typename) stay UNRESOLVABLE, since their libclang
+#          counterparts are USR-keyed (D1c) or drop at resolution anyway. Fixture pins:
+#          MiniStr's two surviving shapes (param deliberately named T — the libclang
+#          typedef-to-param collapse spells the FIRST-SEEN param-0 name from the
+#          seenNames cache, the N5-family order-dependence; libstdc++'s uniform _Tp
+#          naming keeps production convergent, and these ratchet numbers pin it).
 #      D1c remaining: set/unordered_set's surviving overloads spell the element by the
 #          param's USR (`template_c_stl_set_h_3743` = c:stl_set.h@3743 — a header BYTE
 #          OFFSET): libclang's assocTypedefElement keys its reconstructed value_type
 #          tref by param USR where this front-end deliberately keys by NAME. Mirroring
 #          means synthesizing file@offset USRs into symbol names (decision brick).
+#          Post-D1b these are the ONLY initializer_list diff lines left (set 161,
+#          unordered_set 166, + their ALL share).
 #      D1d downstream: the disambiguation-suffix renames on UNRELATED members
 #          (set::insert(const value_type&) -> `__const_template_c_stl_set_h_3743_and`)
-#          have no independent fix — they collapse into D1b+D1c.
+#          have no independent fix — they collapse into D1c.
 #   D2 RESOLVED for the incidental-surface half (D2a): ModelBuilder now traverses
 #      LinkageSpecDecl with libclang's attach semantics, so the extern "C++"-wrapped
 #      std functions (std::abs/wcschr/wcspbrk/wcsrchr/wcsstr/wmemchr/get_new_handler/
@@ -75,21 +90,21 @@
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
-Box<Box<int>>=diff:287
-Box<Point>=diff:287
-Box<int>=diff:287
-Pair2<int, double>=diff:287
-std::map<int, double>=diff:319
-std::map<int, int>=diff:319
-std::pair<int, int>=diff:287
-std::set<int>=diff:365
-std::unique_ptr<int>=diff:484
-std::unordered_map<int, int>=diff:327
-std::unordered_set<int>=diff:370
-std::vector<Point>=diff:433
-std::vector<Thing*>=diff:356
-std::vector<double>=diff:433
-std::vector<int>=diff:396
-std::vector<std::__cxx11::basic_string<char>>=diff:401
-std::vector<std::vector<int>>=diff:473
-ALL=diff:1326
+Box<Box<int>>=diff:83
+Box<Point>=diff:83
+Box<int>=diff:83
+Pair2<int, double>=diff:83
+std::map<int, double>=diff:115
+std::map<int, int>=diff:115
+std::pair<int, int>=diff:83
+std::set<int>=diff:161
+std::unique_ptr<int>=diff:280
+std::unordered_map<int, int>=diff:123
+std::unordered_set<int>=diff:166
+std::vector<Point>=diff:115
+std::vector<Thing*>=diff:115
+std::vector<double>=diff:115
+std::vector<int>=diff:115
+std::vector<std::__cxx11::basic_string<char>>=diff:83
+std::vector<std::vector<int>>=diff:115
+ALL=diff:697
