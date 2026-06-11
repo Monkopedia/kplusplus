@@ -419,7 +419,7 @@ private class ModelBuilder {
             decl.getKind() != Kind.ClassTemplatePartialSpecialization
         ) {
             decl.asCXXRecordDecl()?.let { record ->
-                addClass(record, decl, parent)
+                addClass(record, decl, parent, attach = true)
                 return
             }
         }
