@@ -29,7 +29,6 @@ import clang.CX_CXXAccessSpecifier
 import com.monkopedia.krapper.generator.model.ElementIdentity
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.RangeReturn
-import com.monkopedia.krapper.generator.model.forEachIdentityPair
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -43,6 +42,7 @@ import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
+import com.monkopedia.krapper.generator.model.forEachIdentityPair
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
