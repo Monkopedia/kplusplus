@@ -213,6 +213,17 @@ private val FIXTURE_HEADER = """
         void insert(const value_type& v);
     };
 
+    template <typename H> struct HashTraits { typedef H hash_fn; };
+
+    template <typename K, typename H>
+    struct MiniHash {
+        typedef HashTraits<H> traits_type;
+        typedef typename HashTraits<H>::hash_fn hasher;
+        typedef typename traits_type::hash_fn key_equal;
+        void rehash(const hasher& h);
+        void requal(const key_equal& q);
+    };
+
     template <typename T> struct DefAlloc {};
 
     template <typename T, typename A = DefAlloc<T>>
@@ -634,10 +645,10 @@ fun main(args: Array<String>): Unit = memScoped {
     val holders = tu.children.filterIsInstance<WrappedTemplate>()
     val holder = holders.find { it.name == "Holder" }
     check(
-        "TU contains the 10 WrappedTemplates in source order (Holder + the Phase D shapes)",
+        "TU contains the 12 WrappedTemplates in source order (Holder + the Phase D shapes)",
         holders.map { it.name } == listOf(
             "Holder", "PtrTrait", "SmartPtr", "MapTraits", "MiniMap",
-            "SetTraits", "MiniSet", "DefAlloc", "DefBox", "DefPair"
+            "SetTraits", "MiniSet", "HashTraits", "MiniHash", "DefAlloc", "DefBox", "DefPair"
         ),
         "got ${holders.map { it.name }}"
     )
@@ -716,8 +727,8 @@ fun main(args: Array<String>): Unit = memScoped {
     // WrappedEnumType (TypeFactories' CXCursor_EnumDecl branch). Underlyings + values are
     // pinned against the libclang oracle for this fixture.
     check(
-        "TU has exactly 22 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
-        tu.children.size == 22,
+        "TU has exactly 24 children (the 3 enum DECLs + 2 `using` aliases contribute NONE)",
+        tu.children.size == 24,
         "got ${tu.children.size}"
     )
     val palette = tu.children.filterIsInstance<WrappedClass>().find { it.name == "Palette" }
@@ -999,6 +1010,31 @@ fun main(args: Array<String>): Unit = memScoped {
         miniSet?.methods?.find { it.name == "insert" }?.args?.singleOrNull()
             ?.type?.toString() == "const template<K>&",
         "got ${miniSet?.methods?.find { it.name == "insert" }?.args}"
+    )
+    // The D3 dependent-typename leaf (unordered_map/set's hasher shape): a member
+    // typedef whose underlying is a DependentNameType NO reducer claims keeps the
+    // WRITTEN `typename <qual>::<name>` spelling as a WrappedTypename — the
+    // deterministic mirror of TypeFactories' `WrappedType(spelling)` else-branch
+    // (the libclang cache's order-dependent remappings are ledger-accepted, D3).
+    val miniHash = holders.find { it.name == "MiniHash" }
+    val miniHashTypedefs = miniHash?.children?.filterIsInstance<WrappedTypedef>().orEmpty()
+    check(
+        "MiniHash's dependent aliases keep the WRITTEN typename spelling, '<'-truncated " +
+            "(template-id qualifier collapses; bare-typedef qualifier survives whole)",
+        miniHashTypedefs.find { it.name == "hasher" }?.targetType
+            ?.toString() == "typename!<HashTraits>" &&
+            miniHashTypedefs.find { it.name == "key_equal" }?.targetType
+            ?.toString() == "typename!<traits_type::hash_fn>",
+        "got ${miniHashTypedefs.map { "${it.name}=${it.targetType}" }}"
+    )
+    check(
+        "MiniHash::rehash/requal args carry the typename leaves (not unresolveable)",
+        miniHash?.methods?.find { it.name == "rehash" }?.args?.singleOrNull()
+            ?.type?.toString() == "const typename!<HashTraits>&" &&
+            miniHash?.methods?.find { it.name == "requal" }?.args?.singleOrNull()
+            ?.type?.toString() == "const typename!<traits_type::hash_fn>&",
+        "got rehash=${miniHash?.methods?.find { it.name == "rehash" }?.args} " +
+            "requal=${miniHash?.methods?.find { it.name == "requal" }?.args}"
     )
     // WrappedTemplateParam.defaultType: the cursor-walk residue shapes, pinned against
     // the libclang oracle (see TypeBuilder.defaultTypeResidue).

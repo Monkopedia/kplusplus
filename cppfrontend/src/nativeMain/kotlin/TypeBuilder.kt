@@ -196,6 +196,31 @@ fun buildWrappedType(type: QualType): WrappedType {
         return WrappedTemplateRef(name).maybeConst(isConst)
     }
 
+    // Dependent member alias clang leaves unresolved (`typename _Hashtable::hasher`,
+    // a DependentNameType): TypeFactories' `else -> WrappedType(spelling)` wraps the
+    // WRITTEN spelling, and the WrappedType string factory peels the `typename ` prefix
+    // into a WrappedTypename leaf — read off the SUGARED type, since visit() returns a
+    // NoDeclFound type unchanged and canonicalization would leak `type-parameter-N-M`.
+    // DETERMINISTIC-RULE divergence (D3, parity-expectations.txt): the libclang path
+    // only produces this shape when its order-dependent visit() cache hasn't already
+    // remapped the alias's spelling to an earlier-seen type — PROVEN context-dependent
+    // (the same unordered_set<int> ctor spells `const hasher&` three different ways
+    // across parse contexts: `typename _Hashtable::hasher` under featuregen's header,
+    // `_Equal`/`allocator_type` leaks in minimal parses). This front-end always emits
+    // the typename leaf — the stable spelling, matching libclang's uncached case.
+    // One createForType string step is load-bearing here: the spelling is TRUNCATED at
+    // the first '<' before wrapping, so a template-id qualifier collapses to its bare
+    // name (`typename HashTraits<H>::hash_fn` -> `typename!<HashTraits>`) while the
+    // bare-typedef qualifier of the unordered containers survives whole
+    // (`typename _Hashtable::hasher` -> `typename!<_Hashtable::hasher>`) — both pinned
+    // against the live oracle by goldenCompare's MiniHash shapes.
+    if (ty.isDependentType()) {
+        val written = type.getUnqualifiedType().getAsString()?.trim()
+        if (written != null && written.startsWith("typename ")) {
+            return WrappedType(written.substringBefore('<')).maybeConst(isConst)
+        }
+    }
+
     // ---- createForType leaf dispatch (post-visit, i.e. against the canonical type) ----
 
     if (canonTy != null && canonTy.isConstantArrayType()) {
@@ -240,13 +265,11 @@ fun buildWrappedType(type: QualType): WrappedType {
     // Builtin (and any remaining) leaf: createForType's `else -> WrappedType(spelling)`,
     // spelled from the canonical type — the structural equivalent of visit()'s collapse.
     val spelling = spellingOf(canonical) ?: return UNRESOLVABLE
-    // A canonical spelling still carrying a dependent-parameter placeholder (a
-    // DependentNameType member alias clang can't reduce, e.g. unordered_map's
-    // `_Hashtable<type-parameter-0-0,...>::hasher`) is unmodelable: the libclang path
-    // leaves these CXType_Unexposed and the member referencing them DROPS, while a
-    // surviving leaf here baked `type-parameter-0-0` (an illegal C identifier fragment)
-    // into uniqueCNames and broke the wrapper compile (#46 Phase D finding —
-    // unordered_map's hasher/key_equal/allocator_type ctor).
+    // A canonical spelling still carrying a dependent-parameter placeholder (residual
+    // dependent shapes that aren't `typename `-prefixed sugar, e.g. an unsugared
+    // `_Hashtable<type-parameter-0-0,...>::hasher`) is unmodelable: a surviving leaf
+    // here baked `type-parameter-0-0` (an illegal C identifier fragment) into
+    // uniqueCNames and broke the wrapper compile (#46 Phase D finding).
     if (spelling.contains("type-parameter-")) return UNRESOLVABLE
     return WrappedTypeReference(spelling).maybeConst(isConst)
 }
