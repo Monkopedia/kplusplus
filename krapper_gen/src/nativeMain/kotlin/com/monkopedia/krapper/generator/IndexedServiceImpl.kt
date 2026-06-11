@@ -267,9 +267,15 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             alreadyBoundKeys,
             forcedContainerKeys
         )
-        classes = classes + newClasses.filter {
-            it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
-        }
+        // One entry per class type-key, last copy wins (#60): without this, every
+        // writer received a fresh full copy of each bound class per instantiation
+        // request and the C++ writers emitted a complete wrapper section per copy
+        // (18 sections per class in featuregen). See dedupClassesLastWins.
+        classes = (
+            classes + newClasses.filter {
+                it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
+            }
+            ).dedupClassesLastWins()
     }
 
     // The std headers needed to declare the types named in an instantiation

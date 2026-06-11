@@ -18,8 +18,10 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
+import com.monkopedia.krapper.generator.builders.LogPolicy
 import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
@@ -767,6 +769,97 @@ class ReturnShapeTest {
             assertTrue(
                 names.sortedBy { it ?: "" } == listOf("Holder_align_of", "Holder_size_of"),
                 "Re-resolution must keep exactly ONE clean-named sizeOf/alignOf pair; got $names"
+            )
+        }
+    }
+
+    // #60: per-instantiation SECTION duplication. Every requestInstantiation appends a
+    // re-resolved copy of each already-bound class (the carrier of pass-3 recovery), and
+    // the C++ writers iterated the RAW list — emitting a full wrapper section per copy
+    // (header parse + 17 instantiations = 18 sections per class in featuregen's .h/.cc;
+    // the .cc only compiled because Scope.allocateName renamed the colliding definitions
+    // into dead `_`-prefixed variants). Drive resolveForcing twice over a bound class
+    // whose range method is only recovered by pass 3 (so the copies genuinely differ),
+    // dedup as requestInstantiation now does, and assert (a) one copy per type-key,
+    // (b) the survivor is the LAST (recovered) copy, (c) HeaderWriter emits exactly one
+    // section per class.
+    @Test
+    fun repeatedForcingEmitsOneSectionPerClass() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val headerFile = "/tmp/krapper_dedup_${random()}_${random()}.h"
+            File(headerFile).writeText(
+                """
+                |#include <vector>
+                |struct Thing { int id; };
+                |struct Holder {
+                |    std::vector<Thing*> items() const { return {}; }
+                |};
+                """.trimMargin()
+            )
+            val mainResolver =
+                parseHeader(index, listOf(headerFile), generateIncludes("clang++"))
+            var classes: List<ResolvedElement> =
+                mainResolver.findClasses(AllowListFilter(listOf("Holder")).wrapperFilter())
+                    .resolveAll(mainResolver, ReferencePolicy.IGNORE_MISSING)
+
+            val forceFile = "/tmp/krapper_dedup_inst_${random()}.h"
+            File(forceFile).writeText(
+                """
+                |#include <vector>
+                |#include "$headerFile"
+                |struct KrapperForce_Holder { std::vector<Thing*> value; };
+                """.trimMargin()
+            )
+            val forceResolver =
+                parseHeader(index, listOf(forceFile), generateIncludes("clang++"))
+
+            // Two rounds = two instantiation requests, each appending a re-resolved copy
+            // of the bound Holder (pre-fix: 3 raw copies, 3 emitted sections).
+            val forcedKeys = mutableSetOf<String>()
+            repeat(2) {
+                val alreadyBound = classes.filterIsInstance<ResolvedClass>()
+                    .mapTo(HashSet()) { it.type.toString() }
+                val scoped = forceResolver.findClasses { defaultFilter() }.filter {
+                    val cls = it as? WrappedClass ?: return@filter true
+                    val key = cls.type.toString()
+                    key.contains("KrapperForce_Holder") || key in alreadyBound
+                }
+                classes = (
+                    classes + scoped.resolveForcing(
+                        forceResolver,
+                        ReferencePolicy.IGNORE_MISSING,
+                        alreadyBound,
+                        forcedKeys
+                    )
+                    ).dedupClassesLastWins()
+            }
+
+            // (a) one copy per class type-key.
+            val keys = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
+            assertTrue(
+                keys.size == keys.distinct().size,
+                "dedup must keep one copy per class type-key; got $keys"
+            )
+            // (b) LAST-wins: the main-resolve Holder dropped items() (the container was
+            // unbound), so only the pass-3-recovered copy carries it.
+            val holder =
+                classes.filterIsInstance<ResolvedClass>().first { it.type.type == "Holder" }
+            assertTrue(
+                holder.children.filterIsInstance<ResolvedMethod>().any { it.name == "items" },
+                "the surviving Holder must be the recovered (last) copy carrying items()"
+            )
+            // (c) writer-level: exactly one wrapper section per class.
+            val builder = CppCodeBuilder()
+            HeaderWriter(builder, policy = LogPolicy)
+                .generate("dedup_probe", listOf(headerFile), classes)
+            val sections = builder.toString().lines()
+                .filter { it.contains("BEGIN KRAPPER GEN for") }
+            assertTrue(
+                sections.size == sections.distinct().size &&
+                    sections.any { it.contains("for Holder") },
+                "header must emit exactly one section per class; got $sections"
             )
         }
     }

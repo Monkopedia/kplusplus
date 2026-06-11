@@ -385,6 +385,35 @@ suspend fun List<WrappedElement>.resolveForcing(
     return resolved
 }
 
+/**
+ * Collapse the per-instantiation class copies to ONE entry per class type-key (#60).
+ *
+ * Each `requestInstantiation` appends a re-resolved copy of every already-bound class
+ * (that's how pass-3 recovery upgrades them), so after featuregen's header parse + 17
+ * instantiation requests the element list carries 18 copies of each main-bound class.
+ * KotlinWriter already collapses these via `associateBy { it.type.toString() }` —
+ * last copy wins — but HeaderWriter/CppWriter iterated the raw list, emitting a full
+ * wrapper section per copy: 18 identical declarations per symbol in the .h (legal
+ * redeclarations) and 18 definitions in the .cc that only compiled because the
+ * builder's `Scope.allocateName` `_`-uniquified the colliding names into dead
+ * `_timespec_new`/`__timespec_new`/... variants.
+ *
+ * Mirror the KotlinWriter semantics exactly: LAST copy wins (the most recent pass-3
+ * re-resolution is the most completely resolved one — cumulative forcing guarantees the
+ * final copy carries every recovered range accessor regardless of request order), kept
+ * at the key's FIRST position (matching `associateBy`'s LinkedHashMap order, so the
+ * Kotlin output is unchanged). Non-class elements pass through untouched.
+ */
+fun List<ResolvedElement>.dedupClassesLastWins(): List<ResolvedElement> {
+    val lastByKey = filterIsInstance<ResolvedClass>().associateBy { it.type.toString() }
+    val seen = mutableSetOf<String>()
+    return mapNotNull { element ->
+        if (element !is ResolvedClass) return@mapNotNull element
+        val key = element.type.toString()
+        if (seen.add(key)) lastByKey.getValue(key) else null
+    }
+}
+
 data class ResolveContext(
     val tracker: ResolveTracker,
     val resolver: Resolver,
