@@ -143,9 +143,14 @@ fun buildWrappedType(type: QualType): WrappedType {
     // signatures), which have no canonical record and previously fell through to a
     // canonical-spelling leaf ("vector<type-parameter-0-0,...>"). Checked BEFORE the
     // typedef handling for the same reason invoke checks it before createForType: an
-    // alias over a template type still collapses to the template shape. A non-type
-    // argument decodes to a null QualType and is dropped (TypeFactories' CXType_Invalid
-    // filterNotNull).
+    // alias over a template type still collapses to the template shape. A NON-TYPE
+    // argument decodes to a null QualType and becomes the UNRESOLVABLE leaf — probed on
+    // the live libclang oracle (featuregen's `Mask<4>`/`Flags<true>` T-defarg rows):
+    // clang_Type_getTemplateArgumentAsType yields a type WrappedType() can't model, so
+    // the libclang arg lands UNRESOLVABLE (NOT filterNotNull-dropped) and the
+    // specialization spells `Flags<unresolveable>`, failing resolution so the member
+    // referencing it drops. Dropping the arg instead materialized a broken zero-arg
+    // `Flags<>` binding that the wrapper compile rejects (#46 Phase D finding).
     val canonical = type.getCanonicalType()
     val canonTy = canonical.typePtr()
     val templateArgCount = with(type.memScope) { numTemplateArgs(type) }
@@ -161,9 +166,9 @@ fun buildWrappedType(type: QualType): WrappedType {
         // decode (value_type -> the substituted element type) would otherwise
         // MATERIALIZE initializer_list<Item*> as a useless extra binding.
         if (baseName == "std::initializer_list") return UNRESOLVABLE
-        val args = (0u until templateArgCount.toUInt()).mapNotNull { i ->
+        val args = (0u until templateArgCount.toUInt()).map { i ->
             val arg = with(type.memScope) { templateArgAsType(type, i) }
-            if (arg.typePtr() == null) null else buildWrappedType(arg)
+            if (arg.typePtr() == null) UNRESOLVABLE else buildWrappedType(arg)
         }
         return WrappedTemplateType(WrappedTypeReference(baseName), args).maybeConst(isConst)
     }
