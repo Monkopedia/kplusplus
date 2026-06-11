@@ -558,13 +558,19 @@ private fun elementOfIterator(iterator: QualType): String? {
     return null
 }
 
-// ModelFactories.stripDecoration, verbatim: reduce a spelling to its bare class name.
+// ModelFactories.stripDecoration: reduce a spelling to its bare class name. One bridge
+// beyond the libclang original: getAsString()'s default policy prints a canonical record
+// ELABORATED ("struct Thing" — the same C-LangOptions policy as the `_Bool` bridge in
+// spellingOf), where libclang spells the bare name — strip the tag keyword too.
 private fun stripDecoration(spelling: String?): String? {
     var s = (spelling ?: return null).trim()
     if (s.isEmpty()) return null
     while (true) {
         val before = s
         if (s.startsWith("const ")) s = s.substring("const ".length).trim()
+        for (tag in listOf("struct ", "class ", "union ", "enum ")) {
+            if (s.startsWith(tag)) s = s.substring(tag.length).trim()
+        }
         if (s.endsWith("*") || s.endsWith("&")) s = s.dropLast(1).trim()
         if (s.endsWith("const")) s = s.dropLast("const".length).trim()
         if (s == before) break
