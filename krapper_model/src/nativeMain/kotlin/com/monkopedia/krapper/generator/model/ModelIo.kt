@@ -231,24 +231,18 @@ data class TemplateTypeDto(
 
 @Serializable
 @SerialName("t.tref")
-data class TemplateRefDto(
-    val target: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TemplateRefDto(val target: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.typedef")
-data class TypedefRefDto(
-    val usr: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TypedefRefDto(val usr: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.typename")
-data class TypenameDto(
-    val target: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TypenameDto(val target: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.enum")
@@ -370,10 +364,20 @@ private class ModelEncoder(private val shared: Set<ElementIdentity>) {
             )
 
             is WrappedTemplate ->
-                TemplateDto(element.name, element.metadata.copy(), element.templateArgCounter, kids())
+                TemplateDto(
+                    element.name,
+                    element.metadata.copy(),
+                    element.templateArgCounter,
+                    kids()
+                )
 
             is WrappedTemplateParam ->
-                TemplateParamDto(element.name, element.usr, element.otherParams.map(::element), kids())
+                TemplateParamDto(
+                    element.name,
+                    element.usr,
+                    element.otherParams.map(::element),
+                    kids()
+                )
 
             is WrappedTypedef -> TypedefDto(element.name, type(element.targetType), kids())
 
