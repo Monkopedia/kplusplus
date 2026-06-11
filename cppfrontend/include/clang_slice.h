@@ -100,18 +100,37 @@ inline clang::QualType templateArgAsType(const clang::QualType &type, unsigned i
     return clang::QualType();
 }
 
+// Phase D BRIDGE (#46): the "::"-joined qualified name INCLUDING inline namespaces.
+// libclang's fullyQualified walk joins every named semantic parent — `std::string`'s
+// template spells `std::__cxx11::basic_string` — but NamedDecl::getQualifiedNameAsString
+// suppresses redundant inline namespaces by default (SuppressInlineNamespaceMode::
+// Redundant), spelling `std::basic_string`. The mismatch breaks resolution on the cpp
+// path: the basic_string ClassTemplate element's qualified name (built from the model's
+// REAL namespace chain, which includes the inline __cxx11) never matches the type-use
+// spelling, so std::string members silently drop. Print with None instead.
+inline std::string qualifiedName(const clang::NamedDecl *decl) {
+    if (!decl) return std::string();
+    clang::PrintingPolicy policy(decl->getASTContext().getLangOpts());
+    policy.SuppressInlineNamespace =
+        llvm::to_underlying(clang::PrintingPolicy::SuppressInlineNamespaceMode::None);
+    std::string out;
+    llvm::raw_string_ostream os(out);
+    decl->printQualifiedName(os, policy);
+    return out;
+}
+
 // The specialization's TEMPLATE name, qualified — the decl-side equivalent of
 // createForType(forTemplateBase=true)'s referencedDecl.fullyQualified (libclang's
 // clang_getTypeDeclaration resolves a TST to its ClassTemplateDecl and a resolved
 // specialization to its ClassTemplateSpecializationDecl; both spell the "::"-joined
-// semantic-parent chain).
+// semantic-parent chain — inline namespaces included, hence qualifiedName above).
 inline std::string templateBaseName(const clang::QualType &type) {
     if (type.isNull()) return std::string();
     if (const auto *spec = type->getAs<clang::TemplateSpecializationType>())
         if (const auto *decl = spec->getTemplateName().getAsTemplateDecl())
-            return decl->getQualifiedNameAsString();
+            return qualifiedName(decl);
     if (const auto *record = type->getAsCXXRecordDecl())
-        return record->getQualifiedNameAsString();
+        return qualifiedName(record);
     return std::string();
 }
 

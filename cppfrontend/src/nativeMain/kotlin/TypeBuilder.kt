@@ -37,6 +37,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointer
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import kppbridge.numTemplateArgs
+import kppbridge.qualifiedName
 import kppbridge.templateArgAsType
 import kppbridge.templateBaseName
 
@@ -211,8 +212,11 @@ fun buildWrappedType(type: QualType): WrappedType {
     canonTy?.asRecord()?.let { record ->
         // Record leaf: createForType's CXCursor_ClassDecl/StructDecl branches ->
         // WrappedType(referencedDecl.fullyQualified) — the "::"-joined semantic-parent
-        // chain, which is exactly NamedDecl::getQualifiedNameAsString().
-        val qualified = record.getQualifiedNameAsString() ?: return UNRESOLVABLE
+        // chain INCLUDING inline namespaces (kppbridge::qualifiedName; plain
+        // getQualifiedNameAsString suppresses `__cxx11`, breaking the std::string
+        // template-element match — see clang_slice.h).
+        val qualified = with(canonTy.memScope) { qualifiedName(record.asNamedDecl()) }
+            .takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
@@ -468,8 +472,10 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
 }
 
 // The WrappedEnumType payload for [enumDecl] (TypeFactories' CXCursor_EnumDecl branch).
+// Qualified the same inline-namespace-preserving way as the record leaf.
 private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
-    val qualified = enumDecl.getQualifiedNameAsString() ?: return UNRESOLVABLE
+    val qualified = with(enumDecl.memScope) { qualifiedName(enumDecl.asNamedDecl()) }
+        .takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
     // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
     // missing name dropping just that constant (TypeFactories' mapNotNull).
     val constants = enumDecl.asDeclContext().decls()

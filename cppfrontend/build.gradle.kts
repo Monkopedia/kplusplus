@@ -185,6 +185,9 @@ kplusplus {
         // TemplateArgumentLoc unwrap for TemplateTypeParmDecl::getDefaultArgument()
         // (see clang_slice.h).
         "kppbridge::defaultArgType",
+        // NEW for Phase D (#46): inline-namespace-preserving qualified names
+        // (std::__cxx11::basic_string — see clang_slice.h).
+        "kppbridge::qualifiedName",
         // NEW for #45 brick 3 (instantiation forcing): the forcing-parse entry point —
         // buildASTFromCode with REAL driver args ('\n'-joined; -resource-dir + -std), the
         // smallest bridge until std::vector<std::string> params are bindable (see
