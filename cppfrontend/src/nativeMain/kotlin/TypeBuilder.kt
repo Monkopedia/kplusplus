@@ -148,6 +148,15 @@ fun buildWrappedType(type: QualType): WrappedType {
     if (templateArgCount > 0) {
         val baseName = with(type.memScope) { templateBaseName(type) }
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+        // std::initializer_list is compiler magic the C boundary can never marshal (a
+        // Kotlin caller cannot construct one), so it is UNRESOLVABLE by construction —
+        // members taking one drop in resolution (or have the defaulted arg omitted),
+        // matching the libclang path, where the same members drop because that
+        // front-end's `initializer_list<value_type>` spelling keeps the alias-name leaf
+        // its order-dependent visit() collapse can't resolve. This front-end's faithful
+        // decode (value_type -> the substituted element type) would otherwise
+        // MATERIALIZE initializer_list<Item*> as a useless extra binding.
+        if (baseName == "std::initializer_list") return UNRESOLVABLE
         val args = (0u until templateArgCount.toUInt()).mapNotNull { i ->
             val arg = with(type.memScope) { templateArgAsType(type, i) }
             if (arg.typePtr() == null) null else buildWrappedType(arg)
