@@ -18,6 +18,7 @@ package com.monkopedia.krapper.generator.model
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.ALIGN_OF
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType.SIZE_OF
+import kotlinx.serialization.Serializable
 
 class WrappedBase(
     val type: WrappedType?,
@@ -29,6 +30,7 @@ class WrappedBase(
     }
 }
 
+@Serializable
 data class ClassMetadata(
     var hasHiddenNew: Boolean = false,
     var hasHiddenDelete: Boolean = false,

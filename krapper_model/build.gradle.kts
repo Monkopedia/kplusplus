@@ -47,6 +47,9 @@ kotlin {
     sourceSets["commonMain"].dependencies {
         implementation(libs.serialization.json)
     }
+    sourceSets["commonTest"].dependencies {
+        implementation(kotlin("test"))
+    }
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {

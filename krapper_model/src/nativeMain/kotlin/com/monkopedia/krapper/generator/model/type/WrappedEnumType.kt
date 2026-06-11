@@ -15,7 +15,10 @@
  */
 package com.monkopedia.krapper.generator.model.type
 
+import kotlinx.serialization.Serializable
+
 /** One constant of a C/C++ enum: its declared name and integer value. */
+@Serializable
 data class WrappedEnumConstant(val name: String, val value: Long)
 
 /**
