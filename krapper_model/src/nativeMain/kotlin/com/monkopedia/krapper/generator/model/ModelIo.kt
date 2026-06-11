@@ -68,10 +68,8 @@ data class TuDto(override val children: List<NodeDto> = emptyList()) : NodeDto()
 
 @Serializable
 @SerialName("ns")
-data class NamespaceDto(
-    val namespace: String,
-    override val children: List<NodeDto> = emptyList()
-) : NodeDto()
+data class NamespaceDto(val namespace: String, override val children: List<NodeDto> = emptyList()) :
+    NodeDto()
 
 @Serializable
 @SerialName("cls")
@@ -182,10 +180,8 @@ sealed class TypeDto : NodeDto()
 
 @Serializable
 @SerialName("t.ref")
-data class TypeRefDto(
-    val name: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TypeRefDto(val name: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.mod")
@@ -213,24 +209,18 @@ data class TemplateTypeDto(
 
 @Serializable
 @SerialName("t.tref")
-data class TemplateRefDto(
-    val target: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TemplateRefDto(val target: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.typedef")
-data class TypedefRefDto(
-    val usr: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TypedefRefDto(val usr: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.typename")
-data class TypenameDto(
-    val target: String,
-    override val children: List<NodeDto> = emptyList()
-) : TypeDto()
+data class TypenameDto(val target: String, override val children: List<NodeDto> = emptyList()) :
+    TypeDto()
 
 @Serializable
 @SerialName("t.enum")
@@ -256,14 +246,22 @@ fun WrappedElement.toDto(): NodeDto {
     val kids = children.map { it.toDto() }
     return when (this) {
         is WrappedType -> toTypeDto(kids)
+
         is WrappedTU -> TuDto(kids)
+
         is WrappedNamespace -> NamespaceDto(namespace, kids)
+
         is WrappedClass -> ClassDto(name, isAbstract, specifiedType?.toDto(), metadata.copy(), kids)
+
         is WrappedTemplate -> TemplateDto(name, metadata.copy(), templateArgCounter, kids)
+
         is WrappedTemplateParam ->
             TemplateParamDto(name, usr, otherParams.map { it.toDto() as TemplateParamDto }, kids)
+
         is WrappedTypedef -> TypedefDto(name, targetType.toDto(), kids)
+
         is WrappedBase -> BaseDto(type?.toDto(), isPublic, isVirtualBase, kids)
+
         // Order matters: WrappedConstructor/WrappedDestructor IS-A WrappedMethod.
         is WrappedConstructor -> ConstructorDto(
             name,
@@ -275,7 +273,9 @@ fun WrappedElement.toDto(): NodeDto {
             isConst,
             kids
         )
+
         is WrappedDestructor -> DestructorDto(name, returnType.toDto(), isVirtual, kids)
+
         is WrappedMethod -> MethodDto(
             name,
             returnType.toDto(),
@@ -287,8 +287,11 @@ fun WrappedElement.toDto(): NodeDto {
             rangeElementType,
             kids
         )
+
         is WrappedArgument -> ArgumentDto(name, type.toDto(), usr, hasDefault, defaultValue, kids)
+
         is WrappedField -> FieldDto(name, type.toDto(), kids)
+
         // Fail loudly: a silently-dropped kind would surface as inexplicable codegen
         // drift; an unknown kind means this schema needs a new DTO.
         else -> throw IllegalArgumentException("No DTO mapping for element kind ${this::class}")
@@ -299,14 +302,22 @@ fun WrappedType.toDto(): TypeDto = toTypeDto(children.map { it.toDto() })
 
 private fun WrappedType.toTypeDto(kids: List<NodeDto>): TypeDto = when (this) {
     is WrappedTypeReference -> TypeRefDto(name, kids)
+
     is WrappedModifiedType -> ModifiedTypeDto(baseType.toDto(), modifier, kids)
+
     is WrappedPrefixedType -> PrefixedTypeDto(baseType.toDto(), modifier, kids)
+
     is WrappedTemplateType ->
         TemplateTypeDto(baseType.toDto(), templateArgs.map { it.toDto() }, kids)
+
     is WrappedTemplateRef -> TemplateRefDto(target, kids)
+
     is WrappedTypedefRef -> TypedefRefDto(usr, kids)
+
     is WrappedTypename -> TypenameDto(target, kids)
+
     is WrappedEnumType -> EnumTypeDto(cppName, underlying.toDto(), constants, kids)
+
     is WrappedFunctionPointer -> FunctionPointerDto(
         cName,
         returnType.toDto(),
@@ -314,26 +325,35 @@ private fun WrappedType.toTypeDto(kids: List<NodeDto>): TypeDto = when (this) {
         cppName.takeIf { it != cName },
         kids
     )
+
     else -> throw IllegalArgumentException("No DTO mapping for type kind ${this::class}")
 }
 
 fun NodeDto.toModel(): WrappedElement {
     val element = when (this) {
         is TypeDto -> toType()
+
         is TuDto -> WrappedTU()
+
         is NamespaceDto -> WrappedNamespace(namespace)
+
         is ClassDto -> WrappedClass(name, isAbstract, specifiedType?.toType()).also {
             it.metadata = metadata.copy()
         }
+
         is TemplateDto -> WrappedTemplate(name).also {
             it.metadata = metadata.copy()
             it.templateArgCounter = templateArgCounter
         }
+
         is TemplateParamDto -> WrappedTemplateParam(name, usr).also { param ->
             param.otherParams.addAll(otherParams.map { it.toModel() as WrappedTemplateParam })
         }
+
         is TypedefDto -> WrappedTypedef(name, targetType.toType())
+
         is BaseDto -> WrappedBase(type?.toType(), isPublic, isVirtualBase)
+
         is ConstructorDto -> WrappedConstructor(
             name,
             returnType.toType(),
@@ -344,9 +364,11 @@ fun NodeDto.toModel(): WrappedElement {
             it.isVirtual = isVirtual
             it.isConst = isConst
         }
+
         is DestructorDto -> WrappedDestructor(name, returnType.toType()).also {
             it.isVirtual = isVirtual
         }
+
         is MethodDto -> WrappedMethod(name, returnType.toType(), methodType).also {
             it.isVirtual = isVirtual
             it.isConst = isConst
@@ -354,7 +376,9 @@ fun NodeDto.toModel(): WrappedElement {
             it.returnViaMemberCall = returnViaMemberCall
             it.rangeElementType = rangeElementType
         }
+
         is ArgumentDto -> WrappedArgument(name, type.toType(), usr, hasDefault, defaultValue)
+
         is FieldDto -> WrappedField(name, type.toType())
     }
     // Rebuild the tree (and thereby every parent back-link) bottom-up. NOTE: base-class
@@ -367,14 +391,22 @@ fun NodeDto.toModel(): WrappedElement {
 fun TypeDto.toType(): WrappedType {
     val type = when (this) {
         is TypeRefDto -> WrappedTypeReference(name)
+
         is ModifiedTypeDto -> WrappedModifiedType(baseType.toType(), modifier)
+
         is PrefixedTypeDto -> WrappedPrefixedType(baseType.toType(), modifier)
+
         is TemplateTypeDto ->
             WrappedTemplateType(baseType.toType(), templateArgs.map { it.toType() })
+
         is TemplateRefDto -> WrappedTemplateRef(target)
+
         is TypedefRefDto -> WrappedTypedefRef(usr)
+
         is TypenameDto -> WrappedTypename(target)
+
         is EnumTypeDto -> WrappedEnumType(cppName, underlying.toType(), constants)
+
         is FunctionPointerDto -> WrappedFunctionPointer(
             cName,
             returnType.toType(),
