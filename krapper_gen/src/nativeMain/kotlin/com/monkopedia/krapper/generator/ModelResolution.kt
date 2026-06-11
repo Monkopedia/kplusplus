@@ -299,20 +299,28 @@ private fun WrappedClass.modifyMethodsIfNeeded(baseClasses: List<WrappedClass>) 
             removeChild(it)
         }
     }
-    addChild(
-        WrappedMethod(
-            "sizeOf",
-            WrappedTypeReference("int"),
-            MethodType.SIZE_OF
+    // Idempotent: this runs on the SHARED WrappedClass on EVERY resolve, and a class is
+    // re-resolved once per requestInstantiation pass (resolveForcing pass 1 + pass 3).
+    // Unconditionally appending here accumulated a fresh sizeOf/alignOf pair per pass,
+    // which the per-pass NameHandler then `_`-uniquified — e.g. `timespec_size_of`
+    // emitted 324 times with up to 34 leading underscores after featuregen's 17
+    // instantiation requests (#57). Add the pair only once per class.
+    if (children.none { (it as? WrappedMethod)?.methodType == MethodType.SIZE_OF }) {
+        addChild(
+            WrappedMethod(
+                "sizeOf",
+                WrappedTypeReference("int"),
+                MethodType.SIZE_OF
+            )
         )
-    )
-    addChild(
-        WrappedMethod(
-            "alignOf",
-            WrappedTypeReference("int"),
-            MethodType.ALIGN_OF
+        addChild(
+            WrappedMethod(
+                "alignOf",
+                WrappedTypeReference("int"),
+                MethodType.ALIGN_OF
+            )
         )
-    )
+    }
 }
 
 suspend fun WrappedElement.createThisArg(resolverContext: ResolveContext): ResolvedArgument? {

@@ -22,6 +22,7 @@ import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ArgumentCastMode
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
@@ -696,6 +697,76 @@ class ReturnShapeTest {
                 "aitems" in accessors && "bitems" in accessors,
                 "BOTH range accessors must survive after forcing both element containers; " +
                     "got $accessors (pre-fix only the last-forced `bitems` survives)"
+            )
+        }
+    }
+
+    // #57: synthetic sizeOf/alignOf must be IDEMPOTENT across re-resolutions. Each
+    // requestInstantiation re-resolves every already-bound class (resolveForcing pass 1 +
+    // pass 3), and `modifyMethodsIfNeeded` mutates the SHARED WrappedClass — before the fix
+    // it appended a FRESH sizeOf/alignOf pair on every resolve, which the per-pass
+    // NameHandler `_`-uniquified instead of deduping (timespec_size_of emitted 324 times in
+    // featuregen's krapped output, up to 34 leading underscores). Drive resolveForcing twice
+    // over the same bound class (mirroring two requestInstantiation calls) and assert the
+    // last-wins copy carries exactly ONE pair with the CLEAN names.
+    @Test
+    fun repeatedForcingDoesNotDuplicateSyntheticMembers() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val header =
+                """
+                |struct Thing { int id; };
+                |struct Holder { Thing* p_; };
+                """.trimMargin()
+            val headerFile = "/tmp/krapper_synth_${random()}_${random()}.h"
+            File(headerFile).writeText(header)
+
+            val mainResolver =
+                parseHeader(index, listOf(headerFile), generateIncludes("clang++"))
+            var classes: List<ResolvedElement> =
+                mainResolver.findClasses(AllowListFilter(listOf("Holder")).wrapperFilter())
+                    .resolveAll(mainResolver, ReferencePolicy.IGNORE_MISSING)
+
+            val forceFile = "/tmp/krapper_synth_inst_${random()}.h"
+            File(forceFile).writeText(
+                """
+                |#include <vector>
+                |#include "$headerFile"
+                |struct KrapperForce_Thing { std::vector<Thing*> value; };
+                """.trimMargin()
+            )
+            val forceResolver =
+                parseHeader(index, listOf(forceFile), generateIncludes("clang++"))
+
+            // Two rounds over the SAME forcing TU — each re-resolves the bound Holder twice
+            // (pass 1 + pass 3), so pre-fix the final copy carries 5 sizeOf children.
+            val forcedKeys = mutableSetOf<String>()
+            repeat(2) {
+                val alreadyBound = classes.filterIsInstance<ResolvedClass>()
+                    .mapTo(HashSet()) { it.type.toString() }
+                val scoped = forceResolver.findClasses { defaultFilter() }.filter {
+                    val cls = it as? WrappedClass ?: return@filter true
+                    val key = cls.type.toString()
+                    key.contains("KrapperForce_Thing") || key in alreadyBound
+                }
+                classes = classes + scoped.resolveForcing(
+                    forceResolver,
+                    ReferencePolicy.IGNORE_MISSING,
+                    alreadyBound,
+                    forcedKeys
+                )
+            }
+
+            val holder = classes.filterIsInstance<ResolvedClass>()
+                .associateBy { it.type.toString() }
+                .values.first { it.type.type == "Holder" }
+            val names = holder.children.filterIsInstance<ResolvedMethod>()
+                .filter { it.methodType in listOf(MethodType.SIZE_OF, MethodType.ALIGN_OF) }
+                .map { it.uniqueCName }
+            assertTrue(
+                names.sortedBy { it ?: "" } == listOf("Holder_align_of", "Holder_size_of"),
+                "Re-resolution must keep exactly ONE clean-named sizeOf/alignOf pair; got $names"
             )
         }
     }
