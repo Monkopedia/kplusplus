@@ -198,19 +198,32 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             appendLine("struct $forceName { $target value; };")
         }
         forcingHeaders[forceName] = forcingContent
-        // Parse from a per-run temp file (cleaned in close()); the same header is
-        // re-materialized into the output dir by writeTo for the generated wrapper.
-        val tmpFile = File(tempDir(), "$forceName.h").path
-        File(tmpFile).writeText(forcingContent)
-        Log.i("Forcing instantiation of $target via $tmpFile")
-        val resolver = scope.parseHeader(
-            index,
-            listOf(tmpFile),
-            includePaths + request.headerDirectories,
-            args = parseArgs(request.headerDirectories),
-            debug = config.debug,
-            strictDiagnostics = config.strictDiagnostics
-        )
+        // #45 brick 3: with --frontend=cpp the forcing-parse tree was already produced by
+        // the cppfrontend binary (which synthesizes the SAME forcing header and parses it
+        // with the Clang C++ AST); load it instead of parsing through libclang. The
+        // forcing header content above is still recorded either way: writeTo
+        // re-materializes it so the generated wrapper can #include the specialization's
+        // declaration. Everything downstream of obtaining the resolver — the scoping,
+        // resolveForcing's 3-pass dance, cumulative forcedContainerKeys, dedup — is the
+        // SAME code on both paths.
+        val resolver = cppForcingModelPaths[target]?.let { path ->
+            Log.i("cpp front-end forcing handoff: loading $target model from $path")
+            loadParsedModel(path)
+        } ?: run {
+            // Parse from a per-run temp file (cleaned in close()); the same header is
+            // re-materialized into the output dir by writeTo for the generated wrapper.
+            val tmpFile = File(tempDir(), "$forceName.h").path
+            File(tmpFile).writeText(forcingContent)
+            Log.i("Forcing instantiation of $target via $tmpFile")
+            scope.parseHeader(
+                index,
+                listOf(tmpFile),
+                includePaths + request.headerDirectories,
+                args = parseArgs(request.headerDirectories),
+                debug = config.debug,
+                strictDiagnostics = config.strictDiagnostics
+            )
+        }
         // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
         // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the
         // re-parsed TU — against a large library that is the whole transitive surface

@@ -203,6 +203,24 @@ class KrapperGen : CliktCommand() {
         help = "Path to the ModelIo JSON WrappedTU to load when --frontend=cpp " +
             "(required in that mode; ignored otherwise)."
     )
+    val forcingModel by option(
+        "--forcingModel",
+        help = "Instantiation forcing on the cpp path (#45 brick 3): " +
+            "'<spec>=<path>' maps an --instantiate spec (e.g. 'std::vector<Item*>') to " +
+            "the ModelIo JSON of its FORCING-PARSE WrappedTU — the tree the libclang " +
+            "path gets by synthesizing a KrapperForce_* header and re-parsing it, here " +
+            "produced by the cppfrontend binary instead. Repeatable; with --frontend=cpp " +
+            "every --instantiate spec must have a matching entry. Ignored otherwise."
+    ).multiple()
+    val dumpModels by option(
+        "--dumpModels",
+        help = "Debug/oracle flag (#45 brick 3, libclang path): write every parse's " +
+            "post-reduce WrappedTU (the main header parse AND each instantiation's " +
+            "forcing re-parse) as ModelIo JSON into the given directory " +
+            "(model_<n>_<header>.json) and continue the run. The files are directly " +
+            "consumable by --frontend=cpp --parsedModel/--forcingModel, which is how the " +
+            "file-handoff instantiation flow is proven against the in-process run."
+    )
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -224,15 +242,30 @@ class KrapperGen : CliktCommand() {
         // pipeline below is otherwise unchanged — parseHeader returns a ParsedResolver
         // over the LOADED tree instead of a libclang parse, and resolution+codegen run
         // exactly as the --roundTripModel oracle proved they can on a decoded model.
+        dumpModelsDir = dumpModels
         if (frontend == Frontend.CPP) {
-            require(instantiate.isEmpty()) {
-                "--frontend=cpp does not support --instantiate yet: instantiation " +
-                    "forcing synthesizes a forcing header and re-parses it through " +
-                    "libclang (IndexedServiceImpl.requestInstantiation), which the cpp " +
-                    "front-end path skips. Scoped out of #45 brick 2."
-            }
             cppParsedModelPath = parsedModel
                 ?: error("--frontend=cpp requires --parsedModel <path>")
+            // #45 brick 3: --instantiate is supported on the cpp path when every spec has
+            // a forcing model (the cppfrontend-produced tree replacing the libclang
+            // forcing re-parse). Keys are normalized through parseInstantiation so the
+            // --forcingModel spelling matches requestInstantiation's target string
+            // regardless of arg spacing ('std::vector<Item *>' vs 'std::vector<Item*>').
+            cppForcingModelPaths = forcingModel.associate { entry ->
+                val idx = entry.indexOf('=')
+                require(idx > 0) { "--forcingModel must be '<spec>=<path>', got: $entry" }
+                val req = parseInstantiation(entry.substring(0, idx))
+                "${req.base}<${req.args.joinToString(", ")}>" to entry.substring(idx + 1)
+            }
+            val missing = instantiate.map { parseInstantiation(it) }
+                .map { "${it.base}<${it.args.joinToString(", ")}>" }
+                .filter { it !in cppForcingModelPaths }
+            require(missing.isEmpty()) {
+                "--frontend=cpp requires a --forcingModel '<spec>=<path>' for every " +
+                    "--instantiate spec; missing: $missing (instantiation forcing on " +
+                    "this path loads the cppfrontend-produced forcing-parse model " +
+                    "instead of re-parsing through libclang)."
+            }
         }
         runBlocking {
             val service = KrapperServiceImpl()
