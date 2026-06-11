@@ -145,6 +145,43 @@ var roundTripParsedModel: Boolean =
 // is Phase E; what matters here is the cpp path never CALLS it.
 var cppParsedModelPath: String? = null
 
+// Instantiation forcing on the cpp path (#45 brick 3), set by KrapperGen --frontend=cpp
+// --forcingModel <spec>=<path>. Maps each normalized instantiation target (e.g.
+// "std::vector<Item*>") to the ModelIo JSON of its FORCING-PARSE WrappedTU — the tree the
+// libclang path obtains by synthesizing a `KrapperForce_*` header and re-parsing it
+// (IndexedServiceImpl.requestInstantiation). With an entry present, requestInstantiation
+// loads the tree instead of parsing, and the whole downstream flow (scoping +
+// resolveForcing's 3-pass dance + cumulative keys + dedup) runs UNCHANGED over it.
+// CLI-scoped global, same rationale as [cppParsedModelPath].
+var cppForcingModelPaths: Map<String, String> = emptyMap()
+
+// Model-dump oracle (#45 brick 3), set by KrapperGen --dumpModels <dir>. On the LIBCLANG
+// path, every [parseHeader] (the main header parse AND each instantiation's forcing parse)
+// additionally serializes its post-reduce, pre-rewrite WrappedTU as ModelIo JSON into the
+// directory (model_<n>_<firstHeaderName>.json) and CONTINUES the run. The dumped files are
+// exactly what --frontend=cpp consumes via --parsedModel/--forcingModel, so feeding them
+// back through the cpp path and diffing the generated output proves the file-handoff
+// instantiation flow (fresh instances, no cursor->element memo) reproduces the in-process
+// libclang run — isolating flow correctness from cppfrontend model-construction fidelity.
+var dumpModelsDir: String? = null
+private var dumpModelCounter = 0
+
+/**
+ * Load a ModelIo WrappedTU from [path] and prepare it for resolution exactly the way a
+ * libclang parse is prepared: run the pre-resolution rewrites, then wrap in a
+ * ParsedResolver. Shared by the --frontend=cpp base-model hook in [parseHeader] and the
+ * per-instantiation forcing-model load in IndexedServiceImpl.requestInstantiation. No
+ * cursor->element memo exists on this path (nothing was parsed in-process); identity
+ * across the separately-loaded trees is structural (type-string keys), which is all the
+ * forcing flow consults (alreadyBoundKeys / tracker keys / dedup are string-keyed).
+ */
+internal suspend fun loadParsedModel(path: String): ParsedResolver {
+    val restored = ModelIo.decodeFromString(File(path).readText())
+    rewriteViewReturns(restored)
+    rewriteUniquePtrReturns(restored)
+    return ParsedResolver(restored)
+}
+
 fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
     return when (this) {
         is AndFilter -> {
@@ -582,11 +619,8 @@ suspend fun DeferScope.parseHeader(
     // later parse ever needs to rediscover these instances. The pre-resolution rewrites
     // run on the loaded tree exactly as they do on a --roundTripModel restored tree.
     cppParsedModelPath?.let { path ->
-        val restored = ModelIo.decodeFromString(File(path).readText())
-        Log.i("cpp front-end handoff: loaded parsed model from $path (libclang parse skipped)")
-        rewriteViewReturns(restored)
-        rewriteUniquePtrReturns(restored)
-        return ParsedResolver(restored)
+        Log.i("cpp front-end handoff: loading parsed model from $path (libclang parse skipped)")
+        return loadParsedModel(path)
     }
     val builder = ResolverBuilderImpl()
     val tu = file.map {
@@ -613,6 +647,17 @@ suspend fun DeferScope.parseHeader(
         File(path).writeText(Json.encodeToString(tu.serialized()))
         Log.i("Dumped parsed model to $path (parse-only mode, exiting)")
         exitProcess(0)
+    }
+    // Model-dump oracle (#45 brick 3): serialize EVERY parse's tree (main + each forcing
+    // re-parse) as ModelIo JSON and continue. Placed at the same post-reduce, pre-rewrite
+    // point as the hooks above so the dumped file is byte-compatible with what the
+    // --frontend=cpp load path expects (loadParsedModel re-applies the rewrites itself).
+    dumpModelsDir?.let { dir ->
+        File(dir).mkdirs()
+        val name = File(file.first()).name.substringBeforeLast(".")
+        val out = File(File(dir), "model_${dumpModelCounter++}_$name.json")
+        out.writeText(ModelIo.encodeToString(tu))
+        Log.i("Dumped ModelIo model to ${out.path}")
     }
     // Round-trip oracle (#45 brick 1): serialize the parsed model to JSON, deserialize
     // it back, and hand the rest of the pipeline THE DESERIALIZED TREE. Placed at the

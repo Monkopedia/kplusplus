@@ -21,3 +21,4 @@ gradle-app.setting
 local.properties
 .claude/worktrees/
 .kotlin/
+*.hprof
