@@ -2,6 +2,10 @@
 
 Status: **active** · Branch model: `clang-base` (stage0) → `clang-selfhost` (stage1) · LLVM pin: **22.1.6**
 
+> **Building/running the clang modules?** See the [clang self-bootstrap runbook](clang-runbook.md)
+> for the toolchain (`-PenableClang` / `-PllvmConfig`), JDK matrix, the gated tasks, and
+> troubleshooting.
+
 ---
 
 ## Goal
