@@ -341,22 +341,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
 
     /**
      * The directory the generated cinterop .def + Kotlin sources live in (and that
-     * kplusplusSync writes). Defaults to `<projectDir>/krapped` — the committed,
-     * standard location. Two gated, additive overrides (both default-absent, so the
-     * default path is byte-for-byte unchanged):
-     *
-     *   * `-Pkpp.krappedDir.<module>=<abs path>` — an explicit alternate dir;
-     *   * `-Pkpp.frontend.<module>=cpp` — the Phase E (#47) flip-safety harness:
-     *     consume cpp-front-end bindings under `<buildDir>/krapped-cpp` instead, with
-     *     kplusplusSync's libclang body skipped (an external task supplies that dir).
+     * kplusplusSync writes). Defaults to `<projectDir>/krapped` — the committed, standard
+     * location. The single gated, additive override (default-absent, so the default path
+     * is byte-for-byte unchanged) is the Phase E (#47) flip-safety harness:
+     * `-Pkpp.frontend.<module>=cpp` consumes cpp-front-end bindings under
+     * `<buildDir>/krapped-cpp` instead, with kplusplusSync's libclang body skipped (an
+     * external task — :cppfrontend:featuregenCppBindings — supplies that dir).
      *
      * Used by BOTH the sync task (where it writes) and wireGeneratedBindings (where the
      * cinterop/srcDir are pointed), so the on-disk wiring stays consistent.
      */
     private fun krappedDirFor(target: Project): File {
-        (target.findProperty("kpp.krappedDir.${target.name}") as String?)?.let {
-            return File(it)
-        }
         if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
             return File(target.layout.buildDirectory.get().asFile, "krapped-cpp")
         }
