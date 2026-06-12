@@ -205,7 +205,8 @@ suspend fun List<WrappedElement>.resolveForcing(
     resolver: Resolver,
     policy: ReferencePolicy,
     alreadyBoundKeys: Set<String>,
-    forcedContainerKeys: MutableSet<String> = mutableSetOf()
+    forcedContainerKeys: MutableSet<String> = mutableSetOf(),
+    forcingTargets: Set<String> = emptySet()
 ): List<ResolvedElement> {
     val classes = filterIsInstance<WrappedClass>()
     // The `KrapperForce_*` struct's `value` member type IS the forced container
@@ -234,7 +235,8 @@ suspend fun List<WrappedElement>.resolveForcing(
             resolver = resolver,
             debugFilter = { _, _, _ ->
                 platform.posix.getenv("KRAPPER_DEBUG_RESOLVE") != null
-            }
+            },
+            forcingTargetKeys = forcingTargets
         )
         .withClasses(classes)
 
@@ -430,7 +432,19 @@ data class ResolveContext(
     // bases/members (e.g. `std::ctype<char>` → `std::ctype_base`), emitting broken
     // C++. False only while expanding an INCLUDE_MISSING reference. See
     // `WrappedClass.resolve`.
-    val dropUnresolvablePrimaryBase: Boolean = true
+    val dropUnresolvablePrimaryBase: Boolean = true,
+    // The type-string keys of the instantiation targets being FORCED this resolve (the
+    // `--instantiate`/forcing-struct specializations). An INCLUDE_MISSING expansion of a
+    // class whose key is in this set is an EXPLICITLY REQUESTED binding, not an incidental
+    // transitive reference, so it gets the listed/found-class treatment — drop an
+    // unresolvable PRIMARY base rather than hard-failing the whole class. This is what lets
+    // `std::pair<int, int>` bind on the cpp front-end: its faithful model carries the
+    // private `__pair_base<_T1, _T2>` base (libclang's lossy walk omits it) with
+    // unsubstituted dependent params that can't resolve; dropping that empty constraint
+    // base keeps pair's own `first`/`second`/`swap`, matching the libclang binding. Empty
+    // off the forcing path, so the main resolve is unaffected. See `typeMapper`'s
+    // INCLUDE_MISSING branch and `resolveForcing`.
+    val forcingTargetKeys: Set<String> = emptySet()
 ) {
 
     suspend fun map(type: WrappedType): WrappedType? {
@@ -648,11 +662,14 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                             // pulled class's primary base can't resolve (don't
                             // resurrect transitively-referenced subclasses + their
                             // incomplete-at-emit bases). Listed/found classes still
-                            // drop-to-borrowed via their own resolve context.
+                            // drop-to-borrowed via their own resolve context — as does an
+                            // EXPLICITLY-FORCED instantiation target (in forcingTargetKeys),
+                            // which is a requested binding, not an incidental reference.
+                            val dropBase = it.toString() in context.forcingTargetKeys
                             val (resolved, wrapper) =
                                 context.resolver.resolve(
                                     it,
-                                    context.copy(dropUnresolvablePrimaryBase = false)
+                                    context.copy(dropUnresolvablePrimaryBase = dropBase)
                                 ) ?: error("Couldn't include $it, resolve failed")
                             if (!resolved.isNotEmpty()) {
                                 return@operateOn RemoveElement
