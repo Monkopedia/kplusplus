@@ -102,6 +102,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import com.monkopedia.krapper.generator.resolvedmodel.type.fullyQualifiedType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
+import com.monkopedia.krapper.generator.resolvedmodel.type.plainDeclaredName
 import com.monkopedia.krapper.generator.resolvedmodel.type.plainName
 import com.monkopedia.krapper.generator.resolvedmodel.type.typedWith
 
