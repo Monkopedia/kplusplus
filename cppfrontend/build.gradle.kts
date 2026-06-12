@@ -677,6 +677,77 @@ tasks.register("featuregenParity") {
     }
 }
 
+// ---- Phase E step 2 (#47): BEHAVIORAL FLIP-SAFETY bindings ----
+// featuregenParity above proves the cpp-front-end bindings GENERATE + COMPILE for every
+// featuregen unit; the open flip-safety question is whether featuregen's 188 runtime
+// tests still PASS against them (a spelling delta that renames a method a test calls
+// would break; the ~345-line ALL diff is mostly EXTRA / more-correct bindings, which
+// shouldn't). This task materializes the FULL featuregen surface (all specs at once —
+// the real kplusplusSync shape) through --frontend=cpp into featuregen/build/krapped-cpp,
+// with the SAME CLI tail kplusplusSync uses (module name, INCLUDE_MISSING,
+// krapper.featuregen, --header). The kplusplus plugin, under -Pkpp.frontend.featuregen=cpp,
+// wires featuregen's nativeTest against THIS dir (not the committed krapped/) and skips
+// its libclang sync — so `:featuregen:nativeTest -PenableClang -Pkpp.frontend.featuregen=cpp`
+// runs the behavioral golden gate on cpp-front-end bindings. Additive + gated: the default
+// build never configures :cppfrontend and never sets the property, so krapped/ is untouched.
+val featuregenKrappedCppDir = rootProject.layout.projectDirectory
+    .dir("featuregen/build/krapped-cpp").asFile
+
+tasks.register("featuregenCppBindings") {
+    dependsOn(parityEmit, ":krapper_gen:linkReleaseExecutableNative")
+    doLast {
+        val specs = paritySpecs()
+        val forcingPaths = File(parityDir, "forcing_map.txt").readLines()
+            .filter { it.isNotEmpty() }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+        val missing = specs.filter { (forcingPaths[it] ?: "EMIT_FAILED") == "EMIT_FAILED" }
+        check(missing.isEmpty()) {
+            "featuregenCppBindings: cppfrontend model emit failed for $missing " +
+                "(see ${File(parityDir, "logs")})"
+        }
+        val baseModel = File(parityDir, "models/base_model.json")
+        featuregenKrappedCppDir.deleteRecursively()
+        featuregenKrappedCppDir.mkdirs()
+        // The kplusplusSync CLI tail (module name, INCLUDE_MISSING, krapper.featuregen,
+        // --header) + every instantiation + the cpp front-end models — IDENTICAL to the
+        // libclang sync save for the --frontend=cpp/--parsedModel/--forcingModel swap.
+        // The wrapper is -c compiled with clang++ (matching featuregenParity), which is
+        // also what the cpp front-end PARSES against (system libstdc++) — so the faithful
+        // model and the wrapper agree. NOTE (#47 flip prerequisite): a behavioral RUN
+        // additionally LINKS libfeaturegen.a into a K/N binary, whose bundled lld +
+        // gcc-8.3 libstdc++ can't resolve the newer-libstdc++ internals this faithful,
+        // system-libstdc++-parsed model surfaces (std::__size_to_integer,
+        // __throw_bad_array_new_length, __glibcxx_assert_fail). Closing that needs the cpp
+        // parse + the K/N toolchain to target ONE libstdc++ — out of scope for this
+        // additive harness; see the PR body / #47.
+        val args = listOf(
+            krapperGenKexe.absolutePath, "featuregen",
+            "-r", "INCLUDE_MISSING",
+            "-p", "krapper.featuregen",
+            "-c", "clang++",
+            "-o", featuregenKrappedCppDir.absolutePath
+        ) + specs.flatMap { listOf("--instantiate", it) } +
+            listOf("--header", parityHeader.absolutePath) +
+            listOf("--frontend", "cpp", "--parsedModel", baseModel.absolutePath) +
+            specs.flatMap { listOf("--forcingModel", "$it=${forcingPaths[it]}") }
+        val log = File(parityDir, "logs/featuregen_cpp_bindings.log")
+        val exit = runLogged(args, log)
+        check(exit == 0) {
+            "featuregenCppBindings: krapper_gen --frontend=cpp failed (exit $exit), tail:\n" +
+                log.readLines().takeLast(25).joinToString("\n")
+        }
+        // Mirror generated.txt so the plugin's already-generated bookkeeping is coherent.
+        File(featuregenKrappedCppDir, "generated.txt")
+            .writeText(specs.joinToString("\n") + "\n")
+        val kt = File(featuregenKrappedCppDir, "src").walkTopDown()
+            .count { it.isFile && it.extension == "kt" }
+        println(
+            "featuregenCppBindings: cpp-front-end featuregen bindings ($kt Kotlin files, " +
+                "${specs.size} instantiations) -> $featuregenKrappedCppDir"
+        )
+    }
+}
+
 tasks.register("handoffInstDiff") {
     dependsOn(handoffInstGenerate, handoffInstBaseline, handoffOracleGenerate)
     doLast {

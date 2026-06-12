@@ -59,7 +59,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // and the kexe artifact through whichever path is wired up.
             val (linkTask, kexe) = resolveKrapperGen(target)
             linkTask?.let { lt -> it.dependsOn(lt) }
-            val krappedDir = File(target.projectDir, "krapped")
+            val krappedDir = krappedDirFor(target)
             val manifestFile = File(krappedDir, "requested.txt")
             val generatedFile = File(krappedDir, "generated.txt")
             val fixupFile = File(krappedDir, "fixups.json")
@@ -102,6 +102,19 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
             }
             it.doLast {
+                // Phase E step 2 (#47) flip-safety harness: when this module is driven
+                // by the cpp front-end (-Pkpp.frontend.<module>=cpp), the bindings under
+                // build/krapped-cpp are produced by an EXTERNAL gated task (e.g.
+                // :cppfrontend:featuregenCppBindings, wired as a dependency of this task);
+                // the libclang generation body is skipped. Fully additive — absent the
+                // property this branch never fires and the default path is unchanged.
+                if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
+                    println(
+                        "kplusplusSync: $moduleName driven by --frontend=cpp " +
+                            "(bindings supplied under $krappedDir); skipping libclang sync."
+                    )
+                    return@doLast
+                }
                 if (!kexe.exists()) {
                     throw GradleException(
                         "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
@@ -326,6 +339,25 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         )
     }
 
+    /**
+     * The directory the generated cinterop .def + Kotlin sources live in (and that
+     * kplusplusSync writes). Defaults to `<projectDir>/krapped` — the committed, standard
+     * location. The single gated, additive override (default-absent, so the default path
+     * is byte-for-byte unchanged) is the Phase E (#47) flip-safety harness:
+     * `-Pkpp.frontend.<module>=cpp` consumes cpp-front-end bindings under
+     * `<buildDir>/krapped-cpp` instead, with kplusplusSync's libclang body skipped (an
+     * external task — :cppfrontend:featuregenCppBindings — supplies that dir).
+     *
+     * Used by BOTH the sync task (where it writes) and wireGeneratedBindings (where the
+     * cinterop/srcDir are pointed), so the on-disk wiring stays consistent.
+     */
+    private fun krappedDirFor(target: Project): File {
+        if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
+            return File(target.layout.buildDirectory.get().asFile, "krapped-cpp")
+        }
+        return File(target.projectDir, "krapped")
+    }
+
     private fun compareVersions(a: String, b: String): Int {
         val aParts = a.split(".", "-").mapNotNull { it.toIntOrNull() }
         val bParts = b.split(".", "-").mapNotNull { it.toIntOrNull() }
@@ -404,7 +436,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         project: Project
     ) {
         val moduleName = project.name
-        val krappedDir = File(project.projectDir, "krapped")
+        val krappedDir = krappedDirFor(project)
         val krappedDef = File(krappedDir, "$moduleName.def")
         val krappedSrc = File(krappedDir, "src")
         // Wire the generated cinterop .def + Kotlin source dir into the main
