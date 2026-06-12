@@ -75,6 +75,24 @@ fun WrappedElement.Companion.setDroppedUsrs(usrs: Set<String>) {
 }
 
 /**
+ * Clear the process-global parse memo before a fresh generation run (#11 hermeticity).
+ *
+ * [elementLookup] interns parsed elements by USR-tag so a declaration re-encountered
+ * across the base parse and every forcing re-parse WITHIN one run collapses onto a single
+ * instance — resolution then mutates that instance in place (metadata, synthetic children,
+ * dedup). That identity must NOT survive across runs: in service mode the v2 plugin's
+ * kplusplusSync reuses one krapper_gen process, so a later run re-parsing the same header
+ * would otherwise find the prior run's already-RESOLVED, mutated elements and build on
+ * them, diverging from a fresh-process run. [droppedUsrs] is overwritten before each
+ * [mapAll], but is reset here too so a fresh run never inherits a stale dropped set.
+ * Called from `IndexedServiceImpl.init`, next to [DropLedger.reset]/[GenerationContext.reset].
+ */
+fun WrappedElement.Companion.resetElementMemo() {
+    elementLookup.clear()
+    droppedUsrs = emptySet()
+}
+
+/**
  * Round-trip oracle support (#45 brick 1): after `--roundTripModel` replaces a parsed
  * tree with its deserialized copy, point every [elementLookup] memo entry that referenced
  * an element of the ORIGINAL tree at its RESTORED counterpart. The memo is what carries
