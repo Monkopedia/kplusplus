@@ -186,7 +186,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // SAME code on both paths.
         val resolver = cppForcingModelPaths[target]?.let { path ->
             Log.i("cpp front-end forcing handoff: loading $target model from $path")
-            loadParsedModel(path)
+            loadForcingModel(path)
         } ?: run {
             // Parse from a per-run temp file (cleaned in close()); the same header is
             // re-materialized into the output dir by writeTo for the generated wrapper.

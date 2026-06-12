@@ -182,6 +182,65 @@ internal suspend fun loadParsedModel(path: String): ParsedResolver {
     return ParsedResolver(restored)
 }
 
+// The base-model tree loaded by [parseHeader]'s --parsedModel hook, kept so each
+// forcing-model load can mirror libclang's first-seen ordering against it (O1, #46).
+internal var cppBaseModelTu: WrappedTU? = null
+
+/**
+ * Load a FORCING model (#46 O1): [loadParsedModel], then reorder its namespace-level
+ * children into the BASE model's first-seen order. On the libclang path the base parse
+ * and every forcing re-parse share one Index, so ModelFactories' USR-keyed elementLookup
+ * memo collapses each namespace onto the element the base parse already populated —
+ * re-encountered decls keep their base position and only NEW decls append. The forcing
+ * TU's own lexical order DIFFERS from the base TU's whenever ForcingHeader prepends a
+ * std include (e.g. `#include <vector>` pulls <new> in front of the user header's
+ * <cwchar>), so a per-payload tree loaded as-is would emit that round's std functions
+ * in a SPEC-DEPENDENT order. First-seen base order is the spec-invariant choice.
+ */
+internal suspend fun loadForcingModel(path: String): ParsedResolver {
+    val resolver = loadParsedModel(path)
+    cppBaseModelTu?.let { base -> reorderToFirstSeen(resolver.tu, base) }
+    return resolver
+}
+
+// The structural identity used ONLY for the first-seen ordering above — the same
+// name/signature granularity the forcing flow's string-keyed merge consults
+// (alreadyBoundKeys / forcingIdentity / last-wins dedup).
+private fun WrappedElement.firstSeenKey(): String? = when (this) {
+    is WrappedNamespace -> "n:$namespace"
+    is WrappedTemplate -> "T:$name"
+    is WrappedClass -> "c:$name"
+    is WrappedTypedef -> "t:$name"
+    is WrappedMethod -> "m:$name(${args.joinToString(",") { it.type.toString() }})"
+    else -> null
+}
+
+// Stable-sort [forcing]'s children by their first occurrence in [base]'s children
+// (children with no base counterpart — the KrapperForce_* struct, new decls — keep
+// their own relative order AFTER every base-seen child, exactly where the libclang
+// memo would APPEND them), then recurse into namespaces. Class members are untouched:
+// they attach from the defining redeclaration on both paths.
+private fun reorderToFirstSeen(forcing: WrappedElement, base: WrappedElement) {
+    val baseOrder = mutableMapOf<String, Int>()
+    val baseByKey = mutableMapOf<String, WrappedElement>()
+    base.children.forEachIndexed { index, child ->
+        val key = child.firstSeenKey() ?: return@forEachIndexed
+        if (key !in baseOrder) {
+            baseOrder[key] = index
+            baseByKey[key] = child
+        }
+    }
+    val reordered = forcing.children
+        .sortedBy { baseOrder[it.firstSeenKey()] ?: Int.MAX_VALUE }
+    forcing.clearChildren()
+    forcing.addAllChildren(reordered)
+    for (child in reordered) {
+        if (child !is WrappedNamespace) continue
+        (baseByKey[child.firstSeenKey()] as? WrappedNamespace)
+            ?.let { reorderToFirstSeen(child, it) }
+    }
+}
+
 fun FilterDefinition.wrapperFilter(): (WrappedElement) -> Boolean {
     return when (this) {
         is AndFilter -> {
@@ -620,7 +679,8 @@ suspend fun DeferScope.parseHeader(
     // run on the loaded tree exactly as they do on a --roundTripModel restored tree.
     cppParsedModelPath?.let { path ->
         Log.i("cpp front-end handoff: loading parsed model from $path (libclang parse skipped)")
-        return loadParsedModel(path)
+        // Stashed for the forcing loads' first-seen reorder (O1, #46 — loadForcingModel).
+        return loadParsedModel(path).also { cppBaseModelTu = it.tu }
     }
     val builder = ResolverBuilderImpl()
     val tu = file.map {
