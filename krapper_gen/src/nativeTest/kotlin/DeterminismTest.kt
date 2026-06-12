@@ -15,9 +15,9 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.ErrorPolicy
 import com.monkopedia.krapper.IndexRequest
-import com.monkopedia.krapper.InstantiationRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
@@ -50,13 +50,43 @@ class DeterminismTest {
         debug = false
     )
 
-    // One full generation run (parse + force std::vector<int> + write) into a fresh dir,
-    // returning every generated file as relativePath -> content.
+    // A header written to a STABLE path (not a per-run random name) so both runs parse the
+    // identical file: libclang assigns location-independent USRs to its declarations, so the
+    // two runs collide on the same keys in ModelFactories' cursor->element memo — the
+    // condition under which a non-reset memo would hand run #2 run #1's already-resolved
+    // instances. The class is shaped to MUTATE during resolution (the `value()` const-overload
+    // pair is de-duped; the `const Dep&` accessor pulls Dep in under INCLUDE_MISSING), so any
+    // non-idempotent reuse of a carried-over instance has the best chance to surface here.
+    private val headerPath = "/tmp/krapper_determinism_input.h"
+
+    private fun writeHeader() = File(headerPath).writeText(
+        """
+        |namespace fixture {
+        |class Dep {
+        |public:
+        |    int depValue() const;
+        |};
+        |class Widget {
+        |public:
+        |    Widget();
+        |    int value() const;
+        |    int value(int scale) const;
+        |    const Dep& dep() const;
+        |};
+        |}
+        """.trimMargin()
+    )
+
+    // One full generation run (parse the fixed header + resolve Widget + write) into a fresh
+    // output dir, returning every generated file as relativePath -> content.
     private suspend fun generateOnce(): Map<String, String> {
         val outDir = File.createTempDir("krapper_determinism")
         try {
-            val service = IndexedServiceImpl(config(), IndexRequest(emptyList(), emptyList()))
-            service.requestInstantiation(InstantiationRequest("std::vector", listOf("int")))
+            val service = IndexedServiceImpl(
+                config(),
+                IndexRequest(listOf(headerPath), emptyList())
+            )
+            service.filterAndResolve(AllowListFilter(listOf("fixture::Widget")))
             service.writeTo(outDir.path)
             val files = mutableMapOf<String, String>()
             collect(outDir, outDir, files)
@@ -71,13 +101,19 @@ class DeterminismTest {
             if (file.isDir()) {
                 collect(file, base, into)
             } else {
-                into[file.path.substring(base.path.length)] = file.readText()
+                // The .def file legitimately embeds the run's output directory (libraryPaths /
+                // compilerOpts -I) — a per-invocation INPUT, not leaked global state. Normalize
+                // it to a token so the comparison catches real cross-run leaks (stale element
+                // content, ordering, counters) without flagging the expected path difference.
+                into[file.path.substring(base.path.length)] =
+                    file.readText().replace(base.path, "<OUTDIR>")
             }
         }
     }
 
     @Test
     fun twoInProcessRunsAreByteIdentical(): Unit = runBlocking {
+        writeHeader()
         val first = generateOnce()
         val second = generateOnce()
 
