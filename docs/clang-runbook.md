@@ -71,8 +71,9 @@ strips the unreferenced functions via `-opt`, so it linked from day one.
 
 ## 4. JDK matrix
 
-- **JDK 17** — the generator/model modules the campaign runs on JDK 17: `:krapper_gen`,
-  `:krapper_model`, `:featuregen` (they target JVM 11 bytecode but build/run fine on 17).
+- **JDK 17** — the modules the campaign runs on JDK 17: `:krapper_gen`, `:krapper_model`
+  (both target JVM 11 bytecode but build/run fine on 17) and `:featuregen` (native-only —
+  no JVM bytecode target; it drives the generated K/N bindings).
 - **JDK 21** — the root **`:plugin`** module *requires* Java 21 (`sourceCompatibility` /
   `targetCompatibility = VERSION_21`, `jvmTarget = JVM_21`); any build that configures
   `:plugin` needs a JDK 21.
@@ -96,7 +97,7 @@ The gated verification tasks (all require `-PenableClang`):
 | --- | --- |
 | `:cppfrontend:goldenCompare` | Runs both front-ends over one fixture and tree-diffs their `SerializedElement` models under the documented normalizer ledger; non-zero exit on unexplained divergence. |
 | `:cppfrontend:handoffGenerate` | `krapper_gen --frontend=cpp` loads the cppfrontend model (libclang never called), runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
-| `:cppfrontend:handoffInstDiff` | The strong check: `--frontend=cpp --instantiate` output must be **byte-identical** to the libclang path (path-modulo the `.def`'s absolute output dir). |
+| `:cppfrontend:handoffInstDiff` | Two gates on `--frontend=cpp --instantiate`. **Gate 1 (oracle):** libclang's own dumped models, reloaded through the cpp file-handoff, must regenerate **byte-identical** output (path-modulo the `.def` dir) — proves the handoff itself is lossless. **Gate 2 (functional):** cppfrontend's *own* parses generate + compile, but are deliberately **not** byte-identical (matching libclang's lossy spellings byte-for-byte would mean emulating the lossiness the rewrite exists to delete). |
 | `:cppfrontend:featuregenParity` | The parity oracle: runs every featuregen unit through both front-ends and fails when a unit's verdict is *worse* than `cppfrontend/parity-expectations.txt` records (the ratcheting expected-state ledger). |
 | `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
 
