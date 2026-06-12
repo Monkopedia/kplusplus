@@ -262,7 +262,13 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             resolver,
             config.referencePolicy,
             alreadyBoundKeys,
-            forcedContainerKeys
+            forcedContainerKeys,
+            // The explicitly-requested specialization (this request's target) is a listed
+            // binding, so its INCLUDE_MISSING materialization may drop an unresolvable
+            // PRIMARY base instead of hard-failing — e.g. std::pair<int, int>, whose
+            // faithful cpp model carries the private __pair_base<_T1, _T2> the libclang
+            // walk omits. See ResolveContext.forcingTargetKeys.
+            forcingTargets = setOf(target)
         )
         // One entry per class type-key, last copy wins (#60): without this, every
         // writer received a fresh full copy of each bound class per instantiation
