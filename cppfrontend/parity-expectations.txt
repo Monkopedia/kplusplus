@@ -99,8 +99,8 @@
 #   D4 out-of-line virtual destructor: the libclang cursor walk REPARENTS
 #      Drawable's dtor to the TU and loses it ("Can't find parent type"); the cpp
 #      path keeps it and emits dispose()/owned() (correct-by-construction).
-#   O1 forcing-round std-function ORDER (identified by the D1c endpoint sweep — the
-#      last family, the ONLY one that was uncited): in each instantiation ROUND's
+#   O1 forcing-round std-function ORDER — CONVERGED (D1c brick, 79474d0): the last
+#      family the endpoint sweep found, and the ONLY one that had been uncited. In each round's
 #      emitted "std Functions" block, the cpp path places set/get_new_handler before
 #      the wcs* group while libclang keeps base order. Mechanism: ForcingHeader
 #      prepends the target's std includes (e.g. `#include <vector>`) BEFORE the user
@@ -111,25 +111,26 @@
 #      order wins), while the cpp path's per-payload forcing model keeps the forcing
 #      TU's own lexical order. Spec-dependent on the cpp side today (<vector>/<set>/
 #      <map>/<memory> prepends flip it; <string>-first and non-std specs don't), so
-#      libclang's first-seen order is the SPEC-INVARIANT member of the family — this
-#      is a convergence target (mirror the memo's first-seen ordering when loading a
-#      forcing model), NOT an accept. 32 lines in each flipped unit (vector x5,
-#      map x2, set, unordered_set, unordered_map, unique_ptr), 352 in ALL.
+#      libclang's first-seen order is the SPEC-INVARIANT member of the family, so the
+#      fix mirrors the memo: loadForcingModel (Parsing.kt) reorders a forcing model's
+#      namespace-level children into the base model's first-seen order (unseen children
+#      append in TU order). -32 lines in each flipped unit (vector x5, map x2, set,
+#      unordered_set, unordered_map, unique_ptr), -352 in ALL (697 -> 345).
 Box<Box<int>>=diff:83
 Box<Point>=diff:83
 Box<int>=diff:83
 Pair2<int, double>=diff:83
-std::map<int, double>=diff:115
-std::map<int, int>=diff:115
+std::map<int, double>=diff:83
+std::map<int, int>=diff:83
 std::pair<int, int>=diff:83
-std::set<int>=diff:161
-std::unique_ptr<int>=diff:280
-std::unordered_map<int, int>=diff:123
-std::unordered_set<int>=diff:166
-std::vector<Point>=diff:115
-std::vector<Thing*>=diff:115
-std::vector<double>=diff:115
-std::vector<int>=diff:115
+std::set<int>=diff:129
+std::unique_ptr<int>=diff:248
+std::unordered_map<int, int>=diff:91
+std::unordered_set<int>=diff:134
+std::vector<Point>=diff:83
+std::vector<Thing*>=diff:83
+std::vector<double>=diff:83
+std::vector<int>=diff:83
 std::vector<std::__cxx11::basic_string<char>>=diff:83
-std::vector<std::vector<int>>=diff:115
-ALL=diff:697
+std::vector<std::vector<int>>=diff:83
+ALL=diff:345
