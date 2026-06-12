@@ -44,10 +44,14 @@ kotlin {
                 // The generated wrapper calls into Clang's C++ AST API, so the final
                 // executable links libclang-cpp (the monolithic LLVM/Clang shared lib)
                 // + LLVM core. -lstdc++ for the C++ wrapper runtime.
+                // libdir + LLVM major are DISCOVERED by settings.gradle.kts's #11(b) probe
+                // (llvm-config --libdir / --version) and threaded via rootProject extras,
+                // so an LLVM bump or non-/usr/lib install needs no edit here; the literal
+                // fallbacks match this host and only apply if the probe didn't run.
                 compilerOpts(
-                    "-L/usr/lib",
+                    "-L${rootProject.extra.properties["llvmLibDir"] ?: "/usr/lib"}",
                     "-lclang-cpp",
-                    "-lLLVM-22",
+                    "-lLLVM-${rootProject.extra.properties["llvmMajor"] ?: "22"}",
                     "-lstdc++",
                     "-lm",
                     "-lpthread"

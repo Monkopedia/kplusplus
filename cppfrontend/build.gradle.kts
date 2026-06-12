@@ -36,10 +36,14 @@ kotlin {
                 // versions, --gc-sections so DEBUG dead-strips the stale platform.linux
                 // cinterop cache, and libclang-cpp + LLVM for the Clang C++ AST API.
                 linkerOpts("--gc-sections")
+                // libdir + LLVM major are DISCOVERED by settings.gradle.kts's #11(b) probe
+                // (llvm-config --libdir / --version) and threaded via rootProject extras;
+                // the literal fallbacks match this host and only apply if the probe didn't
+                // run. (See :clangwalk's build.gradle.kts for the full link rationale.)
                 compilerOpts(
-                    "-L/usr/lib",
+                    "-L${rootProject.extra.properties["llvmLibDir"] ?: "/usr/lib"}",
                     "-lclang-cpp",
-                    "-lLLVM-22",
+                    "-lLLVM-${rootProject.extra.properties["llvmMajor"] ?: "22"}",
                     "-lstdc++",
                     "-lm",
                     "-lpthread"
