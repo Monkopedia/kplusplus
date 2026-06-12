@@ -42,6 +42,7 @@ import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.model.ForcingHeader
 import com.monkopedia.krapper.generator.model.WrappedClass
+import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
@@ -108,13 +109,18 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             index.dispose()
         }
         // Start each generation run from clean process-scoped state so its output and
-        // report reflect only this run: the drop ledger (shared with any prior run) and
-        // the GenerationContext (the WrappedType intern cache + the rootPackage). Both
-        // must be reset BEFORE any resolution (requestInstantiation / filterAndResolve):
+        // report reflect only this run: the drop ledger (shared with any prior run), the
+        // GenerationContext (the WrappedType intern cache + the rootPackage), and the
+        // parse memo (the cursor->element interning map). All must be reset BEFORE any
+        // resolution (requestInstantiation / filterAndResolve):
         // a type's Kotlin package is baked into its ResolvedKotlinType at resolve time,
         // so rooting it later (e.g. in writeTo) would be too late.
         DropLedger.reset()
         GenerationContext.reset(config.rootPackage)
+        // The libclang-path cursor->element memo: cleared so a reused service process
+        // (kplusplusSync) never builds a later run on a prior run's resolved/mutated
+        // elements (#11 hermeticity).
+        WrappedElement.resetElementMemo()
     }
 
     private val includePaths = generateIncludes(config.compiler)
