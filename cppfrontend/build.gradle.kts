@@ -711,6 +711,15 @@ tasks.register("featuregenCppBindings") {
         // The kplusplusSync CLI tail (module name, INCLUDE_MISSING, krapper.featuregen,
         // --header) + every instantiation + the cpp front-end models — IDENTICAL to the
         // libclang sync save for the --frontend=cpp/--parsedModel/--forcingModel swap.
+        // The wrapper is -c compiled with clang++ (matching featuregenParity), which is
+        // also what the cpp front-end PARSES against (system libstdc++) — so the faithful
+        // model and the wrapper agree. NOTE (#47 flip prerequisite): a behavioral RUN
+        // additionally LINKS libfeaturegen.a into a K/N binary, whose bundled lld +
+        // gcc-8.3 libstdc++ can't resolve the newer-libstdc++ internals this faithful,
+        // system-libstdc++-parsed model surfaces (std::__size_to_integer,
+        // __throw_bad_array_new_length, __glibcxx_assert_fail). Closing that needs the cpp
+        // parse + the K/N toolchain to target ONE libstdc++ — out of scope for this
+        // additive harness; see the PR body / #47.
         val args = listOf(
             krapperGenKexe.absolutePath, "featuregen",
             "-r", "INCLUDE_MISSING",
