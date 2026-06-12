@@ -168,6 +168,24 @@ data class ResolvedKotlinType(
         } else {
             "$mappedName${if (isNullable) "?" else ""}"
         }
+
+    // The CANONICAL declaration name — this type's own identity, INDEPENDENT of any
+    // per-file import alias (issue #73). `name`/`plainName` resolve through `mappedName`,
+    // which applies `remap`; `remap` is a per-FILE REFERENCE-site rename (how one file
+    // refers to a colliding import it had to alias, e.g. `clang.attr.Kind` -> `AttrKind`),
+    // set as SHARED MUTABLE STATE on this instance by `ImportBlock.build`. A DECLARATION
+    // (the `class X` / `enum class X` token, plus its file name and package) must NOT
+    // depend on that: `remap` set while emitting one file would otherwise leak into the
+    // declared name emitted for this same shared type in another file (a non-hermetic,
+    // order-dependent corruption). So declarations use this canonical name; only
+    // REFERENCES go through `name`/`plainName` and keep the alias.
+    val declaredName: String
+        get() = if (templates.isNotEmpty()) {
+            "${qualifyList.last()}<${templates.joinToString(", ") { it.name }}>" +
+                if (isNullable) "?" else ""
+        } else {
+            "${qualifyList.last()}${if (isNullable) "?" else ""}"
+        }
     val pkg: String
         get() = qualifyList.subList(0, qualifyList.size - 1).joinToString(".") {
             it.replaceFirstChar { it.lowercase() }
@@ -213,6 +231,12 @@ fun nullable(base: ResolvedKotlinType): ResolvedKotlinType = base.copy(isNullabl
 // a `<Name>Api`/`to<Name>` prefix needs the bare name without it.
 val ResolvedKotlinType.plainName: String
     get() = name.trimEnd('?')
+
+// [declaredName] with the use-position nullable `?` stripped — the bare declaration token
+// (`enum class X` / `class X` is illegal with a trailing `?`). Mirrors [plainName], but
+// canonical: a declaration name must never carry a per-file import alias (issue #73).
+val ResolvedKotlinType.plainDeclaredName: String
+    get() = declaredName.trimEnd('?')
 
 fun ResolvedKotlinType.typedWith(parseTypes: List<ResolvedKotlinType>): ResolvedKotlinType =
     copy(templates = parseTypes)
