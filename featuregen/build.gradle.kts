@@ -68,15 +68,9 @@ if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
     tasks.named("kplusplusSync") {
         dependsOn(":cppfrontend:featuregenCppBindings")
     }
-    // FLIP-WORKLIST item (#47): CpPairTest references std::pair<int,int>'s binding, which
-    // the cpp front-end DROPS under the full multi-instantiation sync — even though it
-    // generates fine per-spec (featuregenParity: std::pair<int,int>=diff:83). So this is a
-    // multi-instantiation forcing cross-contamination drop (binding-side, not a spelling
-    // rename, not test-side), the ONE thing blocking a clean flip today. Exclude just this
-    // unit from the cpp-harness test compile so the remaining 186 behavioral tests can be
-    // measured against the cpp bindings. This filter applies ONLY under
-    // -Pkpp.frontend.featuregen=cpp; the default test path compiles ALL tests unchanged.
-    tasks.named("compileTestKotlinNative") {
-        (this as org.gradle.api.tasks.util.PatternFilterable).exclude("**/CpPairTest.kt")
-    }
+    // #77 RESOLVED: std::pair<int,int> now binds under the full multi-instantiation cpp
+    // sync (a forced instantiation target may drop an unresolvable primary base — pair's
+    // private __pair_base<_T1,_T2> the libclang walk omits — instead of hard-failing; see
+    // ResolveContext.forcingTargetKeys). So CpPairTest is no longer excluded: all 188
+    // behavioral tests compile against the cpp bindings.
 }
