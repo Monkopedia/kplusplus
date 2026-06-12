@@ -264,9 +264,14 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // fixed boilerplate with no AST nodes to model.
     private fun renderEnum(enum: ResolvedKotlinType): String {
         val underlying = enum.enumUnderlying?.name ?: "Int"
-        // The enum's DECLARATION name must be the bare class name (`plainName`): an
-        // `enum class TranslationUnitKind?` is illegal. Type USAGES keep the `?`.
-        val name = enum.plainName
+        // The enum's DECLARATION name must be the bare CANONICAL class name
+        // (`plainDeclaredName`, not `plainName`): `plainName` routes through the shared,
+        // per-file import-alias `remap`, so another file aliasing this enum (e.g.
+        // `clang.attr.Kind` -> `AttrKind` to dodge a same-file `Kind` collision) would leak
+        // that alias into this declaration — `enum class AttrKind` while the file/package
+        // and every reference use `clang.attr.Kind` -> unresolved (issue #73). The canonical
+        // name also strips the use-position `?` (an `enum class X?` is illegal).
+        val name = enum.plainDeclaredName
         val entries = enum.enumEntries.joinToString(", ") { entry ->
             "${entry.name}(${literalForUnderlying(entry.value, underlying)})"
         }
@@ -787,7 +792,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    private fun named(name: ResolvedKotlinType) = Raw(name.name)
+    // Sole use: the `class X` declaration token in onGenerate. Uses the CANONICAL
+    // [declaredName], not `name`: a declaration must not inherit a per-file import alias
+    // from the shared `remap` (issue #73 — same hazard as the enum declaration above).
+    // References to a class keep `name`/`plainName` so an aliased import still resolves.
+    private fun named(name: ResolvedKotlinType) = Raw(name.declaredName)
 
     /**
      * Describes the generic interface + scoped factory ("facade") generated for a

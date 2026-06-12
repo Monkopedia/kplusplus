@@ -48,10 +48,15 @@ class ImportBlock(pkg: String, private val target: CodeBuilder<KotlinFactory>) :
         }
         val mappings = fqNames.mapNotNull { item -> item.second?.let { item.first to it } }
             .toMap()
-        if (mappings.isNotEmpty()) {
-            fqSymbols.forEach {
-                it.setNameRemap(mappings)
-            }
+        // Apply this file's alias map to every symbol in the file UNCONDITIONALLY — even
+        // when empty. `remap` is shared mutable state on a `ResolvedKotlinType`, so a type
+        // referenced here may still carry an alias set while a PREVIOUS file (with a
+        // collision) was emitted. Re-applying this file's map (empty == no aliases) resets
+        // that stale alias, so a reference renders by the alias only in files that actually
+        // need it — making reference output independent of file render order (issue #73 /
+        // #11 hermeticity). Declarations are already canonical via `declaredName`.
+        fqSymbols.forEach {
+            it.setNameRemap(mappings)
         }
     }
 
