@@ -59,6 +59,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // and the kexe artifact through whichever path is wired up.
             val (linkTask, kexe) = resolveKrapperGen(target)
             linkTask?.let { lt -> it.dependsOn(lt) }
+            // Phase E step 3 (#47, flip brick B2): in cpp-front-end mode this sync drives
+            // the module's own config through the :cppfrontend binary, so build it first.
+            // Gated by the property + only when :cppfrontend is in the build (LLVM-gated,
+            // -PenableClang); the default path never references it. This replaces the old
+            // per-module manual `dependsOn(":cppfrontend:featuregenCppBindings")` wiring —
+            // ANY module flipped to cpp now self-wires the front-end build generically.
+            if (target.findProperty("kpp.frontend.${target.name}") == "cpp" &&
+                target.rootProject.findProject(":cppfrontend") != null
+            ) {
+                it.dependsOn(":cppfrontend:linkReleaseExecutableKlinker")
+            }
             val krappedDir = krappedDirFor(target)
             val manifestFile = File(krappedDir, "requested.txt")
             val generatedFile = File(krappedDir, "generated.txt")
@@ -102,19 +113,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
             }
             it.doLast {
-                // Phase E step 2 (#47) flip-safety harness: when this module is driven
-                // by the cpp front-end (-Pkpp.frontend.<module>=cpp), the bindings under
-                // build/krapped-cpp are produced by an EXTERNAL gated task (e.g.
-                // :cppfrontend:featuregenCppBindings, wired as a dependency of this task);
-                // the libclang generation body is skipped. Fully additive — absent the
-                // property this branch never fires and the default path is unchanged.
-                if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
-                    println(
-                        "kplusplusSync: $moduleName driven by --frontend=cpp " +
-                            "(bindings supplied under $krappedDir); skipping libclang sync."
-                    )
-                    return@doLast
-                }
                 if (!kexe.exists()) {
                     throw GradleException(
                         "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
@@ -122,6 +120,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                             "build, or check the includeBuild(\"...\") path in your " +
                             "settings.gradle.kts."
                     )
+                }
+                // Phase E step 3 (#47, flip brick B2): when this module is flipped to the
+                // cpp front-end (-Pkpp.frontend.<module>=cpp), GENERATE its bindings from
+                // the module's OWN kplusplus{} config (its header + instantiation worklist)
+                // through the generic cpp pipeline — cppfrontend parse -> ModelIo JSON ->
+                // krapper_gen --frontend=cpp — into build/krapped-cpp, then return. The
+                // libclang body below is skipped. Fully additive + gated: absent the
+                // property this never fires and the default path is byte-for-byte unchanged.
+                if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
+                    runCppFrontendSync(target, ext, moduleName, krappedDir, kexe)
+                    return@doLast
                 }
                 // The v2 extension (created in apply(), captured above) is
                 // optional — projects with no header import and no fixups
@@ -270,6 +279,202 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 }
             }
         }
+    }
+
+    /**
+     * Phase E step 3 (#47, flip brick B2) — GENERIC cpp-front-end binding generation.
+     *
+     * Drives the consuming module's OWN `kplusplus { header(...) ; instantiate(...) }`
+     * config through the two-artifact cpp pipeline, in place of the libclang sync:
+     *  1. the gated `:cppfrontend` binary parses the module's header (the base model) and
+     *     each forced instantiation (the forcing models) into :krapper_model ModelIo JSON
+     *     (one binary invocation per payload — a parse crash on one spec is isolated and
+     *     named, failing THIS module rather than corrupting the rest);
+     *  2. krapper_gen `--frontend=cpp` loads those models (libclang parse SKIPPED) and runs
+     *     the SAME resolve+codegen the libclang path does — invoked with the SAME CLI the
+     *     libclang sync builds (module name, reference policy, package, output, --instantiate
+     *     / --only / --header / fixups / --std / --root-package), minus the parse.
+     *
+     * This is the generalization of the former featuregen-hardcoded
+     * `:cppfrontend:featuregenCppBindings` task: any module flipped to
+     * `-Pkpp.frontend.<module>=cpp` generates from its own config, no per-module wiring.
+     *
+     * Fail-fast (de-risks the B3 default flip): if the cpp front-end yields an EMPTY
+     * krapped-cpp (no Kotlin bindings / no .def — e.g. cppfrontend couldn't parse the
+     * module's headers), throw naming the module instead of silently compiling against
+     * nothing.
+     */
+    private fun runCppFrontendSync(
+        target: Project,
+        ext: KPlusPlusExtension?,
+        moduleName: String,
+        krappedDir: File,
+        kexe: File
+    ) {
+        val cppfrontendProject = target.rootProject.findProject(":cppfrontend")
+            ?: throw GradleException(
+                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp but :cppfrontend " +
+                    "is not in this build. The cpp front-end needs the LLVM-gated modules — " +
+                    "build with -PenableClang (or -PllvmConfig=<path-to-llvm-config>)."
+            )
+        val cppBinary = cppfrontendProject.layout.buildDirectory
+            .file("bin/klinker/cppfrontendRelease/cppfrontend").get().asFile
+        if (!cppBinary.exists()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: cppfrontend binary not found at $cppBinary — the " +
+                    "sync should depend on :cppfrontend:linkReleaseExecutableKlinker."
+            )
+        }
+        val headers = ext?.headers.orEmpty()
+        if (headers.isEmpty()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp requires a " +
+                    "kplusplus { header(...) } — the cpp front-end parses a header to build " +
+                    "its model, but $moduleName declares none."
+            )
+        }
+        // cppfrontend's --parity-emit parses ONE root header (the forcing models #include it
+        // by the same absolute path krapper_gen receives via --header). Multi-header cpp
+        // parsing is a later extension; the cpp-ready modules (featuregen, fixtures) are
+        // single-header, so the primary header is the parse root.
+        val headerPath = target.file(headers.first()).absolutePath
+        val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
+
+        // The worklist is the SAME union kplusplusSync's libclang path uses: the
+        // compiler-written manifest (ALWAYS at <projectDir>/krapped/requested.txt — the FIR
+        // checker hardcodes that path, see applyToCompilation) plus the build-seeded
+        // instantiate() calls, deduped + sorted (the deterministic instantiation order).
+        val manifestFile = File(target.projectDir, "krapped/requested.txt")
+        val manifestSpecs = if (manifestFile.exists()) {
+            manifestFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+        val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
+
+        val modelsDir = File(krappedDir, "cpp-models").apply { mkdirs() }
+        fun emit(specs: List<String>): String {
+            val proc = ProcessBuilder(
+                listOf(cppBinary.absolutePath, "--parity-emit", modelsDir.absolutePath, headerPath, std) +
+                    specs
+            ).redirectErrorStream(true).start()
+            val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+            val exit = proc.waitFor()
+            print(out)
+            if (exit != 0) {
+                throw GradleException(
+                    "kplusplusSync[$moduleName]: cppfrontend --parity-emit failed (exit $exit) " +
+                        "for ${if (specs.isEmpty()) "the base model" else specs.joinToString()} " +
+                        "— see the output above."
+                )
+            }
+            return out
+        }
+
+        emit(emptyList())
+        val baseModel = File(modelsDir, "base_model.json")
+        if (!baseModel.exists()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: cppfrontend emitted no base model at $baseModel."
+            )
+        }
+        val forcingArgs = mutableListOf<String>()
+        for (spec in requested) {
+            val out = emit(listOf(spec))
+            val path = out.lineSequence()
+                .firstOrNull { it.startsWith("PARITY_MODEL $spec=") }
+                ?.substringAfter('=')
+                ?: throw GradleException(
+                    "kplusplusSync[$moduleName]: cppfrontend emitted no forcing model for '$spec'."
+                )
+            forcingArgs += "--forcingModel"
+            forcingArgs += "$spec=$path"
+        }
+
+        krappedDir.mkdirs()
+        // The wrapper is compiled with clang++ (matching what the cpp front-end PARSED the
+        // header against — system libstdc++), NOT the konan-bundled gcc the libclang default
+        // picks: a model parsed against system libstdc++ and a wrapper compiled against it
+        // agree. Override via kplusplus { compiler = "..." }.
+        val compilerPath = ext?.compiler ?: "clang++"
+        val args = mutableListOf(
+            kexe.absolutePath,
+            moduleName,
+            "-r", (ext?.referencePolicy ?: "INCLUDE_MISSING"),
+            "-p", "krapper.$moduleName",
+            "-c", compilerPath,
+            "-o", krappedDir.absolutePath,
+            "--std", std
+        )
+        ext?.rootPackage?.let {
+            args += "--root-package"
+            args += it
+        }
+        for (spec in requested) {
+            args += "--instantiate"
+            args += spec
+        }
+        if (ext != null) {
+            for (entry in ext.only) {
+                args += "--only"
+                args += entry
+            }
+            ext.onlyFile?.let {
+                args += "--only-file"
+                args += target.file(it).absolutePath
+            }
+            for (h in ext.headers) {
+                args += "--header"
+                args += target.file(h).absolutePath
+            }
+            for (lib in ext.libraries) {
+                args += "-l"
+                args += target.file(lib).absolutePath
+            }
+            if (ext.fixups.isNotEmpty()) {
+                val fixupFile = File(krappedDir, "fixups.json")
+                fixupFile.writeText(ext.fixups.toJsonArray())
+                args += "--fixup-file"
+                args += fixupFile.absolutePath
+            }
+        }
+        args += "--frontend"
+        args += "cpp"
+        args += "--parsedModel"
+        args += baseModel.absolutePath
+        args += forcingArgs
+        println(
+            "kplusplusSync[$moduleName]: --frontend=cpp over ${requested.size} " +
+                "instantiation(s) from $headerPath -> $krappedDir"
+        )
+        val exit = ProcessBuilder(args).inheritIO().start().waitFor()
+        if (exit != 0) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: krapper_gen --frontend=cpp failed: exit $exit"
+            )
+        }
+
+        // Fail-fast (B3 de-risk): refuse to leave the module compiling against nothing.
+        val srcDir = File(krappedDir, "src")
+        val ktCount = if (srcDir.isDirectory) {
+            srcDir.walkTopDown().count { it.isFile && it.extension == "kt" }
+        } else {
+            0
+        }
+        val defFile = File(krappedDir, "$moduleName.def")
+        if (ktCount == 0 || !defFile.exists()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: the cpp front-end produced an EMPTY binding set " +
+                    "in $krappedDir (kotlin files=$ktCount, $moduleName.def present=" +
+                    "${defFile.exists()}). cppfrontend could not turn $moduleName's header " +
+                    "($headerPath) into usable bindings — refusing to compile $moduleName " +
+                    "against nothing. Inspect the models under $modelsDir and the krapper_gen " +
+                    "output above."
+            )
+        }
+        // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
+        File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
+        println("kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s).")
     }
 
     /**
@@ -489,5 +694,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         const val PLUGIN_NAME = "kplusplus-compiler-plugin"
         const val PLUGIN_VERSION = "0.2.2"
         const val MIN_KOTLIN_VERSION = "2.3.20"
+
+        // The C++ standard the cpp front-end parses (and krapper_gen compiles the wrapper)
+        // under when a module sets no kplusplus { cppStandard = ... }. Matches krapper_gen's
+        // own default and the former featuregen-hardcoded cpp path.
+        const val DEFAULT_CPP_STANDARD = "c++14"
     }
 }
