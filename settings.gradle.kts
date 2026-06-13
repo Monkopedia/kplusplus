@@ -106,6 +106,11 @@ if (clangEnabled) {
     // :cppfrontend is the stage1 front-end scaffold (#44 brick 2): it constructs
     // :krapper_model's parse-output model from the same gated libclang-cpp bindings.
     include(":cppfrontend")
+    // :cppfixture is the #47 flip-brick-B2 generality demo: a minimal, std-free binding
+    // consumer that proves the GENERIC `-Pkpp.frontend.<module>=cpp` path drives a module's
+    // own config (not just featuregen's). Gated with the clang modules (it needs cppfrontend
+    // for the cpp path); the default build never includes it, so it cannot affect it.
+    include(":cppfixture")
 
     // Thread the discovered toolchain shape to both clang modules (read in their
     // build.gradle.kts as rootProject.extra, with /usr/lib + 22 fallbacks).
