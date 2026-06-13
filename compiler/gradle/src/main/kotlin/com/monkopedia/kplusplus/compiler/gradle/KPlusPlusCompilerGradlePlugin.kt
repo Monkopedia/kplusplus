@@ -58,7 +58,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // consumer usage). Resolve the linkDebugExecutableNative task
             // and the kexe artifact through whichever path is wired up.
             val (linkTask, kexe) = resolveKrapperGen(target)
-            linkTask?.let { lt -> it.dependsOn(lt) }
+            // Phase E step 3 (#47, flip brick B1, Path A) — the stage-0 SEED anchor. A module
+            // that is NOT yet cpp-parseable (cppfrontend, the laggards) sources its bindings
+            // from a COMMITTED seed instead of (re)parsing its headers with the in-tree
+            // libclang krapper_gen. In seed mode krapper_gen is neither built nor run (post-B5
+            // its libclang front-end is gone), so don't depend on its link task and don't
+            // declare its kexe an input — the committed seed is the only input.
+            val seedMode = target.findProperty("kpp.frontend.${target.name}") == "seed"
+            if (!seedMode) linkTask?.let { lt -> it.dependsOn(lt) }
             // Phase E step 3 (#47, flip brick B2): in cpp-front-end mode this sync drives
             // the module's own config through the :cppfrontend binary, so build it first.
             // Gated by the property + only when :cppfrontend is in the build (LLVM-gated,
@@ -90,8 +97,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // which is the existing, correct behaviour for that path.
             val ext = target.extensions.findByType(KPlusPlusExtension::class.java)
             val hasHeadersAtConfig = ext?.headers?.isNotEmpty() == true
-            it.inputs.file(kexe).withPropertyName("krapperGenKexe")
-                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
+            if (!seedMode) {
+                it.inputs.file(kexe).withPropertyName("krapperGenKexe")
+                    .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
+            }
             it.inputs.files(manifestFile).withPropertyName("requestedManifest")
                 .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
                 .optional(true)
@@ -113,6 +122,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
             }
             it.doLast {
+                // Phase E step 3 (#47, flip brick B1, Path A): stage-0 seed anchor. Build the
+                // module's bindings from its COMMITTED seed — no krapper_gen, no libclang
+                // parse. The libclang body below (and its kexe-existence guard) is skipped.
+                if (seedMode) {
+                    runSeedSync(target, ext, moduleName, krappedDir)
+                    return@doLast
+                }
                 if (!kexe.exists()) {
                     throw GradleException(
                         "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
@@ -278,6 +294,92 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Phase E step 3 (#47, flip brick B1, Path A) — the STAGE-0 SEED anchor.
+     *
+     * Builds a module's bindings from its COMMITTED seed instead of (re)parsing its headers
+     * with the in-tree libclang krapper_gen. Triggered by `-Pkpp.frontend.<module>=seed`;
+     * the mechanism by which modules that are NOT yet cpp-parseable (cppfrontend — the engine
+     * that can't bootstrap itself — plus example/clangwalk/slice) still produce bindings AFTER
+     * the libclang reducer is deleted from in-tree krapper_gen (B5).
+     *
+     * The committed seed is the DETERMINISTIC TEXT output of a one-time libclang generation,
+     * living under `<module>/krapped/`: the Kotlin bindings (`src/`), the C++ wrapper
+     * (`<module>.cc`/`<module>.h`) and the forcing headers (`KrapperForce_*.h`). This step
+     * regenerates only the two NON-committed, host-local build products from that text:
+     *  - the cinterop `.def` (deterministic from the module name + this checkout's krapped dir,
+     *    so no absolute path is ever committed to git); and
+     *  - the compiled wrapper object `lib<module>.a`, via the SAME plain C++ compile
+     *    krapper_gen's CppCompiler runs (`<compiler> -std=<std> -c -fPIE -I<krapped>
+     *    -DV8_COMPRESS_POINTERS <module>.cc`) — a compile with NO header parsing, exactly the
+     *    capability that survives the B5 libclang delete. krapper_gen is never invoked.
+     *
+     * Additive + gated: default-absent the property, this never fires and the libclang path is
+     * byte-for-byte unchanged. B5 flips the laggards' default to this seed source.
+     */
+    private fun runSeedSync(
+        target: Project,
+        ext: KPlusPlusExtension?,
+        moduleName: String,
+        krappedDir: File
+    ) {
+        val srcDir = File(krappedDir, "src")
+        val bindingSources = srcDir.listFiles { f -> f.isFile && f.extension == "kt" }
+            ?.filter { it.name != "CppBinding.kt" }
+            .orEmpty()
+        val cppWrapper = File(krappedDir, "$moduleName.cc")
+        if (bindingSources.isEmpty() || !cppWrapper.exists()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=seed but no committed " +
+                    "stage-0 seed under $krappedDir (expected $moduleName.cc + src/*.kt). " +
+                    "Generate it once with the libclang front-end and commit it (see #47, B1)."
+            )
+        }
+        val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
+        val compilerPath = ext?.compiler ?: resolveDefaultCompiler()
+        // Regenerate the cinterop .def — deterministic from the module name + this checkout's
+        // krapped dir, so the committed seed carries no host-specific absolute path. Mirrors
+        // DefWriter/CompileFlags for the static-wrapper case the laggards use.
+        File(krappedDir, "$moduleName.def").writeText(
+            buildString {
+                appendLine("headers = $moduleName.h")
+                appendLine(
+                    "compilerOpts = -I${krappedDir.absolutePath} -DV8_COMPRESS_POINTERS"
+                )
+                appendLine("staticLibraries = lib$moduleName.a")
+                appendLine("libraryPaths = ${krappedDir.absolutePath}")
+                appendLine("package = krapper.$moduleName.internal")
+            }
+        )
+        // Recompile the wrapper object the .def links — the SAME command CppCompiler runs,
+        // minus any libclang parse (the committed .cc is self-contained / re-compilable).
+        val libFile = File(krappedDir, "lib$moduleName.a")
+        val cmd = mutableListOf(
+            compilerPath, "-std=$std", "-c", "-fPIE",
+            "-o", libFile.absolutePath,
+            "-I${krappedDir.absolutePath}", "-DV8_COMPRESS_POINTERS"
+        )
+        // Dynamic (.so) wrapper deps, matching CompileFlags(linkStatics = true). The laggards
+        // pass none (they link Clang/LLVM at the module's own K/N link), but stay general.
+        ext?.libraries?.map { target.file(it) }?.filter { it.name.endsWith(".so") }?.let { sos ->
+            sos.map { it.parentFile.absolutePath }.toSet().forEach { cmd += "-L$it" }
+            sos.forEach { cmd += "-l${it.name.removePrefix("lib").removeSuffix(".so")}" }
+        }
+        cmd += cppWrapper.absolutePath
+        println(
+            "kplusplusSync[$moduleName]: stage-0 seed — ${bindingSources.size} committed " +
+                "binding source(s); recompiling lib$moduleName.a (no krapper_gen, no libclang)."
+        )
+        val proc = ProcessBuilder(cmd).inheritIO().start()
+        val exit = proc.waitFor()
+        if (exit != 0) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: stage-0 seed wrapper compile failed (exit $exit): " +
+                    cmd.joinToString(" ")
+            )
         }
     }
 
