@@ -455,23 +455,30 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
 
         // Fail-fast (B3 de-risk): refuse to leave the module compiling against nothing.
+        // A successful krapper_gen ALWAYS emits the CppBinding.kt boilerplate + the .def, so
+        // "no kt files at all" never happens after a 0-exit run — the real empty-output mode
+        // is cppfrontend parsing the header into ZERO classes (e.g. it couldn't parse it),
+        // leaving only that boilerplate. So require at least one ACTUAL binding source.
         val srcDir = File(krappedDir, "src")
-        val ktCount = if (srcDir.isDirectory) {
-            srcDir.walkTopDown().count { it.isFile && it.extension == "kt" }
+        val bindingKt = if (srcDir.isDirectory) {
+            srcDir.walkTopDown()
+                .filter { it.isFile && it.extension == "kt" && it.name != "CppBinding.kt" }
+                .toList()
         } else {
-            0
+            emptyList()
         }
         val defFile = File(krappedDir, "$moduleName.def")
-        if (ktCount == 0 || !defFile.exists()) {
+        if (bindingKt.isEmpty() || !defFile.exists()) {
             throw GradleException(
                 "kplusplusSync[$moduleName]: the cpp front-end produced an EMPTY binding set " +
-                    "in $krappedDir (kotlin files=$ktCount, $moduleName.def present=" +
-                    "${defFile.exists()}). cppfrontend could not turn $moduleName's header " +
-                    "($headerPath) into usable bindings — refusing to compile $moduleName " +
-                    "against nothing. Inspect the models under $modelsDir and the krapper_gen " +
-                    "output above."
+                    "in $krappedDir (binding kotlin files=${bindingKt.size}, $moduleName.def " +
+                    "present=${defFile.exists()}). cppfrontend could not turn $moduleName's " +
+                    "header ($headerPath) into usable bindings — refusing to compile " +
+                    "$moduleName against nothing. Inspect the models under $modelsDir and the " +
+                    "krapper_gen output above."
             )
         }
+        val ktCount = bindingKt.size + 1 // + the CppBinding.kt boilerplate
         // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
         File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
         println("kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s).")
