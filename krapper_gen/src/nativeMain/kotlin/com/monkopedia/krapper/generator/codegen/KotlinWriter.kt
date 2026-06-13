@@ -747,7 +747,14 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
             extensionFunction {
                 receiver = fqType(MEM_SCOPE)
-                name = cls.type.kotlinType.plainName + "_Holder"
+                // The `<Type>_Holder` factory is a generated SIBLING function, not an
+                // imported type reference: it is DECLARED here under the canonical name
+                // (`plainDeclaredName`, ignoring `remap`) and every CALL to it (see
+                // generateMethodBody's ARG_CAST path) must use that SAME canonical name.
+                // `plainName` would route through the per-file import alias (issue #75) —
+                // a remote calling file that aliased this type would then emit
+                // `<Alias>_Holder`, an undeclared symbol. Declaration-name == call-name.
+                name = cls.type.kotlinType.plainDeclaredName + "_Holder"
                 retType = type(cls.type)
                 body {
                     if (defaultConstructor != null) {
@@ -2081,7 +2088,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 initializer = memScope dot Call(
                     extensionMethod(
                         kotlinType.fullyQualified + ".Companion",
-                        kotlinType.plainName + "_Holder"
+                        // CALL the `<Type>_Holder` factory by its canonical DECLARED name
+                        // (`plainDeclaredName`), matching the declaration site above. This
+                        // body is emitted in the file of the method's owning class, which
+                        // may have aliased `kotlinType` via an import collision; `plainName`
+                        // would yield `<Alias>_Holder` (undeclared), since the factory is
+                        // declared canonical regardless of the calling file's alias (#75).
+                        kotlinType.plainDeclaredName + "_Holder"
                     )
                 )
             ).also {
