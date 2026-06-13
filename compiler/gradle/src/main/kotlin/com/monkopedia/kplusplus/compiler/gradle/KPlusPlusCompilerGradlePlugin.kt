@@ -557,8 +557,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * location. The single gated, additive override (default-absent, so the default path
      * is byte-for-byte unchanged) is the Phase E (#47) flip-safety harness:
      * `-Pkpp.frontend.<module>=cpp` consumes cpp-front-end bindings under
-     * `<buildDir>/krapped-cpp` instead, with kplusplusSync's libclang body skipped (an
-     * external task — :cppfrontend:featuregenCppBindings — supplies that dir).
+     * `<buildDir>/krapped-cpp` instead: kplusplusSync's libclang body is skipped and it
+     * generates that dir itself via `runCppFrontendSync` (the :cppfrontend binary over the
+     * module's own config → krapper_gen --frontend=cpp), generically, no per-module task.
      *
      * Used by BOTH the sync task (where it writes) and wireGeneratedBindings (where the
      * cinterop/srcDir are pointed), so the on-disk wiring stays consistent.
