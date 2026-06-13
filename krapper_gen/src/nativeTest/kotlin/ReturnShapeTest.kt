@@ -863,4 +863,61 @@ class ReturnShapeTest {
             )
         }
     }
+
+    // #62: namespace FREE FUNCTIONS duplicated one section per instantiation pass (18x in
+    // featuregen's .h/.cc, plus 18 `_`-prefixed Kotlin facades). #60's dedup only collapsed
+    // ResolvedClass copies and let top-level ResolvedMethods through. Resolve a namespace of
+    // free functions — one of them OVERLOADED — simulate the header parse + N instantiation
+    // passes (each re-appends a copy of every main-bound free function), dedup as
+    // requestInstantiation now does, and assert (a) the 18 identical copies of each function
+    // collapse to ONE, (b) the two overloads stay DISTINCT (overload-safe key = full
+    // signature, not bare name).
+    @Test
+    fun repeatedForcingEmitsOneSectionPerFreeFunction() = memScoped {
+        runBlocking {
+            val index = createIndex(0, 0) ?: error("Failed to create Index")
+            defer { index.dispose() }
+            val headerFile = "/tmp/krapper_freefn_${random()}_${random()}.h"
+            File(headerFile).writeText(
+                """
+                |namespace ns {
+                |    inline void handler() {}
+                |    inline int compute(int a) { return a; }
+                |    inline int compute(int a, int b) { return a + b; }
+                |}
+                """.trimMargin()
+            )
+            val resolver = parseHeader(index, listOf(headerFile), generateIncludes("clang++"))
+            val freeFns = resolver.findClasses { defaultFilter() }
+                .resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+                .filterIsInstance<ResolvedMethod>()
+            // handler(), compute(int), compute(int, int).
+            assertTrue(
+                freeFns.size == 3,
+                "expected the 3 namespace free functions; " +
+                    "got ${freeFns.map { it.name to it.args.size }}"
+            )
+
+            // Header parse + 17 instantiation passes: each re-appends a copy of every bound
+            // free function (pre-fix: 18 raw copies each -> 18 emitted sections + 18 facades).
+            var elements: List<ResolvedElement> = freeFns
+            repeat(17) {
+                elements = (elements + freeFns.map { it.clone() }).dedupClassesLastWins()
+            }
+
+            // (a) one section per free function: the 18 identical copies collapse to one each.
+            val survivors = elements.filterIsInstance<ResolvedMethod>()
+            assertTrue(
+                survivors.size == 3,
+                "dedup must keep one copy per free-function signature; got ${survivors.size}"
+            )
+            // (b) overloads stay distinct: both compute(int) and compute(int, int) survive.
+            val computeArities =
+                survivors.filter { it.name == "compute" }.map { it.args.size }.sorted()
+            assertTrue(
+                computeArities == listOf(1, 2),
+                "overloaded free functions must NOT collapse together; got $computeArities"
+            )
+        }
+    }
 }

@@ -61,7 +61,11 @@ import kotlinx.coroutines.runBlocking
 // re-parse was ALREADY main-bound (keep) or is incidental (drop). Two distinct functions
 // that happen to mangle to the same uniqueCName get different identities here, so a
 // collision can't false-keep an incidental function (which would emit non-compiling Kotlin).
-private val ResolvedMethod.forcingIdentity: String
+// Also the LAST-WINS dedup key for a top-level free function (#62): two passes re-resolve
+// the SAME function to this identity (collapse to one section), while genuine OVERLOADS —
+// same name, different args — get distinct identities (stay separate). See
+// `dedupClassesLastWins`.
+internal val ResolvedMethod.forcingIdentity: String
     get() = "$qualified::$name(${args.joinToString(",") { it.type.toString() }})#$uniqueCName"
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
