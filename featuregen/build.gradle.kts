@@ -73,4 +73,63 @@ if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
     // private __pair_base<_T1,_T2> the libclang walk omits — instead of hard-failing; see
     // ResolveContext.forcingTargetKeys). So CpPairTest is no longer excluded: all 188
     // behavioral tests compile against the cpp bindings.
+
+    // #78 (the last flip prerequisite): MAKE THE 188 TESTS LINK + RUN. The cpp front-end
+    // parses featuregen's surface against the SYSTEM libstdc++ (gcc-16 here), so the
+    // faithful generated wrapper references newer-libstdc++ internals
+    // (std::__throw_bad_array_new_length@GLIBCXX_3.4.29,
+    // std::__glibcxx_assert_fail@GLIBCXX_3.4.30, std::__size_to_integer). K/N's default
+    // test link resolves libstdc++ from its BUNDLED gcc-8.3 sysroot, which caps at
+    // GLIBCXX_3.4.25 → those symbols are undefined and linkDebugTestNative fails. The
+    // system libstdc++ HAS them and is backward-ABI-compatible (it provides every older
+    // GLIBCXX version too). Point K/N's own linker at it: link the REAL system
+    // libstdc++.so by ABSOLUTE PATH (not -L/-lstdc++ — konan's bundled gcc-8.3 sysroot
+    // -L is searched first, so `-lstdc++` would resolve to the OLD lib and the newer
+    // symbols would stay undefined; an absolute path can't be shadowed by search order),
+    // --gc-sections to dead-strip the stale platform.linux cinterop cache (the same trick
+    // the klinked clang consumers use — see clangwalk/build.gradle.kts), and
+    // -rpath/-rpath-link so the test binary loads that .so at runtime (its SONAME
+    // libstdc++.so.6 wins over the bundled one via the rpath). The .so is DISCOVERED at
+    // configure time from `clang++ -print-file-name=libstdc++.so` (a GNU-ld linker
+    // script/symlink), canonicalized to the real shared object — host-portable, not
+    // hardcoded. This is ENTIRELY under the property guard: the default
+    // `./gradlew :featuregen:nativeTest` never enters this block, so the standard test
+    // link path is untouched (it keeps using the bundled libstdc++ against the committed
+    // libclang krapped/ bindings). Post-flip the default consumer link will target the
+    // system libstdc++ wholesale — consistent with main becoming LLVM-mandatory once
+    // `--frontend=cpp` is the default.
+    val systemStdcxxSo: File = run {
+        val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
+            .redirectErrorStream(true).start()
+        val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
+        proc.waitFor()
+        File(out).canonicalFile.takeIf { it.isFile }
+            ?: error(
+                "#78: could not resolve the system libstdc++.so from " +
+                    "`clang++ -print-file-name=libstdc++.so` (got: '$out')"
+            )
+    }
+    val systemStdcxxLibDir = systemStdcxxSo.parentFile.absolutePath
+    kotlin {
+        linuxX64("native") {
+            binaries.getTest("DEBUG").linkerOpts(
+                systemStdcxxSo.absolutePath,
+                "--gc-sections",
+                // The system libstdc++.so.6 in turn references NEWER glibc symbols
+                // (pthread_*@GLIBC_2.34 — the libpthread→libc merge, strfromf128@GLIBC_2.26,
+                // __isoc23_*@GLIBC_2.38) that konan's bundled old-sysroot glibc stub doesn't
+                // define, which --no-allow-shlib-undefined (K/N's default) rejects. These
+                // are resolved at RUNTIME by the host glibc (the test runs on this box, the
+                // same toolchain that parsed the bindings), so relax the shlib check.
+                // Crucially this only relaxes undefined refs coming from SHARED LIBRARIES —
+                // the generated libfeaturegen.a archive's own symbols are still fully
+                // checked, so a genuinely missing binding symbol would still fail the link.
+                "--allow-shlib-undefined",
+                "-rpath",
+                systemStdcxxLibDir,
+                "-rpath-link",
+                systemStdcxxLibDir
+            )
+        }
+    }
 }
