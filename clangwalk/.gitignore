@@ -1,1 +1,21 @@
-/krapped/
+# Phase E (#47, flip brick B3) — the stage-0 SEED anchor.
+#
+# Most of krapped/ is machine-generated and ignored, BUT the deterministic TEXT output of
+# a one-time libclang generation is COMMITTED as the bootstrap seed: post-B5 (libclang
+# reducer deleted from in-tree krapper_gen) this module can no longer (re)parse its own
+# Clang-slice headers, so it builds from this committed seed under
+# -Pkpp.frontend.clangwalk=seed (now its default — see root gradle.properties).
+#
+# Committed (deterministic, portable): the Kotlin bindings (src/), the C++ wrapper
+# (clangwalk.cc / clangwalk.h) and the forcing headers (KrapperForce_*.h, includes
+# hand-relativized to ../include/clang_slice.h — the #86 absolute-path generator bug).
+# Everything else — the compiled wrapper object (libclangwalk.a, host/LLVM-pinned), the
+# cinterop .def (carries this checkout's absolute krapped path), generated.txt, fixups.json,
+# cpp-models/, *.log — stays machine-generated/ignored and is regenerated at build (the .def
+# + .a by runSeedSync, a plain C++ compile with no libclang parse).
+/krapped/*
+!/krapped/requested.txt
+!/krapped/src
+!/krapped/src/**
+!/krapped/*.cc
+!/krapped/*.h
