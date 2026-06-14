@@ -106,12 +106,32 @@ normal build picks up the generated bindings.
 
 ## 6. Troubleshooting
 
-- **Out-of-memory during the release link.** The K/N release link is memory-hungry and can
-  OOM the Gradle daemon. Remedy that bit the campaign repeatedly:
+- **Out-of-memory during the release link.** The K/N release link is memory-hungry. Kotlin/
+  Native compiles **and links in-process inside the Gradle daemon**, so what governs OOM is
+  the *daemon* heap — `org.gradle.jvmargs` — and **not** `GRADLE_OPTS`, which does not reach
+  the in-process K/N compiler. That subtlety bit the campaign repeatedly: people exported
+  `GRADLE_OPTS="-Xmx…"` and still OOM'd.
+
+  The repo now commits a sane daemon heap in the root `gradle.properties`:
 
   ```
-  ./gradlew --stop
-  GRADLE_OPTS="-Xmx12g" ./gradlew :clangwalk:runReleaseExecutableKlinker -PenableClang
+  org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError
+  ```
+
+  6g reliably builds the default (LLVM-free) gate and the gated cpp front-end
+  (`-PenableClang`) — no manual per-build heap bump needed. If a *heavier* gated release
+  link (the cpp/clang modules under `-PenableClang`) still OOMs, raise the heap — edit that
+  line, or add the same key to `~/.gradle/gradle.properties` (a per-user override that keeps
+  the committed default sane for low-RAM contributors):
+
+  ```
+  org.gradle.jvmargs=-Xmx12g -XX:MaxMetaspaceSize=512m
+  ```
+
+  Then re-run, e.g.:
+
+  ```
+  ./gradlew :clangwalk:runReleaseExecutableKlinker -PenableClang
   ```
 
 - **Known issue — `:clangwalk` release generation against LLVM-22.1.6.** There is a current
