@@ -28,11 +28,14 @@ class DefWriter(private val namer: NameHandler) {
         pkg: String,
         moduleName: String,
         headers: List<String>,
-        libraries: List<String>
+        libraries: List<String>,
+        // Extra -I roots from the module's headerDirectory(...); see CompileFlags.
+        extraIncludeDirs: List<String> = emptyList()
     ): String = buildString {
         val flags = CompileFlags(
             listOf(File(outputBase, "$moduleName.h").path),
-            libraries + File(outputBase, "lib$moduleName.a").path
+            libraries + File(outputBase, "lib$moduleName.a").path,
+            extraIncludeDirs = extraIncludeDirs
         )
         appendLine("headers = ${flags.headerFiles.joinToString(" ") { it.name }}")
         flags.includeDirs?.let {

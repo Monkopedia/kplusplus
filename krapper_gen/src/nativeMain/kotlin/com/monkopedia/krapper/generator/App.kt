@@ -127,6 +127,13 @@ class KrapperGen : CliktCommand() {
             "(borrowed/opaque) rather than being recursively bound. May be combined with " +
             "--only-file. When neither is set, DefaultFilter binds every non-std class."
     ).multiple()
+    val includeDir by option(
+        "--include-dir",
+        help = "Extra include directory (-I) for the generated C++ wrapper compile, from the " +
+            "module's `kplusplus { headerDirectory(...) }`. Repeatable. Folded in alongside the " +
+            "header files' own parent dirs so cross-directory quote-includes in the wrapper " +
+            "compile resolve the same way the cpp front-end's parse did."
+    ).multiple()
     val onlyFile by option(
         "--only-file",
         help = "Like --only, but reads the allowlist from a file (one fully-qualified " +
@@ -216,7 +223,15 @@ class KrapperGen : CliktCommand() {
                     strictDiagnostics = strictDiagnostics
                 )
             )
-            val indexService = service.index(IndexRequest(header, library))
+            // Augment the request's include dirs (default = header parents) with the module's
+            // explicit `headerDirectory(...)` roots passed via --include-dir; these reach the
+            // wrapper compile through CompileFlags so its quote-includes resolve.
+            val baseRequest = IndexRequest(header, library)
+            val indexService = service.index(
+                baseRequest.copy(
+                    headerDirectories = (baseRequest.headerDirectories + includeDir).distinct()
+                )
+            )
             try {
                 // v2 flow: when both --header and --instantiate are present, parse
                 // the headers first (filterAndResolve) then layer the requested
