@@ -15,21 +15,6 @@
  */
 package com.monkopedia.krapper.generator
 
-import clang.CXCursor
-import clang.CXCursorKind
-import clang.CXCursorKind.CXCursor_TypedefDecl
-import clang.CXDiagnosticSeverity
-import clang.CXIndex
-import clang.CXTranslationUnit
-import clang.CXType
-import clang.clang_defaultDiagnosticDisplayOptions
-import clang.clang_disposeDiagnostic
-import clang.clang_disposeString
-import clang.clang_formatDiagnostic
-import clang.clang_getDiagnostic
-import clang.clang_getDiagnosticLocation
-import clang.clang_getDiagnosticSeverity
-import clang.clang_getNumDiagnostics
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.AndFilter
 import com.monkopedia.krapper.DefaultFilter
@@ -63,7 +48,6 @@ import com.monkopedia.krapper.StringSelector.NAMESPACE
 import com.monkopedia.krapper.StringSelector.STRINGIFY
 import com.monkopedia.krapper.TypeFilter
 import com.monkopedia.krapper.filter
-import com.monkopedia.krapper.generator.canonicalType
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.model.ModelIo
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -81,7 +65,6 @@ import com.monkopedia.krapper.generator.model.filterRecursive
 import com.monkopedia.krapper.generator.model.forEachRecursive
 import com.monkopedia.krapper.generator.model.freeFunctionQualifiedName
 import com.monkopedia.krapper.generator.model.parentClass
-import com.monkopedia.krapper.generator.model.serialized
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -94,77 +77,25 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedNamespace
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import kotlin.math.min
-import kotlin.system.exitProcess
-import kotlinx.cinterop.ByteVar
-import kotlinx.cinterop.CValue
-import kotlinx.cinterop.DeferScope
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.allocArray
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.ptr
-import kotlinx.cinterop.set
-import kotlinx.cinterop.toKString
-import kotlinx.cinterop.toKStringFromUtf8
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import platform.posix.EOF
-import platform.posix.close
-import platform.posix.getenv
-import platform.posix.read
-import platform.posix.system
-import platform.posix.write
 
 typealias ElementFilter = WrappedElement.() -> Boolean
 
-// Golden-test dump path (#44 brick 7), set by KrapperGen --dumpParsedModel before the run.
-// When non-null, [parseHeader] writes the parsed (pre-resolution, pre-rewrite) WrappedTU
-// as canonical SerializedElement JSON to this path and exits the process — parse-only
-// mode, used by :cppfrontend:goldenCompare. A CLI-scoped global rather than a KrapperConfig
-// field so the ksrpc service schema (:slice) is untouched by a debug-only flag.
-var dumpParsedModelPath: String? = null
-
-// Round-trip oracle (#45 brick 1), set by KrapperGen --roundTripModel or the
-// KRAPPER_ROUNDTRIP_MODEL=1 environment variable (the env var also reaches service-mode
-// runs, where CLI options don't apply — e.g. the gradle plugin's kplusplusSync spawn).
-// When enabled, [parseHeader] serializes each parsed WrappedTU through the
-// full-fidelity ModelIo JSON, deserializes it back, and continues the normal
-// resolution+generation pipeline ON THE DESERIALIZED MODEL — so a byte-identical
-// generated output proves every field resolution+codegen consume survives the
-// round-trip (the verification gate for the --frontend=cpp handoff format).
-var roundTripParsedModel: Boolean =
-    getenv("KRAPPER_ROUNDTRIP_MODEL")?.toKString() == "1"
-
-// THE HANDOFF (#45 brick 2), set by KrapperGen --frontend=cpp --parsedModel <path>.
-// When non-null, [parseHeader] SKIPS the libclang parse entirely and instead loads the
-// WrappedTU from this path — the full-fidelity ModelIo JSON the cppfrontend binary
-// emitted from the Clang C++ AST (on kplusplus-generated bindings). The loaded tree
-// enters the pipeline at the exact post-parse point the --roundTripModel oracle proved
-// (brick 1): the pre-resolution rewrites below run on it, then ParsedResolver wraps it.
-// CLI-scoped global (same rationale as [dumpParsedModelPath]): the ksrpc service schema
-// stays untouched. The libclang cinterop remains LINKED into the binary — flip/deletion
-// is Phase E; what matters here is the cpp path never CALLS it.
+// THE FRONT-END (#45 brick 2; flip B5), set by KrapperGen --parsedModel <path>.
+// krapper_gen has a SINGLE front-end: it loads its parse-output WrappedTU from this path —
+// the full-fidelity ModelIo JSON the cppfrontend binary emitted from the Clang C++ AST (on
+// kplusplus-generated bindings). The loaded tree enters the pipeline at the post-parse
+// point: the pre-resolution rewrites below run on it, then ParsedResolver wraps it. The
+// in-tree libclang-C reducer was DELETED in B5 (#47) — there is no in-process parse path.
+// CLI-scoped global so the ksrpc service schema (:slice) stays untouched.
 var cppParsedModelPath: String? = null
 
-// Instantiation forcing on the cpp path (#45 brick 3), set by KrapperGen --frontend=cpp
-// --forcingModel <spec>=<path>. Maps each normalized instantiation target (e.g.
-// "std::vector<Item*>") to the ModelIo JSON of its FORCING-PARSE WrappedTU — the tree the
-// libclang path obtains by synthesizing a `KrapperForce_*` header and re-parsing it
-// (IndexedServiceImpl.requestInstantiation). With an entry present, requestInstantiation
-// loads the tree instead of parsing, and the whole downstream flow (scoping +
-// resolveForcing's 3-pass dance + cumulative keys + dedup) runs UNCHANGED over it.
-// CLI-scoped global, same rationale as [cppParsedModelPath].
+// Instantiation forcing (#45 brick 3), set by KrapperGen --forcingModel <spec>=<path>.
+// Maps each normalized instantiation target (e.g. "std::vector<Item*>") to the ModelIo JSON
+// of its FORCING-PARSE WrappedTU — the tree the cppfrontend binary produces by synthesizing
+// a `KrapperForce_*` header and parsing it. requestInstantiation loads the tree, and the
+// whole downstream flow (scoping + resolveForcing's 3-pass dance + cumulative keys + dedup)
+// runs over it. CLI-scoped global, same rationale as [cppParsedModelPath].
 var cppForcingModelPaths: Map<String, String> = emptyMap()
-
-// Model-dump oracle (#45 brick 3), set by KrapperGen --dumpModels <dir>. On the LIBCLANG
-// path, every [parseHeader] (the main header parse AND each instantiation's forcing parse)
-// additionally serializes its post-reduce, pre-rewrite WrappedTU as ModelIo JSON into the
-// directory (model_<n>_<firstHeaderName>.json) and CONTINUES the run. The dumped files are
-// exactly what --frontend=cpp consumes via --parsedModel/--forcingModel, so feeding them
-// back through the cpp path and diffing the generated output proves the file-handoff
-// instantiation flow (fresh instances, no cursor->element memo) reproduces the in-process
-// libclang run — isolating flow correctness from cppfrontend model-construction fidelity.
-var dumpModelsDir: String? = null
-private var dumpModelCounter = 0
 
 /**
  * Load a ModelIo WrappedTU from [path] and prepare it for resolution exactly the way a
@@ -488,72 +419,6 @@ fun WrappedElement.defaultFilter(): Boolean {
     return false
 }
 
-/**
- *
-#include <...> search starts here:
-/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/../../../../include/c++/11.1.0
-/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/../../../../include/c++/11.1.0/x86_64-pc-linux-gnu
-/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/../../../../include/c++/11.1.0/backward
-/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/include
-/usr/local/include
-/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/include-fixed
-/usr/include
-End of search list.
- */
-
-fun generateIncludes(compiler: String) = memScoped {
-    // Per-run unique scratch dir (pid + counter) so concurrent generator runs never
-    // collide on a fixed /tmp path; removed before returning so it never accumulates.
-    val tmpDir = File.createTempDir("krapper_includes")
-    defer { tmpDir.rmR() }
-    val emptyFile = File(tmpDir, "clang_includes.c")
-    emptyFile.writeText("")
-    val process = Process {
-        system("$compiler -E -x c++ -v ${emptyFile.path}")
-    }
-    process.start()
-    defer {
-        process.kill()
-    }
-    val buffer = alloc<ByteVar> {
-        EOF
-    }
-    write(process.stdIn(), buffer.ptr, 1.toULong())
-    close(process.stdIn())
-    process.wait()
-    val readBuffer = allocArray<ByteVar>(256)
-    var fullString = StringBuilder()
-    var amount = read(process.stdOut(), readBuffer, 255.toULong())
-    while (amount > 0) {
-        readBuffer[amount.toInt()] = 0.toByte()
-        fullString.append(readBuffer.toKStringFromUtf8())
-        amount = read(process.stdOut(), readBuffer, 255.toULong())
-    }
-    val lines = fullString.split("\n")
-    val start = lines.indexOf("#include <...> search starts here:")
-    val end = lines.indexOf("End of search list.")
-    if (start < 0 || end < 0) {
-        throw IllegalStateException("Can't find includes for:\n$fullString")
-    }
-    return@memScoped (
-        lines.subList(start + 1, end).toList().map { it.trim() } + "."
-        ).toTypedArray()
-}
-
-fun find(s: String): String? {
-    val paths = getenv("PATH")?.toKStringFromUtf8().orEmpty().split(":")
-    for (path in paths) {
-        val parent = File(path)
-        val file = File(parent, s)
-        if (file.exists()) {
-            return file.path
-        }
-    }
-    return error("Can't find $s in $paths")
-}
-
-// Obtained from 'g++ -E -x c++ - -v < /dev/null'
-
 class ParsedResolver(val tu: WrappedTU) : Resolver {
     private val classMap = mutableMapOf<String, Pair<ResolvedClass, WrappedClass>?>()
     private val templateMap = mutableMapOf<String, WrappedTemplate>()
@@ -610,314 +475,27 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
     }
 }
 
-private class ResolverBuilderImpl : ResolverBuilder {
-    private val seenNames = mutableMapOf<String, CValue<CXType>>()
-    val classes = mutableListOf<WrappedClass>()
-    val desiredTemplates = mutableListOf<CValue<CXType>>()
-
-    override fun visit(type: CValue<CXType>): CValue<CXType> {
-        // Use canonical type spelling as cache key to avoid collisions between
-        // inner classes with the same short name (e.g. Serializer::Delegate vs
-        // Deserializer::Delegate both spelling as just "Delegate").
-        // However, template type parameters have positional canonical forms like
-        // "type-parameter-0-0" that collide across different templates (e.g.,
-        // _Tp and _Alloc from different templates both become type-parameter-0-0).
-        // For those, use the original spelling which preserves the parameter name.
-        val strType = run {
-            val canonical = type.canonicalType.spelling.toKString()?.trim()
-            if (canonical != null && !canonical.contains("type-parameter")) {
-                canonical
-            } else {
-                type.spelling.toKString()?.trim()
-            }
-        } ?: return type
-        return seenNames.getOrPut(strType) {
-            val declaration = type.typeDeclaration
-            when (declaration.kind) {
-                CXCursorKind.CXCursor_ClassDecl,
-                CXCursorKind.CXCursor_StructDecl -> {
-                    seenNames[strType] = type
-                    if (type.numTemplateArguments <= 0) {
-                        classes.add(WrappedClass(declaration, this))
-                    } else {
-                        desiredTemplates.add(type)
-                    }
-                    type
-                }
-
-                CXCursor_TypedefDecl -> {
-                    visit(type.typeDeclaration.typedefDeclUnderlyingType)
-                }
-
-                else -> {
-                    type
-                }
-            }
-        }
-    }
-}
-
-suspend fun DeferScope.parseHeader(
-    index: CXIndex,
-    file: List<String>,
-    includePaths: Array<String>,
-    args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
-        .toTypedArray(),
-    debug: Boolean = false,
-    // When true, any `error:` diagnostic aborts the whole run (historical behavior).
-    // When false (default), an error attributable to a single declaration drops that
-    // symbol into the drop ledger and binding continues; only fatal / unattributable
-    // diagnostics abort. See [handleDiagnostics].
-    strictDiagnostics: Boolean = false
-): Resolver {
-    // THE HANDOFF (#45 brick 2): with --frontend=cpp the model was already produced by
-    // the cppfrontend binary; decode it and skip the libclang parse below entirely. No
-    // cursor->element memo exists on this path (nothing was parsed in-process), and no
-    // memo is needed: the CLI forbids --instantiate with this front-end (instantiation
-    // forcing re-parses synthesized headers with libclang — see KrapperGen.run), so no
-    // later parse ever needs to rediscover these instances. The pre-resolution rewrites
-    // run on the loaded tree exactly as they do on a --roundTripModel restored tree.
-    cppParsedModelPath?.let { path ->
-        Log.i("cpp front-end handoff: loading parsed model from $path (libclang parse skipped)")
-        // Stashed for the forcing loads' first-seen reorder (O1, #46 — loadForcingModel).
-        return loadParsedModel(path).also { cppBaseModelTu = it.tu }
-    }
-    val builder = ResolverBuilderImpl()
-    val tu = file.map {
-        parseHeader(index, it, builder, includePaths, args, debug, strictDiagnostics)
-    }
-        .reduceRight { tu1, tu2 ->
-            tu1.also {
-                it.addAllChildren(
-                    tu2.children.map {
-                        it.also { it.parent = tu1 }
-                    }
-                )
-            }
-        }
-    Log.i("Reduced ${tu.children.size}")
-    // Golden-test dump (#44 brick 7, armed by krapper_gen --dumpParsedModel): project the
-    // PARSED tree through the canonical SerializedElement DTO and exit (parse-only mode).
-    // The hook sits HERE — after the multi-file reduce completes the tree, but BEFORE the
-    // pre-resolution rewrites below (rewriteViewReturns/rewriteUniquePtrReturns are
-    // krapper-specific marshalling baked onto the tree, not parse output — the C++-AST
-    // front-end does not perform them, so the golden compare must see the tree without
-    // them).
-    dumpParsedModelPath?.let { path ->
-        File(path).writeText(Json.encodeToString(tu.serialized()))
-        Log.i("Dumped parsed model to $path (parse-only mode, exiting)")
-        exitProcess(0)
-    }
-    // Model-dump oracle (#45 brick 3): serialize EVERY parse's tree (main + each forcing
-    // re-parse) as ModelIo JSON and continue. Placed at the same post-reduce, pre-rewrite
-    // point as the hooks above so the dumped file is byte-compatible with what the
-    // --frontend=cpp load path expects (loadParsedModel re-applies the rewrites itself).
-    dumpModelsDir?.let { dir ->
-        File(dir).mkdirs()
-        val name = File(file.first()).name.substringBeforeLast(".")
-        val out = File(File(dir), "model_${dumpModelCounter++}_$name.json")
-        out.writeText(ModelIo.encodeToString(tu))
-        Log.i("Dumped ModelIo model to ${out.path}")
-    }
-    // Round-trip oracle (#45 brick 1): serialize the parsed model to JSON, deserialize
-    // it back, and hand the rest of the pipeline THE DESERIALIZED TREE. Placed at the
-    // same point as the --dumpParsedModel golden hook — post-reduce, BEFORE the
-    // pre-resolution rewrites below — because the rewrites REPLACE method children with
-    // copies (rewriteMethods): running them after the swap lets them act on the restored
-    // tree, so the cursor->element memo (remapped to the restored instances by
-    // remapMemoized) and the live tree stay aligned exactly as in a non-flag run. The
-    // rewrite-produced fields (returnsPairSecond/returnViaMemberCall/rangeElementType)
-    // are still covered by the schema — they're serialized whenever set (e.g. by the
-    // instantiation-time rewrite passes feeding later parses through shared elements).
-    val model = if (roundTripParsedModel) {
-        val json = ModelIo.encodeToString(tu)
-        val restored = ModelIo.decodeFromString(json)
-        WrappedElement.remapMemoized(tu, restored)
-        Log.i("Round-tripped parsed model through ModelIo JSON (${json.length} chars)")
-        restored
-    } else {
-        tu
-    }
-    // T1.10: bake view-return rewrites (e.g. llvm::StringRef -> std::string via `.str()`)
-    // into the parsed tree BEFORE resolution. ParsedResolver.resolve re-reads classes from
-    // this TU (not the findClasses() result), so the rewrite must live on the tree itself.
-    rewriteViewReturns(model)
-    // T1.7e: a by-value `std::unique_ptr<T>` return -> raw `T*` (ownership transferred via
-    // `.release()`). Same pre-resolution baking rationale as rewriteViewReturns.
-    rewriteUniquePtrReturns(model)
-    return ParsedResolver(model)
-}
-
-private fun DeferScope.parseHeader(
-    index: CXIndex,
-    file: String,
-    resolverBuilder: ResolverBuilder,
-    includePaths: Array<String>,
-    args: Array<String> = arrayOf("-xc++", "--std=c++14") + includePaths.map { "-I$it" }
-        .toTypedArray(),
-    debug: Boolean = false,
-    strictDiagnostics: Boolean = false
-): WrappedTU {
-    val tu = index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
-    val droppedUsrs = tu.handleDiagnostics(file, strictDiagnostics)
-    defer {
-        tu.dispose()
-    }
-    val cursor = tu.cursor
-    if (debug) {
-        File(
-            File("/tmp"),
-            "cursor_${File(file).name}.json"
-        ).writeText(Json.encodeToString(Utils.CursorTreeInfo(cursor)))
-    }
-    // Excise declarations the diagnostic policy dropped (issue #9) so the broken decl and
-    // its members are never carried into the model / resolution.
-    WrappedElement.setDroppedUsrs(droppedUsrs)
-    val element = WrappedElement.mapAll(tu.cursor, resolverBuilder)
-    return element as? WrappedTU ?: error("$element is not a WrappedTU, ${tu.cursor.kind}")
-}
-
 /**
- * A single error-severity parse diagnostic, paired with the declaration it could be
- * attributed to. [text] is the formatted diagnostic line; [symbol]/[usr] are the spelling
- * and USR of the enclosing top-level declaration the error landed inside, or `null` when
- * the error can't be tied to a single declaration (a translation-unit-level / fatal
- * error — a missing include, "too many errors", an error at the TU root). [fatal] is true
- * for `CXDiagnostic_Fatal`, which always aborts because the rest of the AST can't be
- * trusted.
- */
-private data class ErrorDiagnostic(
-    val text: String,
-    val symbol: String?,
-    val usr: String?,
-    val fatal: Boolean
-) {
-    /** Attributable to a single declaration -> droppable when not strict and not fatal. */
-    val isAttributable: Boolean get() = symbol != null && usr != null && !fatal
-}
-
-/**
- * Inspect this translation unit's diagnostics and decide whether to abort the run.
+ * krapper_gen's SINGLE front-end (flip B5, #47): load the parse-output WrappedTU from the
+ * ModelIo JSON the cppfrontend binary produced (--parsedModel) and prepare it for
+ * resolution. The in-tree libclang-C reducer was deleted — there is NO in-process parse
+ * path. [cppParsedModelPath] must be set (the CLI requires --parsedModel); calling this
+ * with it unset is a misconfiguration and fails loudly.
  *
- * Historically (and still under [strictDiagnostics]) ANY `error:` diagnostic threw,
- * taking the whole import down — fine for curated clean headers, fatal for pointing at a
- * real library where one bad declaration would block everything else. The default policy
- * now SKIPS the affected symbol instead: an error attributable to a single top-level
- * declaration drops that declaration into the [DropLedger] (PARSE phase, the diagnostic
- * text as the reason) and binding continues over the rest of the header. libclang still
- * recovers a usable AST for the surviving declarations, and the downstream model build
- * (`mapAll`) is already skip-not-crash, so dropping the named symbol here is safe.
- *
- * The boundary, by design:
- *  - strict mode             -> abort on the first error/fatal (the old behavior).
- *  - fatal severity          -> always abort (recovered AST is untrustworthy).
- *  - unattributable error    -> always abort (an error at the TU root / with no enclosing
- *                               declaration is translation-unit-level, e.g. a missing
- *                               include; we can't surgically drop a single symbol).
- *  - attributable error      -> drop that symbol into the ledger, continue.
+ * The loaded tree enters the pipeline at the post-parse point: the pre-resolution rewrites
+ * (rewriteViewReturns/rewriteUniquePtrReturns) run on it, then ParsedResolver wraps it. The
+ * base tree is stashed in [cppBaseModelTu] for the forcing loads' first-seen reorder
+ * (O1, #46 — loadForcingModel).
  */
-private fun CXTranslationUnit.handleDiagnostics(
-    file: String,
-    strictDiagnostics: Boolean
-): Set<String> {
-    val errors = collectErrorDiagnostics()
-    if (errors.isEmpty()) {
-        return emptySet()
-    }
-    val mustAbort = strictDiagnostics || errors.any { !it.isAttributable }
-    if (mustAbort) {
-        val reason = if (strictDiagnostics) {
-            "strict diagnostics"
-        } else {
-            "fatal / translation-unit-level diagnostic(s)"
-        }
-        throw RuntimeException(
-            "Parse failure ($reason) in $file:\n" + errors.joinToString("\n") { it.text }
+suspend fun parseHeader(): Resolver {
+    val path = cppParsedModelPath
+        ?: error(
+            "krapper_gen has no in-process parse front-end (the libclang-C reducer was " +
+                "removed in flip B5, #47). A parse-output model is required: pass " +
+                "--parsedModel <ModelIo JSON> (the cppfrontend binary produces it)."
         )
-    }
-    // Lenient: every error is attributable -> drop each affected symbol and continue.
-    // Dedup by USR: one bad declaration can raise several diagnostics, but it's one drop.
-    val droppedUsrs = mutableSetOf<String>()
-    for (error in errors) {
-        val symbol = error.symbol ?: continue
-        val usr = error.usr ?: continue
-        if (!droppedUsrs.add(usr)) {
-            continue
-        }
-        DropLedger.record(symbol, error.text, DropPhase.PARSE)
-        println(
-            "WARN skip-not-crash: dropping declaration '$symbol' in $file on parse " +
-                "diagnostic: ${error.text}"
-        )
-    }
-    return droppedUsrs
-}
-
-/**
- * Collect this TU's `error:`/fatal diagnostics, attributing each to the enclosing
- * top-level declaration where one exists (via the diagnostic's source location ->
- * [clang_getCursor] -> walk semantic parents up to the TU root).
- */
-private fun CXTranslationUnit.collectErrorDiagnostics(): List<ErrorDiagnostic> {
-    val nbDiag = clang_getNumDiagnostics(this)
-    val errors = mutableListOf<ErrorDiagnostic>()
-    for (currentDiag in 0 until nbDiag.toInt()) {
-        val diagnostic = clang_getDiagnostic(this, currentDiag.toUInt())
-        try {
-            val severity = clang_getDiagnosticSeverity(diagnostic)
-            val isError = severity == CXDiagnosticSeverity.CXDiagnostic_Error ||
-                severity == CXDiagnosticSeverity.CXDiagnostic_Fatal
-            if (!isError) {
-                continue
-            }
-            val formatted =
-                clang_formatDiagnostic(diagnostic, clang_defaultDiagnosticDisplayOptions())
-            val text = formatted.toKString().orEmpty()
-            clang_disposeString(formatted)
-            val location = clang_getDiagnosticLocation(diagnostic)
-            val topLevel = topLevelDecl(getCursor(location))
-            errors.add(
-                ErrorDiagnostic(
-                    text = text,
-                    symbol = topLevel?.spelling?.toKString()?.takeIf { it.isNotBlank() },
-                    usr = topLevel?.usr?.toKString()?.takeIf { it.isNotBlank() },
-                    fatal = severity == CXDiagnosticSeverity.CXDiagnostic_Fatal
-                )
-            )
-        } finally {
-            clang_disposeDiagnostic(diagnostic)
-        }
-    }
-    return errors
-}
-
-/**
- * Walk [cursor] up its semantic parents to the outermost named, non-namespace declaration
- * — the one whose semantic parent is the TU or a namespace — and return that cursor, or
- * `null` when the error can't be tied to a single declaration (a null/invalid cursor, the
- * TU root itself, or no named non-namespace ancestor — i.e. a translation-unit-level
- * error). That outermost decl is what the model binds as a top-level symbol, so excising
- * it (by USR, in WrappedElement.map) cleanly drops the whole bad declaration and all of
- * its members. Namespaces are skipped as drop targets: a namespace is a container, not a
- * bindable symbol, and dropping it would take every sibling declaration with it.
- */
-private fun CXTranslationUnit.topLevelDecl(cursor: CValue<CXCursor>): CValue<CXCursor>? {
-    val tuCursor = this.cursor
-    if (cursor.kind.isInvalid || cursor.equals(tuCursor)) {
-        return null
-    }
-    var current = cursor
-    var named: CValue<CXCursor>? = null
-    while (!current.kind.isInvalid && !current.equals(tuCursor)) {
-        if (current.kind.isDeclaration &&
-            current.kind != CXCursorKind.CXCursor_Namespace &&
-            !current.spelling.toKString().isNullOrBlank()
-        ) {
-            named = current
-        }
-        current = current.semanticParent
-    }
-    return named
+    Log.i("cpp front-end: loading parsed model from $path")
+    return loadParsedModel(path).also { cppBaseModelTu = it.tu }
 }
 
 suspend fun WrappedTemplate.typedAs(

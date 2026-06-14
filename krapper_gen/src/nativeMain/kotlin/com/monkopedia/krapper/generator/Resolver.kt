@@ -15,7 +15,6 @@
  */
 package com.monkopedia.krapper.generator
 
-import clang.CXType
 import com.monkopedia.krapper.generator.codegen.BasicAssignmentOperator
 import com.monkopedia.krapper.generator.codegen.NameHandler
 import com.monkopedia.krapper.generator.codegen.Namer
@@ -53,7 +52,6 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedEnumEntry
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedFunctionPointer
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
-import kotlinx.cinterop.CValue
 
 interface Resolver {
     suspend fun resolve(
@@ -112,10 +110,6 @@ class ResolveTracker(val classes: MutableMap<String, WrappedClass>) {
     }
 
     val otherResolved = mutableSetOf<String>()
-}
-
-interface ResolverBuilder {
-    fun visit(type: CValue<CXType>): CValue<CXType>
 }
 
 suspend fun List<WrappedElement>.resolveAll(
