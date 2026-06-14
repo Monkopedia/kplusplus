@@ -67,9 +67,12 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     private var classes: List<ResolvedElement> = emptyList()
     private val mappings = mutableListOf<MappingService>()
 
-    // Forcing headers recorded by requestInstantiation for the specializations the cpp
-    // front-end forced. Keyed forceName -> file contents. They are re-materialized into the
-    // output dir by writeTo, so the generated wrapper #includes them by a stable, relative,
+    // Forcing specializations recorded by requestInstantiation for the targets the cpp
+    // front-end forced. Keyed forceName -> the instantiation target spec. The header CONTENT
+    // is synthesized later, in writeTo: only then is the output dir known, and the consumer
+    // `#include` in the forcing header must be RELATIVE to that dir (so a regen from any
+    // checkout location produces byte-identical headers — #86). Materialized into the output
+    // dir by writeTo, so the generated wrapper #includes them by a stable, relative,
     // self-contained path (deterministic across runs).
     private val forcingHeaders = linkedMapOf<String, String>()
 
@@ -136,8 +139,9 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // bytes for its forcing parse, so both paths force the same specialization from
         // the same translation unit.
         val forceName = ForcingHeader.forceName(target)
-        val forcingContent = ForcingHeader.contentFor(target, request.headers)
-        forcingHeaders[forceName] = forcingContent
+        // Record only the target spec; writeTo synthesizes the bytes once it knows the output
+        // dir (the consumer #include must be relative to where the header lands — #86).
+        forcingHeaders[forceName] = target
         // The forcing-parse tree is produced by the cppfrontend binary (which synthesizes
         // the SAME forcing header and parses it with the Clang C++ AST); load it. The
         // forcing header content above is still recorded: writeTo re-materializes it so the
@@ -244,13 +248,21 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         }
         val outputBase = File(output)
         outputBase.mkdirs()
-        // Re-materialize the forcing headers into the output dir so the generated wrapper
-        // #includes them by a stable relative path (no /tmp), and the emitted .cc is
+        // Synthesize + materialize the forcing headers into the output dir so the generated
+        // wrapper #includes them by a stable relative path (no /tmp), and the emitted .cc is
         // self-contained / re-compilable. Deterministic name -> deterministic output.
+        //
+        // The forcing header's OWN consumer `#include` is emitted RELATIVE to the forcing
+        // file's location (the output dir), mirroring how the main .cc relativizes its
+        // consumer includes against cppFile (CppWriter.onGenerate -> File(h).relativeTo).
+        // The forcing header lands in <krapped>/ and is compiled with -I<krapped> (see the
+        // .def compilerOpts), so a path relative to that dir resolves; and because it carries
+        // no absolute host path, a regen from any checkout location is byte-identical (#86).
         syntheticHeaders.clear()
-        for ((forceName, content) in forcingHeaders) {
+        for ((forceName, target) in forcingHeaders) {
             val forcingFile = File(outputBase, "$forceName.h")
-            forcingFile.writeText(content)
+            val relHeaders = request.headers.map { File(it).relativeTo(forcingFile) }
+            forcingFile.writeText(ForcingHeader.contentFor(target, relHeaders))
             syntheticHeaders.add(forcingFile.path)
         }
         val headers = request.headers + syntheticHeaders
