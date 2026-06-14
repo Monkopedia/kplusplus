@@ -83,6 +83,10 @@ kplusplus {
     header("../include/v8-combined.h")
     headerDirectory("../include/")
     library("../libv8_monolith.a")
+    // v8 needs C++17 (the default is c++14); the cpp front-end parses AND the wrapper
+    // compiles under this standard. The frontend flip itself is in gradle.properties
+    // (kpp.frontend.kotlin_project=cpp), built with -PenableClang.
+    cppStandard = "c++17"
 
     fixup {
         // v8::ScriptOrigin::options returns a stale `const ScriptOriginOptions*`
@@ -100,13 +104,29 @@ kplusplus {
         stripConstFromReturnType("v8::ScriptOrigin<")
         stripConstFromReturnType("v8::Location<")
 
-        // Three v8 methods generate uncompilable C++ wrappers for this
-        // particular instantiation; drop them by their uniqueCName.
-        removeMethod("_v8_Persistent_v8_Value_new")
+        // v8 methods that generate uncompilable C++ wrappers; drop them by uniqueCName.
+        // v8::Persistent<v8::Value> is NonCopyable (NonCopyablePersistentTraits::Copy is a
+        // `static_assert(sizeof(S) < 0)`), so neither its copy ctor nor its copy-assignment
+        // may be instantiated. The cpp front-end (brick-1 flip to
+        // -Pkpp.frontend.kotlin_project=cpp) materializes these IMPLICIT special members
+        // parse-dependently — one run surfaces the copy ctor
+        // (`..._new__const_v8_Persistent_and`), another the copy-assignment (`..._op_assign`,
+        // the libclang-era name, still valid) — so drop BOTH to stay robust across parses.
+        removeMethod("v8_Persistent_v8_Value_new__const_v8_Persistent_and")
         removeMethod("v8_Persistent_v8_Value_op_assign")
         removeMethod(
             "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
         )
+
+        // v8::Maybe<void> is an explicit specialization carrying only IsJust/IsNothing/==/!=,
+        // but the front-end projects the primary Maybe<T> member set onto it, so these five
+        // reference members that don't exist on the void specialization (ToChecked/Check/To/
+        // FromJust/FromMaybe — the last also takes a `void` value). Drop them.
+        removeMethod("v8_Maybe_void_to_checked")
+        removeMethod("v8_Maybe_void_check")
+        removeMethod("v8_Maybe_void_to")
+        removeMethod("v8_Maybe_void_from_just")
+        removeMethod("v8_Maybe_void_from_maybe")
 
         // std::unique_ptr<>'s auto-generated `get()` doesn't model ownership
         // properly; this fixup emits a custom one per instantiation.

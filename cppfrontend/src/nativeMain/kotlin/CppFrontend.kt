@@ -332,8 +332,12 @@ fun main(args: Array<String>): Unit = memScoped {
         return@memScoped
     }
     if (args.firstOrNull() == "--parity-emit") {
-        // --parity-emit <dir> <header> <std> [spec...] — Phase D (#46), see parityEmit.
-        val usage = "--parity-emit <dir> <header> <std> [spec...]"
+        // --parity-emit <dir> <header> <std> [-I<dir>...] [spec...] — Phase D (#46), see
+        // parityEmit. The trailing args mix the module's extra include dirs (each a `-I<dir>`
+        // token, threaded by the gradle plugin from `kplusplus { headerDirectory(...) }`) with
+        // the instantiation specs (C++ type strings, which never start with `-I`); parityEmit
+        // partitions them.
+        val usage = "--parity-emit <dir> <header> <std> [-I<dir>...] [spec...]"
         parityEmit(
             args.getOrNull(1) ?: fail(usage),
             args.getOrNull(2) ?: fail(usage),
@@ -1172,14 +1176,24 @@ private fun MemScope.handoffEmit(dir: String) {
  *    parse it, emit <forceName>.json, print `PARITY_MODEL <spec>=<path>` — the line the
  *    gradle task turns into krapper_gen's --forcingModel argument.
  * [std] pins the SAME standard featuregen's sync parses under (krapper_gen's default).
+ *
+ * [trailing] mixes the module's extra include dirs (each a `-I<dir>` token, threaded by the
+ * gradle plugin from `kplusplus { headerDirectory(...) }`) with the instantiation specs; we
+ * partition on the `-I` prefix (C++ type specs never start with `-I`) and fold the include
+ * flags into the driver args so cross-directory quote-includes resolve in BOTH the base and
+ * per-spec forcing parses — exactly as krapper_gen's wrapper compile sees them.
  */
 private fun MemScope.parityEmit(
     dir: String,
     headerPath: String,
     std: String,
-    specs: List<String>
+    trailing: List<String>
 ) {
-    val parseArgs = "-std=$std\n-resource-dir=" + commandOutput("clang++ -print-resource-dir")
+    val (includeFlags, specs) = trailing.partition { it.startsWith("-I") }
+    val parseArgs = (
+        listOf("-std=$std", "-resource-dir=" + commandOutput("clang++ -print-resource-dir")) +
+            includeFlags
+        ).joinToString("\n")
     if (specs.isEmpty()) {
         val baseTu = parseToWrappedTU(readFile(headerPath), "parity_base.cc", parseArgs)
         val path = "$dir/base_model.json"

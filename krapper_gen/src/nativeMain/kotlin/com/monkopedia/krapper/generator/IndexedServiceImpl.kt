@@ -299,7 +299,10 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
                 "$pkg.internal",
                 config.moduleName!!,
                 headers,
-                request.libraries
+                request.libraries,
+                // The module's headerDirectory(...) roots, so the cinterop .def's
+                // compilerOpts carry the same -I set the wrapper compile needs.
+                request.headerDirectories
             )
         )
         Log.i("Compiling native wrapper library")
@@ -310,7 +313,10 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         ).compile(
             cppFile,
             headers,
-            request.libraries
+            request.libraries,
+            // Cross-directory quote-includes (e.g. v8's cppgc/*.h reaching v8config.h)
+            // resolve only if the module's headerDirectory(...) roots are on -I.
+            request.headerDirectories
         )
         Log.i("Generating Kotlin bindings")
         val srcDir = File(outputBase, "src")

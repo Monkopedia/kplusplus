@@ -72,10 +72,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // -PenableClang); the default path never references it. This replaces the old
             // per-module manual `dependsOn(":cppfrontend:featuregenCppBindings")` wiring —
             // ANY module flipped to cpp now self-wires the front-end build generically.
-            if (target.findProperty("kpp.frontend.${target.name}") == "cpp" &&
-                target.rootProject.findProject(":cppfrontend") != null
-            ) {
-                it.dependsOn(":cppfrontend:linkReleaseExecutableKlinker")
+            // resolveCppFrontend covers BOTH the sibling layout (featuregen/cppfixture) and
+            // the included-build layout (the standalone v8 example, where cppfrontend lives in
+            // the kplusplus build pulled in via includeBuild) — its link task is null when
+            // clang isn't enabled, in which case the doLast fails fast with the -PenableClang
+            // guidance.
+            if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
+                resolveCppFrontend(target).first?.let { ct -> it.dependsOn(ct) }
             }
             val krappedDir = krappedDirFor(target)
             val manifestFile = File(krappedDir, "requested.txt")
@@ -272,18 +275,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         krappedDir: File,
         kexe: File
     ) {
-        val cppfrontendProject = target.rootProject.findProject(":cppfrontend")
-            ?: throw GradleException(
-                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp but :cppfrontend " +
-                    "is not in this build. The cpp front-end needs the LLVM-gated modules — " +
-                    "build with -PenableClang (or -PllvmConfig=<path-to-llvm-config>)."
-            )
-        val cppBinary = cppfrontendProject.layout.buildDirectory
-            .file("bin/klinker/cppfrontendRelease/cppfrontend").get().asFile
+        // Resolve the cppfrontend binary across BOTH layouts (sibling project / included
+        // build) — see resolveCppFrontend. A non-existent binary means clang isn't enabled
+        // (cppfrontend is LLVM-gated and then in neither build), so guide to -PenableClang.
+        val cppBinary = resolveCppFrontend(target).second
         if (!cppBinary.exists()) {
             throw GradleException(
-                "kplusplusSync[$moduleName]: cppfrontend binary not found at $cppBinary — the " +
-                    "sync should depend on :cppfrontend:linkReleaseExecutableKlinker."
+                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp but the cppfrontend " +
+                    "binary was not found at $cppBinary. The cpp front-end needs the LLVM-gated " +
+                    "modules — build with -PenableClang (or -PllvmConfig=<path-to-llvm-config>); " +
+                    "in a standalone consumer that pulls kplusplus in via includeBuild, the flag " +
+                    "must reach that included build too."
             )
         }
         val headers = ext?.headers.orEmpty()
@@ -300,6 +302,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // single-header, so the primary header is the parse root.
         val headerPath = target.file(headers.first()).absolutePath
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
+        // The module's `kplusplus { headerDirectory(...) }` roots, resolved to absolute paths.
+        // These must reach BOTH the cpp parse (so the front-end's clang sees them) AND the
+        // krapper_gen wrapper compile (so its quote-includes resolve) — a header dropped on
+        // either side aborts the wrapper compile (exit 134) on cross-directory includes.
+        val includeDirs = ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
         // The worklist is the SAME union kplusplusSync's libclang path uses: the
         // compiler-written manifest (ALWAYS at <projectDir>/krapped/requested.txt — the FIR
@@ -314,10 +321,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
 
         val modelsDir = File(krappedDir, "cpp-models").apply { mkdirs() }
+        // The include dirs ride the trailing args as -I tokens; cppfrontend partitions them
+        // from the type specs (which never start with -I) — see --parity-emit / parityEmit.
+        val includeFlags = includeDirs.map { "-I$it" }
         fun emit(specs: List<String>): String {
             val proc = ProcessBuilder(
                 listOf(cppBinary.absolutePath, "--parity-emit", modelsDir.absolutePath, headerPath, std) +
-                    specs
+                    includeFlags + specs
             ).redirectErrorStream(true).start()
             val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
             val exit = proc.waitFor()
@@ -387,6 +397,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             for (h in ext.headers) {
                 args += "--header"
                 args += target.file(h).absolutePath
+            }
+            // headerDirectory(...) roots -> krapper_gen's wrapper-compile -I set.
+            for (dir in includeDirs) {
+                args += "--include-dir"
+                args += dir
             }
             for (lib in ext.libraries) {
                 args += "-l"
@@ -511,6 +526,40 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         return null to target.rootProject.file(
             "krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe"
         )
+    }
+
+    /**
+     * Find the :cppfrontend release binary and its link task — the SAME two layouts
+     * resolveKrapperGen handles, because a cpp-front-end module can equally be a sibling
+     * project (featuregen/cppfixture in the kplusplus build) or a consumer that pulls
+     * kplusplus in via `includeBuild("../../")` (the standalone v8 example). In the included
+     * case `rootProject.findProject(":cppfrontend")` is null — cppfrontend lives in the OTHER
+     * build — so we resolve its task + binary through `gradle.includedBuilds`.
+     *
+     * cppfrontend is LLVM-gated (`-PenableClang`); when the flag is absent it is in NEITHER
+     * build, so a null binary here means "not enabled". Returns the link task (or null) plus
+     * the binary File; the caller fails fast at execution time if the binary doesn't exist.
+     */
+    private fun resolveCppFrontend(target: Project): Pair<Any?, File> {
+        val relBinary = "cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend"
+        val direct = target.rootProject.findProject(":cppfrontend")
+        if (direct != null) {
+            return direct.tasks.findByName("linkReleaseExecutableKlinker") to
+                direct.layout.buildDirectory
+                    .file("bin/klinker/cppfrontendRelease/cppfrontend").get().asFile
+        }
+        for (included in target.gradle.includedBuilds) {
+            val taskRef = try {
+                included.task(":cppfrontend:linkReleaseExecutableKlinker")
+            } catch (_: Throwable) {
+                null
+            }
+            val binary = File(included.projectDir, relBinary)
+            if (taskRef != null || binary.exists()) {
+                return taskRef to binary
+            }
+        }
+        return null to target.rootProject.file(relBinary)
     }
 
     /**

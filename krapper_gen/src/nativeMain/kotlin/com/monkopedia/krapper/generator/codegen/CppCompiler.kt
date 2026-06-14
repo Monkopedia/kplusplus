@@ -24,8 +24,19 @@ class CppCompiler(
     private val cppStandard: String = "c++14"
 ) {
 
-    fun compile(cppFile: File, header: List<String>, library: List<String>) {
-        val flags = CompileFlags(header, library, linkStatics = true)
+    fun compile(
+        cppFile: File,
+        header: List<String>,
+        library: List<String>,
+        // Extra -I roots from the module's headerDirectory(...); see CompileFlags.
+        extraIncludeDirs: List<String> = emptyList()
+    ) {
+        val flags = CompileFlags(
+            header,
+            library,
+            linkStatics = true,
+            extraIncludeDirs = extraIncludeDirs
+        )
         // The wrapper compile must use the same standard as the libclang parse,
         // or C++17/20 types (std::string_view, char8_t) parse but fail to compile.
         val command = "$compiler -std=$cppStandard -c -fPIE -o ${outputFile.path} " +

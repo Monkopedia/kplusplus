@@ -18,7 +18,12 @@ package com.monkopedia.krapper.generator.codegen
 class CompileFlags(
     private val headers: List<String>,
     libraries: List<String>,
-    linkStatics: Boolean = false
+    linkStatics: Boolean = false,
+    // Extra include dirs from the module's `kplusplus { headerDirectory(...) }` (threaded by
+    // the gradle plugin via krapper_gen's --include-dir). The header files' own parents are
+    // always on -I; these add cross-directory roots so quote-includes in the wrapper compile
+    // resolve the same way the cpp front-end's parse did.
+    private val extraIncludeDirs: List<String> = emptyList()
 ) {
 
     init {
@@ -71,7 +76,8 @@ class CompileFlags(
     val includeDirs: String?
         get() {
             if (headerFiles.isEmpty()) return null
-            return headerFiles.map { it.parent }.toSet().joinToString(" ") { "-I${it.path}" } +
+            val headerParents = headerFiles.map { it.parent.path }
+            return (headerParents + extraIncludeDirs).toSet().joinToString(" ") { "-I$it" } +
                 " -DV8_COMPRESS_POINTERS"
         }
 }
