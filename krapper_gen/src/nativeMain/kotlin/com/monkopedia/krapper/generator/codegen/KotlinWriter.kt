@@ -1454,11 +1454,19 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // `__<argtypes>` suffix from their own parameter types (same convention as
     // NameHandler.uniqueOverloadName). No `_`-prefix fallback here: two constructors
     // with identical arg-type suffixes would be a generator bug, not a user error.
+    //
+    // Base uses the CANONICAL [plainDeclaredName] (not `name`, which routes through the
+    // per-file import-alias `remap`): this is a DECLARATION name, so it must be the
+    // type's own identity, independent of any caller's alias — matching the `_Holder`
+    // factory declaration (~757) and the `class X` token (`named`, via `declaredName`).
+    // The CALL site (constructorMethod, #81/PR #95) already names it canonically via
+    // `plainDeclaredName`, so declaration-name == call-name regardless of alias. Last
+    // declaration-side residual of the #73/#75/#81 remap-hazard family (issue #96).
     private fun constructorFactoryName(
         cls: ResolvedClass,
         paramArgs: List<ResolvedArgument>
     ): String {
-        val base = cls.type.kotlinType.name
+        val base = cls.type.kotlinType.plainDeclaredName
         val ctorCount = cls.children.count { it is ResolvedConstructor }
         if (ctorCount <= 1) return base
         val suffix = paramArgs.joinToString("_") { it.type.typeString }.cleanupName()
@@ -1521,7 +1529,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         needsCCaller = true
         extensionFunction {
             receiver = fqType(MEM_SCOPE)
-            name = cls.type.kotlinType.name
+            // Canonical DECLARATION name (`plainDeclaredName`, ignoring the per-file
+            // import-alias `remap`), matching constructorFactoryName / the `_Holder`
+            // declaration and the canonical CALL site (constructorMethod, #81). A
+            // single-constructor stack class, so no overload suffix. Declaration-name ==
+            // call-name; last declaration-side residual of the #73/#75/#81 family (#96).
+            name = cls.type.kotlinType.plainDeclaredName
             retType = type(ResolvedType.UNIT.copy())
             val args = method.args.subList(1, method.args.size).map {
                 define(it.name, it.type)
