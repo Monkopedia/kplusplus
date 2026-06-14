@@ -30,10 +30,6 @@ repositories {
     mavenCentral()
 }
 
-val cflags = arrayOf<String>("-I/usr/include")
-
-val ldflags = emptyArray<String>()
-
 kotlin {
     // Determine host preset.
     val hostOs = System.getProperty("os.name")
@@ -71,13 +67,6 @@ kotlin {
                 compilerOptions {
                     optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
                 }
-            }
-        }
-        compilations["main"].cinterops {
-            this.create("libclang") {
-                this.defFile = file("clang.def")
-                this.compilerOpts += cflags
-                this.linkerOpts += ldflags
             }
         }
     }

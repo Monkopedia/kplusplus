@@ -15,10 +15,6 @@
  */
 package com.monkopedia.krapper.generator
 
-import clang.CXChildVisitResult
-import clang.CXCursor
-import clang.CXCursorKind
-import clang.clang_visitChildren
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
@@ -49,10 +45,6 @@ import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.sockets.posixFileReadChannel
 import com.monkopedia.ksrpc.sockets.posixFileWriteChannel
 import kotlin.system.exitProcess
-import kotlinx.cinterop.CValue
-import kotlinx.cinterop.StableRef
-import kotlinx.cinterop.asStableRef
-import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -67,19 +59,6 @@ val ErrorPolicy.policy: CodeGenerationPolicy
 
 typealias ErrorPolicy = com.monkopedia.krapper.ErrorPolicy
 typealias ReferencePolicy = com.monkopedia.krapper.ReferencePolicy
-
-/** Which parser front-end produces the parse-output model (#45 brick 2). */
-enum class Frontend {
-    /** The libclang-C reducer: parse --header in-process (the historical path). */
-    LIBCLANG,
-
-    /**
-     * THE HANDOFF: skip the libclang parse and load the WrappedTU from --parsedModel —
-     * the full-fidelity ModelIo JSON emitted by the cppfrontend binary (the front-end
-     * built on kplusplus-generated libclang-cpp bindings).
-     */
-    CPP
-}
 
 class KrapperGen : CliktCommand() {
     val header by option(
@@ -169,58 +148,21 @@ class KrapperGen : CliktCommand() {
             "Fatal / translation-unit-level errors (missing include, unattributable) abort " +
             "regardless."
     ).flag()
-    val dumpParsedModel by option(
-        "--dumpParsedModel",
-        help = "Debug/golden-test flag (#44 brick 7): parse the headers, project the PARSED " +
-            "(pre-resolution, pre-rewrite) WrappedTU through the canonical " +
-            "SerializedElement DTO (:krapper_model ModelSerializer) and write it as JSON " +
-            "to the given path, then EXIT without resolving or generating (parse-only " +
-            "mode). :cppfrontend:goldenCompare diffs this libclang front-end's parse " +
-            "output against the C++-AST front-end's."
-    )
-    val roundTripModel by option(
-        "--roundTripModel",
-        help = "Debug/oracle flag (#45 brick 1): after each parse, serialize the full " +
-            "WrappedTU through the ModelIo round-trip JSON, deserialize it back, and run " +
-            "resolution+generation on the DESERIALIZED model. Output should be " +
-            "byte-identical to a run without the flag — the verification gate for the " +
-            "--frontend=cpp handoff format. Also enabled by KRAPPER_ROUNDTRIP_MODEL=1 " +
-            "in the environment (which reaches service-mode runs too)."
-    ).flag()
-    val frontend by option(
-        "--frontend",
-        help = "Which front-end produces the parse-output model (#45 brick 2): " +
-            "'libclang' (default — parse --header in-process with the libclang-C " +
-            "reducer) or 'cpp' (SKIP the libclang parse and load the WrappedTU from " +
-            "--parsedModel, the full-fidelity ModelIo JSON emitted by the cppfrontend " +
-            "binary). With cpp, --header is NOT parsed — it still supplies the " +
-            "#include list for the generated C++ wrapper. --instantiate is not yet " +
-            "supported with cpp (instantiation forcing re-parses synthesized headers " +
-            "through libclang)."
-    ).enum<Frontend>().default(Frontend.LIBCLANG)
     val parsedModel by option(
         "--parsedModel",
-        help = "Path to the ModelIo JSON WrappedTU to load when --frontend=cpp " +
-            "(required in that mode; ignored otherwise)."
+        help = "REQUIRED. Path to the ModelIo JSON WrappedTU to load — the parse-output " +
+            "model the cppfrontend binary emitted from the Clang C++ AST. krapper_gen has " +
+            "a single front-end: it consumes this model (the in-tree libclang-C reducer was " +
+            "removed in flip B5, #47). --header still supplies the #include list for the " +
+            "generated C++ wrapper but is NOT parsed in-process."
     )
     val forcingModel by option(
         "--forcingModel",
-        help = "Instantiation forcing on the cpp path (#45 brick 3): " +
-            "'<spec>=<path>' maps an --instantiate spec (e.g. 'std::vector<Item*>') to " +
-            "the ModelIo JSON of its FORCING-PARSE WrappedTU — the tree the libclang " +
-            "path gets by synthesizing a KrapperForce_* header and re-parsing it, here " +
-            "produced by the cppfrontend binary instead. Repeatable; with --frontend=cpp " +
-            "every --instantiate spec must have a matching entry. Ignored otherwise."
+        help = "Instantiation forcing: '<spec>=<path>' maps an --instantiate spec (e.g. " +
+            "'std::vector<Item*>') to the ModelIo JSON of its FORCING-PARSE WrappedTU — the " +
+            "tree produced by the cppfrontend binary synthesizing a KrapperForce_* header " +
+            "and parsing it. Repeatable; every --instantiate spec must have a matching entry."
     ).multiple()
-    val dumpModels by option(
-        "--dumpModels",
-        help = "Debug/oracle flag (#45 brick 3, libclang path): write every parse's " +
-            "post-reduce WrappedTU (the main header parse AND each instantiation's " +
-            "forcing re-parse) as ModelIo JSON into the given directory " +
-            "(model_<n>_<header>.json) and continue the run. The files are directly " +
-            "consumable by --frontend=cpp --parsedModel/--forcingModel, which is how the " +
-            "file-handoff instantiation flow is proven against the in-process run."
-    )
     val fixupFile by option(
         "--fixup-file",
         help = "Path to a JSON file containing a list of Fixup directives (see Fixup.kt). " +
@@ -233,39 +175,27 @@ class KrapperGen : CliktCommand() {
         if (serviceMode) {
             return runService()
         }
-        // Golden-test dump (#44 brick 7): arm the parse-only hook in Parsing.kt. The
-        // process exits inside parseHeader right after the JSON is written, so the
-        // resolution/generation flow below never runs with the flag set.
-        dumpParsedModelPath = dumpParsedModel
-        if (roundTripModel) roundTripParsedModel = true
-        // THE HANDOFF (#45 brick 2): arm the cpp-front-end hook in Parsing.kt. The
-        // pipeline below is otherwise unchanged — parseHeader returns a ParsedResolver
-        // over the LOADED tree instead of a libclang parse, and resolution+codegen run
-        // exactly as the --roundTripModel oracle proved they can on a decoded model.
-        dumpModelsDir = dumpModels
-        if (frontend == Frontend.CPP) {
-            cppParsedModelPath = parsedModel
-                ?: error("--frontend=cpp requires --parsedModel <path>")
-            // #45 brick 3: --instantiate is supported on the cpp path when every spec has
-            // a forcing model (the cppfrontend-produced tree replacing the libclang
-            // forcing re-parse). Keys are normalized through parseInstantiation so the
-            // --forcingModel spelling matches requestInstantiation's target string
-            // regardless of arg spacing ('std::vector<Item *>' vs 'std::vector<Item*>').
-            cppForcingModelPaths = forcingModel.associate { entry ->
-                val idx = entry.indexOf('=')
-                require(idx > 0) { "--forcingModel must be '<spec>=<path>', got: $entry" }
-                val req = parseInstantiation(entry.substring(0, idx))
-                "${req.base}<${req.args.joinToString(", ")}>" to entry.substring(idx + 1)
-            }
-            val missing = instantiate.map { parseInstantiation(it) }
-                .map { "${it.base}<${it.args.joinToString(", ")}>" }
-                .filter { it !in cppForcingModelPaths }
-            require(missing.isEmpty()) {
-                "--frontend=cpp requires a --forcingModel '<spec>=<path>' for every " +
-                    "--instantiate spec; missing: $missing (instantiation forcing on " +
-                    "this path loads the cppfrontend-produced forcing-parse model " +
-                    "instead of re-parsing through libclang)."
-            }
+        // krapper_gen's SINGLE front-end (flip B5, #47): arm the cpp model-load hook in
+        // Parsing.kt. The in-tree libclang-C reducer was deleted, so a parse-output model
+        // is mandatory — parseHeader loads the WrappedTU from --parsedModel and the
+        // resolution+codegen pipeline runs over it.
+        cppParsedModelPath = parsedModel
+            ?: error("krapper_gen requires --parsedModel <path> (the cppfrontend-produced model)")
+        // Keys are normalized through parseInstantiation so the --forcingModel spelling
+        // matches requestInstantiation's target string regardless of arg spacing
+        // ('std::vector<Item *>' vs 'std::vector<Item*>').
+        cppForcingModelPaths = forcingModel.associate { entry ->
+            val idx = entry.indexOf('=')
+            require(idx > 0) { "--forcingModel must be '<spec>=<path>', got: $entry" }
+            val req = parseInstantiation(entry.substring(0, idx))
+            "${req.base}<${req.args.joinToString(", ")}>" to entry.substring(idx + 1)
+        }
+        val missing = instantiate.map { parseInstantiation(it) }
+            .map { "${it.base}<${it.args.joinToString(", ")}>" }
+            .filter { it !in cppForcingModelPaths }
+        require(missing.isEmpty()) {
+            "Every --instantiate spec requires a matching --forcingModel '<spec>=<path>' " +
+                "(the cppfrontend-produced forcing-parse model); missing: $missing"
         }
         runBlocking {
             val service = KrapperServiceImpl()
@@ -334,43 +264,10 @@ class KrapperGen : CliktCommand() {
                 // directives (see kplusplus { fixup { ... } } in the compiler
                 // gradle subplugin). The block remains so the same code path
                 // serves both the legacy CLI invocation and the new sync flow.
-//            for (file in header) {
-//                val tu =
-//                    index.parseTranslationUnit(file, args, null) ?: error("Failed to parse $file")
-//                tu.printDiagnostics()
-//                defer {
-//                    tu.dispose()
-//                }
-//                        val info = Utils.CursorTreeInfo(tu.cursor)
-//                        Log.i("Writing ${tu.cursor.usr.toKString()}")
-//                        File("/tmp/full_tree.json").writeText(Json.encodeToString(info))
-//                tu.cursor.filterChildrenRecursive {
-//                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("OtherClass")) {
-//                        val info = Utils.CursorTreeInfo(it)
-//                        Log.i("Writing ${it.usr.toKString()}")
-//                        File("/tmp/testlib_otherclass.json").writeText(Json.encodeToString(info))
-//                    }
-//                    if (it.kind == CXCursorKind.CXCursor_ClassDecl && it.fullyQualified.contains("TestClass")) {
-//                        val info = Utils.CursorTreeInfo(it)
-//                        Log.i("Writing ${it.usr.toKString()}")
-//                        File("/tmp/testlib_testClass.json").writeText(Json.encodeToString(info))
-//                    }
-//                    if (it.kind == CXCursorKind.CXCursor_ClassTemplate && it.fullyQualified.contains("basic_string") && !it.fullyQualified.contains("basic_stringbuf")) {
-//                        val info = Utils.CursorTreeInfo(it)
-//                        Log.i("Writing ${it.usr.toKString()}")
-//                        File("/tmp/basic_string.json").writeText(Json.encodeToString(info))
-//                    }
-//                    false
-//                }
-// //                tu.cursor.filterChildren { true }.forEach {
-// //                    val cursor = KXCursor.generate(tu.cursor)
-// //                    Log.i("Cursor $cursor ${cursor?.children?.size} ${tu.cursor.kind}")
-// //                }
-//            }
                 indexService.writeTo(output ?: getcwd())
             } finally {
-                // Always release the index and delete the run's throwaway temp dir, even
-                // when resolution/writeTo throws — so forcing-header intermediates never
+                // Always delete the run's throwaway temp dir, even when
+                // resolution/writeTo throws — so forcing-header intermediates never
                 // leak into $TMPDIR.
                 indexService.close()
             }
@@ -490,114 +387,3 @@ private fun parseInstantiation(spec: String): InstantiationRequest {
     val args = argStr.split(',').map { it.trim() }.filter { it.isNotEmpty() }
     return InstantiationRequest(base, args)
 }
-
-private val CValue<CXCursor>.templatedName: String
-    get() {
-//        if (numTemplateArguments != 0) {
-//            return spelling.toKString() + "<" + (0 until numTemplateArguments).joinToString(",") {
-//                when (getTemplateArgumentKind(it.toUInt())) {
-//                    CXTemplateArgumentKind_Null -> "__NULL__"
-//                    CXTemplateArgumentKind_Type -> getTemplateArgumentType(it.toUInt()).spelling.toKString() ?: ""
-//                    CXTemplateArgumentKind_Declaration -> "__DECL__"
-//                    CXTemplateArgumentKind_NullPtr -> "__NULL_PTR__"
-//                    CXTemplateArgumentKind_Integral -> "__INTEGRAL__"
-//                    CXTemplateArgumentKind_Template -> "__TYPE__"
-//                    CXTemplateArgumentKind_TemplateExpansion -> "__TEMPLATE_EXPANSION__"
-//                    CXTemplateArgumentKind_Expression -> "__EXPRESSION__"
-//                    CXTemplateArgumentKind_Pack -> "__PACK__"
-//                    CXTemplateArgumentKind_Invalid -> "__INVALID__"
-//                }
-//            } + ">"
-//        }
-        return spelling.toKString() ?: ""
-    }
-val CValue<CXCursor>?.fullyQualified: String
-    get() =
-        if (this == null || this == CXCursor.NULL) {
-            ""
-        } else if (kind == CXCursorKind.CXCursor_TranslationUnit) {
-            ""
-        } else {
-            val res = semanticParent.fullyQualified
-            if (res.isNotEmpty()) {
-                "$res::$templatedName"
-            } else {
-                templatedName ?: ""
-            }
-        }
-
-typealias ChildVisitor = (child: CValue<CXCursor>, parent: CValue<CXCursor>) -> Unit
-
-val recurseVisitor =
-    staticCFunction {
-            child: CValue<CXCursor>,
-            parent: CValue<CXCursor>,
-            children: clang.CXClientData?
-        ->
-        children!!.asStableRef<ChildVisitor>().get().invoke(child, parent)
-        CXChildVisitResult.CXChildVisit_Recurse
-    }
-
-val visitor =
-    staticCFunction {
-            child: CValue<CXCursor>,
-            _: CValue<CXCursor>,
-            children: clang.CXClientData?
-        ->
-        children!!.asStableRef<(CValue<CXCursor>) -> Unit>().get()
-            .invoke(child)
-        CXChildVisitResult.CXChildVisit_Continue
-    }
-
-inline fun CValue<CXCursor>.forEachRecursive(noinline childHandler: ChildVisitor) {
-    val ptr = StableRef.create(childHandler)
-    clang_visitChildren(this, recurseVisitor, ptr.asCPointer())
-}
-
-inline fun CValue<CXCursor>.forEach(noinline childHandler: (CValue<CXCursor>) -> Unit) {
-    val ptr = StableRef.create(childHandler)
-    clang_visitChildren(this, visitor, ptr.asCPointer())
-}
-
-inline fun CValue<CXCursor>.filterChildrenRecursive(
-    crossinline filter: (CValue<CXCursor>) -> Boolean
-): List<CValue<CXCursor>> = mutableListOf<CValue<CXCursor>>().also { list ->
-    forEachRecursive { child, _ ->
-        if (filter(child)) {
-            list.add(child)
-        }
-    }
-}
-
-inline fun CValue<CXCursor>.filterChildren(
-    crossinline filter: (CValue<CXCursor>) -> Boolean
-): List<CValue<CXCursor>> = mutableListOf<CValue<CXCursor>>().also { list ->
-    forEach {
-        if (filter(it)) {
-            list.add(it)
-        }
-    }
-}
-
-inline fun <T> CValue<CXCursor>.mapChildren(crossinline filter: (CValue<CXCursor>) -> T): List<T> =
-    mutableListOf<T>().also { list ->
-        forEach {
-            list.add(filter(it))
-        }
-    }
-
-val CValue<CXCursor>.allChildren: Collection<CValue<CXCursor>>
-    get() {
-        return mutableListOf<CValue<CXCursor>>().also { list ->
-            forEachRecursive { child, _ ->
-                list.add(child)
-            }
-        }
-    }
-
-val CValue<CXCursor>.children: Collection<CValue<CXCursor>>
-    get() {
-        return mutableListOf<CValue<CXCursor>>().also { list ->
-            forEach(list::add)
-        }
-    }

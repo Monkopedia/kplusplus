@@ -52,8 +52,6 @@ import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
-import kotlinx.cinterop.Arena
-import kotlinx.coroutines.runBlocking
 
 // A fuller identity for a resolved method than its (possibly-null, possibly-colliding)
 // uniqueCName: the C++ qualified name + simple name + full argument-type signature, plus
@@ -66,28 +64,18 @@ private val ResolvedMethod.forcingIdentity: String
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
     IndexedService {
-    private val scope = Arena()
-    private val index = createIndex(0, 0) ?: error("Failed to create Index")
     private var classes: List<ResolvedElement> = emptyList()
     private val mappings = mutableListOf<MappingService>()
 
-    // Forcing headers synthesized by requestInstantiation to make libclang instantiate a
-    // template specialization. Keyed forceName -> file contents. They are PARSED from a
-    // per-run temp dir (hermetic, cleaned in close()) and then re-materialized into the
+    // Forcing headers recorded by requestInstantiation for the specializations the cpp
+    // front-end forced. Keyed forceName -> file contents. They are re-materialized into the
     // output dir by writeTo, so the generated wrapper #includes them by a stable, relative,
-    // self-contained path (no /tmp leak, deterministic across runs).
+    // self-contained path (deterministic across runs).
     private val forcingHeaders = linkedMapOf<String, String>()
 
     // The output-relative paths the generated .cc/.h should #include for the forcing headers.
     // Populated by writeTo once the output dir is known.
     private val syntheticHeaders = mutableListOf<String>()
-
-    // Process-unique scratch dir for parsing the forcing headers. Created lazily on the
-    // first instantiation (a run with no --instantiate touches nothing) and removed in
-    // close(). Per-run unique (pid + counter) so concurrent runs never clobber each other.
-    private var tempDir: File? = null
-    private fun tempDir(): File =
-        tempDir ?: File.createTempDir("krapper_inst").also { tempDir = it }
 
     // What the run was explicitly ASKED to bind: the --only allowlist entries plus each
     // --instantiate target. The drop-ledger report diffs this against what actually
@@ -105,39 +93,14 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     private val forcedContainerKeys = mutableSetOf<String>()
 
     init {
-        scope.defer {
-            index.dispose()
-        }
         // Start each generation run from clean process-scoped state so its output and
-        // report reflect only this run: the drop ledger (shared with any prior run), the
-        // GenerationContext (the WrappedType intern cache + the rootPackage), and the
-        // parse memo (the cursor->element interning map). All must be reset BEFORE any
-        // resolution (requestInstantiation / filterAndResolve):
-        // a type's Kotlin package is baked into its ResolvedKotlinType at resolve time,
-        // so rooting it later (e.g. in writeTo) would be too late.
+        // report reflect only this run: the drop ledger (shared with any prior run) and the
+        // GenerationContext (the WrappedType intern cache + the rootPackage). Must be reset
+        // BEFORE any resolution (requestInstantiation / filterAndResolve): a type's Kotlin
+        // package is baked into its ResolvedKotlinType at resolve time, so rooting it later
+        // (e.g. in writeTo) would be too late.
         DropLedger.reset()
         GenerationContext.reset(config.rootPackage)
-        // The libclang-path cursor->element memo: cleared so a reused service process
-        // (kplusplusSync) never builds a later run on a prior run's resolved/mutated
-        // elements (#11 hermeticity).
-        WrappedElement.resetElementMemo()
-    }
-
-    private val includePaths = generateIncludes(config.compiler)
-
-    // Clang parse args for libclang. Built per-call so the C++ standard
-    // (config.cppStandard) and any request-supplied header directories both flow
-    // through — previously a dead field defaulted to c++14, blocking C++17 types.
-    private fun parseArgs(extraIncludes: List<String>): Array<String> =
-        arrayOf("-xc++", "--std=${config.cppStandard}") +
-            (includePaths + extraIncludes).map { "-I$it" }.toTypedArray()
-
-    init {
-        if (config.debug) {
-            runBlocking {
-                Log.i("Args: ${parseArgs(request.headerDirectories).toList()}")
-            }
-        }
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {
@@ -146,15 +109,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         if (filter is AllowListFilter) {
             requested.addAll(filter.qualifiedNames)
         }
-        Log.i("Parsing headers: ${request.headers}")
-        val resolver = scope.parseHeader(
-            index,
-            request.headers,
-            includePaths + request.headerDirectories,
-            args = parseArgs(request.headerDirectories),
-            debug = config.debug,
-            strictDiagnostics = config.strictDiagnostics
-        )
+        Log.i("Loading parsed model for headers: ${request.headers}")
+        val resolver = parseHeader()
         val initialClasses = resolver.findClasses(filter.wrapperFilter())
         Log.i("Found ${initialClasses.size} classes to resolve")
         if (config.debug) {
@@ -182,32 +138,23 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         val forceName = ForcingHeader.forceName(target)
         val forcingContent = ForcingHeader.contentFor(target, request.headers)
         forcingHeaders[forceName] = forcingContent
-        // #45 brick 3: with --frontend=cpp the forcing-parse tree was already produced by
-        // the cppfrontend binary (which synthesizes the SAME forcing header and parses it
-        // with the Clang C++ AST); load it instead of parsing through libclang. The
-        // forcing header content above is still recorded either way: writeTo
-        // re-materializes it so the generated wrapper can #include the specialization's
-        // declaration. Everything downstream of obtaining the resolver — the scoping,
-        // resolveForcing's 3-pass dance, cumulative forcedContainerKeys, dedup — is the
-        // SAME code on both paths.
+        // The forcing-parse tree is produced by the cppfrontend binary (which synthesizes
+        // the SAME forcing header and parses it with the Clang C++ AST); load it. The
+        // forcing header content above is still recorded: writeTo re-materializes it so the
+        // generated wrapper can #include the specialization's declaration. Everything
+        // downstream of obtaining the resolver — the scoping, resolveForcing's 3-pass dance,
+        // cumulative forcedContainerKeys, dedup — is unchanged. There is no libclang fallback
+        // (the in-tree reducer was removed in flip B5, #47): an instantiation with no forcing
+        // model is a misconfiguration and fails loudly.
         val resolver = cppForcingModelPaths[target]?.let { path ->
-            Log.i("cpp front-end forcing handoff: loading $target model from $path")
+            Log.i("cpp front-end forcing: loading $target model from $path")
             loadForcingModel(path)
-        } ?: run {
-            // Parse from a per-run temp file (cleaned in close()); the same header is
-            // re-materialized into the output dir by writeTo for the generated wrapper.
-            val tmpFile = File(tempDir(), "$forceName.h").path
-            File(tmpFile).writeText(forcingContent)
-            Log.i("Forcing instantiation of $target via $tmpFile")
-            scope.parseHeader(
-                index,
-                listOf(tmpFile),
-                includePaths + request.headerDirectories,
-                args = parseArgs(request.headerDirectories),
-                debug = config.debug,
-                strictDiagnostics = config.strictDiagnostics
-            )
-        }
+        } ?: error(
+            "No forcing model for instantiation '$target'. krapper_gen has no in-process " +
+                "parse front-end (libclang-C reducer removed in flip B5, #47); every " +
+                "--instantiate spec needs a matching --forcingModel '<spec>=<path>' " +
+                "(produced by the cppfrontend binary)."
+        )
         // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
         // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the
         // re-parsed TU — against a large library that is the whole transitive surface
@@ -505,12 +452,5 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun close() {
         super.close()
-        // Throwaway forcing-header intermediates — written to a per-run temp dir purely so
-        // libclang can parse them; never part of generated output, so always safe to delete.
-        // Cleared here so they don't accumulate in $TMPDIR across runs.
-        tempDir?.takeIf { it.exists() }?.rmR()
-        // index is disposed by the Arena's deferred cleanup in scope.clear(); disposing it
-        // here too would double-free (clang_disposeIndex on a freed handle → abort).
-        scope.clear()
     }
 }
