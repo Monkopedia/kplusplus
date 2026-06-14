@@ -79,8 +79,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             }
             val krappedDir = krappedDirFor(target)
             val manifestFile = File(krappedDir, "requested.txt")
-            val generatedFile = File(krappedDir, "generated.txt")
-            val fixupFile = File(krappedDir, "fixups.json")
             val moduleName = target.name
             // Declare up-to-date inputs/outputs so Gradle can (a) order this task
             // ahead of the native compile that consumes krapped/ (see
@@ -122,177 +120,38 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
             }
             it.doLast {
-                // Phase E step 3 (#47, flip brick B1, Path A): stage-0 seed anchor. Build the
-                // module's bindings from its COMMITTED seed — no krapper_gen, no libclang
-                // parse. The libclang body below (and its kexe-existence guard) is skipped.
+                // flip B5 (#47): krapper_gen's in-tree libclang front-end was DELETED, so
+                // every binding-generating module must declare HOW it produces bindings via
+                // `kpp.frontend.<module>`:
+                //   = seed -> recompile the module's COMMITTED stage-0 seed (no krapper_gen,
+                //             no parse — see runSeedSync); or
+                //   = cpp  -> the LLVM cppfrontend parses the header into ModelIo JSON and
+                //             krapper_gen consumes it (--frontend=cpp — see runCppFrontendSync).
+                // A module with NEITHER set has no parse path (the libclang reducer is gone),
+                // so fail clearly instead of silently doing nothing.
                 if (seedMode) {
                     runSeedSync(target, ext, moduleName, krappedDir)
                     return@doLast
                 }
-                if (!kexe.exists()) {
-                    throw GradleException(
-                        "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
-                            ":krapper_gen:linkDebugExecutableNative in the kplusplus included " +
-                            "build, or check the includeBuild(\"...\") path in your " +
-                            "settings.gradle.kts."
-                    )
-                }
-                // Phase E step 3 (#47, flip brick B2): when this module is flipped to the
-                // cpp front-end (-Pkpp.frontend.<module>=cpp), GENERATE its bindings from
-                // the module's OWN kplusplus{} config (its header + instantiation worklist)
-                // through the generic cpp pipeline — cppfrontend parse -> ModelIo JSON ->
-                // krapper_gen --frontend=cpp — into build/krapped-cpp, then return. The
-                // libclang body below is skipped. Fully additive + gated: absent the
-                // property this never fires and the default path is byte-for-byte unchanged.
                 if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
+                    if (!kexe.exists()) {
+                        throw GradleException(
+                            "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
+                                ":krapper_gen:linkDebugExecutableNative in the kplusplus " +
+                                "included build, or check the includeBuild(\"...\") path in " +
+                                "your settings.gradle.kts."
+                        )
+                    }
                     runCppFrontendSync(target, ext, moduleName, krappedDir, kexe)
                     return@doLast
                 }
-                // The v2 extension (created in apply(), captured above) is
-                // optional — projects with no header import and no fixups
-                // still work via the existing pure-instantiation flow.
-                val hasHeaders = ext?.headers?.isNotEmpty() == true
-                val seededInstantiations = ext?.instantiations.orEmpty()
-                val hasManifest = manifestFile.exists()
-                if (!hasManifest && !hasHeaders && seededInstantiations.isEmpty()) {
-                    println(
-                        "kplusplusSync: no manifest at $manifestFile and no kplusplus " +
-                            "{ header(...) } configured — nothing to do yet. Run a build " +
-                            "first to let the compiler tell us what to generate, or add an " +
-                            "import block."
-                    )
-                    return@doLast
-                }
-                val manifestSpecs = if (hasManifest) {
-                    manifestFile.readLines()
-                        .map { line -> line.trim() }
-                        .filter { line -> line.isNotEmpty() }
-                } else {
-                    emptyList()
-                }
-                // Union the compiler-written manifest with build-script-seeded
-                // instantiations (the bootstrap path for user templates).
-                //
-                // Sort for a deterministic instantiation order. krapper_gen carries
-                // cross-instantiation state within a single run, so the order the
-                // specs are forced in can change the result: `std::unordered_map`'s
-                // `value_type`/`mapped_type` member typedefs (which libclang collapses
-                // to a bare template parameter) poison the identically-spelled
-                // typedefs of a later `std::map`, dropping map's at/operator[]/count.
-                // Sorting makes the order deterministic — and alphabetical order happens
-                // to place `std::map` before `std::unordered_map`, so both resolve
-                // regardless of which test seeded the manifest first. This is a workaround,
-                // not a guarantee: a future container could need explicit ordering. The
-                // underlying order-sensitivity is a deeper krapper_gen issue tracked separately.
-                val requested = (manifestSpecs + seededInstantiations).distinct().sorted()
-                val alreadyGenerated = if (generatedFile.exists()) {
-                    generatedFile.readLines()
-                        .map { line -> line.trim() }
-                        .filter { line -> line.isNotEmpty() }
-                        .toMutableSet()
-                } else {
-                    mutableSetOf()
-                }
-                val newRequests = requested.filter { spec -> spec !in alreadyGenerated }
-                // Force regeneration whenever a header set is configured —
-                // there's no per-method tracking for header-driven imports
-                // and skipping would leave a stale wrapper. The skip
-                // optimization only applies to the pure-instantiation path.
-                if (!hasHeaders && newRequests.isEmpty() && requested.isNotEmpty()) {
-                    println(
-                        "kplusplusSync: all ${requested.size} requested instantiations " +
-                            "already generated."
-                    )
-                    return@doLast
-                }
-                // The kexe regenerates the whole output dir each run, so always pass
-                // the full set of requested instantiations — otherwise a sync that
-                // adds one new spec would wipe the previously-generated bindings.
-                krappedDir.mkdirs()
-                val compilerPath = ext?.compiler ?: resolveDefaultCompiler()
-                val args = mutableListOf(
-                    kexe.absolutePath,
-                    moduleName,
-                    "-r", (ext?.referencePolicy ?: "INCLUDE_MISSING"),
-                    "-p", "krapper.$moduleName",
-                    "-c", compilerPath,
-                    "-o", krappedDir.absolutePath
+                throw GradleException(
+                    "kplusplusSync[$moduleName]: the in-tree libclang front-end was removed " +
+                        "in flip B5 (#47) — krapper_gen no longer parses headers in-process. " +
+                        "Set kpp.frontend.$moduleName=cpp (generate via the LLVM cppfrontend; " +
+                        "build with -PenableClang or -PllvmConfig=<path>) or " +
+                        "kpp.frontend.$moduleName=seed (recompile the committed stage-0 seed)."
                 )
-                ext?.cppStandard?.let { std ->
-                    args += "--std"
-                    args += std
-                }
-                ext?.rootPackage?.let { rootPackage ->
-                    args += "--root-package"
-                    args += rootPackage
-                }
-                for (spec in requested) {
-                    args += "--instantiate"
-                    args += spec
-                }
-                if (ext != null) {
-                    // Scoped-import allowlist (--only / --only-file). When set, only these
-                    // classes are fully bound; everything else falls to referencePolicy.
-                    // Essential for slicing a large library (Clang/LLVM) — see KPlusPlusExtension.
-                    // Pass each entry as its OWN `--only <entry>` (the CLI option is
-                    // .multiple()). Comma-joining them into a single arg would corrupt a
-                    // templated entry like `std::map<int, int>`: the CLI splits --only on
-                    // `,`, so the entry would be torn into `std::map<int` and ` int>`.
-                    for (entry in ext.only) {
-                        args += "--only"
-                        args += entry
-                    }
-                    ext.onlyFile?.let { onlyFilePath ->
-                        args += "--only-file"
-                        args += target.file(onlyFilePath).absolutePath
-                    }
-                    for (headerPath in ext.headers) {
-                        args += "--header"
-                        args += target.file(headerPath).absolutePath
-                    }
-                    // headerDirectories are forwarded by adding files in those
-                    // dirs via -I implicitly through IndexRequest; krapper_gen
-                    // computes headerDirectories from each --header path, so
-                    // an explicit user-supplied include dir works by being
-                    // the parent of a --header entry. For now we also pass
-                    // each library through -l.
-                    for (libPath in ext.libraries) {
-                        args += "-l"
-                        args += target.file(libPath).absolutePath
-                    }
-                    if (ext.fixups.isNotEmpty()) {
-                        fixupFile.writeText(ext.fixups.toJsonArray())
-                        args += "--fixup-file"
-                        args += fixupFile.absolutePath
-                    } else if (fixupFile.exists()) {
-                        // Stale fixup file from a previous configuration —
-                        // delete so krapper_gen doesn't accidentally apply
-                        // old fixups against a now-empty config.
-                        fixupFile.delete()
-                    }
-                }
-                val summary = buildString {
-                    append("kplusplusSync: ")
-                    if (hasHeaders) append("headers=${ext.headers.size} ")
-                    if (requested.isNotEmpty()) {
-                        append("regenerating ${requested.size} instantiation(s): ")
-                        append(requested.joinToString(", "))
-                    } else {
-                        append("(no instantiations requested)")
-                    }
-                }
-                println(summary)
-                val proc = ProcessBuilder(args).inheritIO().start()
-                val exit = proc.waitFor()
-                if (exit != 0) {
-                    throw GradleException("krapper_gen failed: exit $exit")
-                }
-                if (newRequests.isNotEmpty()) {
-                    alreadyGenerated.addAll(newRequests)
-                    generatedFile.writeText(
-                        alreadyGenerated.sorted().joinToString("\n") + "\n"
-                    )
-                }
             }
         }
     }

@@ -25,7 +25,16 @@ include(":featuregen")
 // host won't have, so it is OFF by default and never configured on an LLVM-absent box.
 // Opt in with `-PenableClang` (or set `enableClang=true`); the modules also auto-enable
 // when an explicit toolchain is pointed at via `-PllvmConfig=<path-to-llvm-config>`.
-// Default OFF keeps `./gradlew` green everywhere.
+//
+// LLVM-MANDATORY (flip B5, #47): krapper_gen's in-tree libclang-C reducer was DELETED, so
+// the only way to PARSE a header into bindings is the LLVM cppfrontend (-Pkpp.frontend.
+// <module>=cpp). The default-build cpp consumers (:featuregen, :cppfixture) therefore now
+// REQUIRE this flag — without it :cppfrontend is not in the build and their kplusplusSync
+// fails fast with an actionable "build with -PenableClang" message (runCppFrontendSync).
+// The flag stays opt-in (not default-ON) only so the LLVM-FREE modules — :krapper_gen
+// (now a pure ModelIo consumer), :krapper_model, :plugin — and the committed-seed modules
+// (:cppfrontend/:clangwalk/:slice, kpp.frontend=seed: a plain C++ recompile, no parse)
+// still build/test on a box without an LLVM toolchain.
 //
 // #11(b) — toolchain probe hardening: when the modules ARE enabled, the LLVM toolchain
 // is PROBED ONCE here and the discovered values (major version + libdir) are threaded to
