@@ -2552,9 +2552,18 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         memScope: Symbol
     ): Symbol = Call(constructorMethod(type), ptr, memScope)
 
+    // CALL the generated `MemScope.<Type>(...)` CONSTRUCTOR factory by its canonical
+    // DECLARED name (`plainDeclaredName`, ignoring the per-file import-alias `remap`),
+    // matching the factory's declaration. The factory is a generated SIBLING function,
+    // not an imported type reference: a remote calling file that aliased `type` via an
+    // import collision would, through `plainName`, emit `<Alias>(...)` — an undeclared
+    // symbol, since the factory is declared under the canonical name regardless of the
+    // caller's alias. Declaration-name == call-name; neither follows the alias. This is
+    // the constructor-factory sibling of the `_Holder` call fix (#75) and the enum/class
+    // declaration fixes (#73), completing the #73/#75/#81 remap-hazard family.
     private fun constructorMethod(type: ResolvedKotlinType) = extensionMethod(
         type.pkg,
-        type.plainName
+        type.plainDeclaredName
     )
 
     private fun KotlinCodeBuilder.generateStringReturn(call: Symbol, free: Boolean = true) {
