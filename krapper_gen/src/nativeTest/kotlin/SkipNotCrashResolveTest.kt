@@ -57,7 +57,10 @@ class SkipNotCrashResolveTest {
     private fun intType() = WrappedType("int")
 
     /** A namespaced class wired into a fresh [WrappedTU], ready for resolve. */
-    private fun classInTu(name: String, build: WrappedClass.() -> Unit): Pair<WrappedTU, WrappedClass> {
+    private fun classInTu(
+        name: String,
+        build: WrappedClass.() -> Unit
+    ): Pair<WrappedTU, WrappedClass> {
         val tu = WrappedTU()
         val ns = WrappedNamespace("Skip").also {
             tu.addChild(it)
@@ -139,9 +142,11 @@ class SkipNotCrashResolveTest {
     fun fully_bindable_class_records_no_drops() {
         val (tu, _) = classInTu("Clean") {
             addChild(method("value", intType(), isConst = true))
-            addChild(method("scaled", intType()).also {
-                it.addChild(WrappedArgument("scale", intType()))
-            })
+            addChild(
+                method("scaled", intType()).also {
+                    it.addChild(WrappedArgument("scale", intType()))
+                }
+            )
         }
         val resolved = resolve(tu)
 
