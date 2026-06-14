@@ -126,6 +126,12 @@ class SkipNotCrashResolveTest {
             drop.reason.isNotBlank(),
             "every drop must carry a reason: $drop"
         )
+        // hasDrops() is exactly the predicate the opt-in --fail-on-drop gate reads
+        // (IndexedServiceImpl.reportDrops): a dropped symbol makes it true.
+        assertTrue(
+            DropLedger.hasDrops(),
+            "a dropped symbol must make --fail-on-drop's hasDrops() gate fire"
+        )
     }
 
     // The ledger does not false-positive: a fully-bindable class drops nothing.
@@ -147,6 +153,10 @@ class SkipNotCrashResolveTest {
             emptyList(),
             DropLedger.drops,
             "a fully-bindable class must drop nothing: ${DropLedger.drops}"
+        )
+        assertFalse(
+            DropLedger.hasDrops(),
+            "a clean run must leave --fail-on-drop's hasDrops() gate false"
         )
     }
 
