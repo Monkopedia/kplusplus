@@ -319,17 +319,13 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
 // full decl/class/member contract — with every type decoded STRUCTURALLY from the QualType
 // tree (TypeBuilder.kt), template declarations as WrappedTemplate, and enums as
 // WrappedEnumType leaves — and self-check each constructed shape against the model.
-// Brick 7 adds two golden-test modes (see GoldenCompare.kt):
+// Brick 7's golden-emit mode (see CppFrontend.kt --golden-emit below):
 //  --golden-emit <dir>: write the fixture (for krapper_gen to parse the SAME bytes) and
-//    this front-end's canonical-DTO JSON, then exit (self-checks stay on the default run).
-//  --golden-compare <cpp.json> <libclang.json>: structurally diff the two front-ends'
-//    dumps under the documented normalizer ledger; non-zero exit on divergence.
+//    this front-end's handoff JSON, then exit (self-checks stay on the default run).
+// The historical --golden-compare mode (structural diff vs krapper_gen's libclang-C
+// reducer) was removed in #92: the reducer was deleted in the self-hosting flip (B5, #88),
+// so there is no second front-end to diff against.
 fun main(args: Array<String>): Unit = memScoped {
-    if (args.firstOrNull() == "--golden-compare") {
-        val cpp = args.getOrNull(1) ?: fail("--golden-compare <cpp.json> <libclang.json>")
-        val libclang = args.getOrNull(2) ?: fail("--golden-compare <cpp.json> <libclang.json>")
-        goldenCompare(cpp, libclang)
-    }
     if (args.firstOrNull() == "--handoff-emit") {
         val dir = args.getOrNull(1) ?: fail("--handoff-emit <dir>")
         handoffEmit(dir)
@@ -1163,11 +1159,12 @@ private fun MemScope.handoffEmit(dir: String) {
 }
 
 /**
- * Phase D entry (#46) — FEATUREGEN PARITY EMIT: the cpp front-end's half of
- * :cppfrontend:featuregenParity, generalizing handoffEmit from the fixed bag fixture to
- * an ARBITRARY user header + instantiation specs (featuregen's strings_feature.h + its
- * 17-spec worklist). One invocation per payload, so a crash on one spec's parse never
- * takes the others down (the gradle task records it as a per-spec emit failure):
+ * --parity-emit (#46) — the cpp front-end's MODEL EMIT for the production sync. The
+ * kplusplus gradle plugin's kplusplusSync drives this for ANY module flipped to the cpp
+ * front-end: generalizing handoffEmit from the fixed bag fixture to an ARBITRARY user
+ * header + instantiation specs (e.g. featuregen's strings_feature.h + its worklist). One
+ * invocation per payload, so a crash on one spec's parse never takes the others down (the
+ * caller records it as a per-spec emit failure):
  *  - no specs: parse [headerPath]'s bytes (the base model) -> base_model.json, print
  *    `PARITY_BASE <path>`;
  *  - per spec: synthesize the SAME ForcingHeader the libclang path synthesizes

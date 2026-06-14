@@ -82,23 +82,26 @@ Local paths the campaign used: `/usr/lib/jvm/java-17-openjdk` and
 `/usr/lib/jvm/java-21-openjdk` (point `org.gradle.java.home` or `JAVA_HOME` at the right one
 for the task you're running).
 
-## 5. The two front-ends and the gated tasks
+## 5. The single front-end and the gated tasks
 
-`krapper_gen` takes `--frontend={libclang|cpp}` (default `libclang`):
+`krapper_gen` has a **single** front-end since the self-hosting flip (B5, #88): the in-tree
+libclang-C reducer was deleted. It loads the `WrappedTU` from `--parsedModel` (the ModelIo
+JSON emitted by the `cppfrontend` binary, which is built on kplusplus-generated
+`libclang-cpp` bindings); `--header` now only supplies the `#include` list for the generated
+C++ wrapper, it is not parsed in-process. There is no `--frontend` flag and no `--dumpModels`
+/`--dumpParsedModel` flag any more.
 
-- `libclang` — the historical libclang-C reducer parses `--header` in-process.
-- `cpp` — **the handoff**: the libclang parse is skipped and the `WrappedTU` is loaded from
-  `--parsedModel` (the ModelIo JSON emitted by the `cppfrontend` binary, which is built on
-  kplusplus-generated `libclang-cpp` bindings).
+Because there is no second front-end, the historical libclang-vs-cpp parity/oracle tasks
+(`goldenCompare`, `handoffInstDiff`'s byte-oracle, `featuregenParity` + `parity-expectations.txt`)
+were removed in #92. The standing cpp-side gates are the end-to-end generate-and-compile
+tasks below plus `:featuregen:nativeTest -PenableClang` (the self-hosted feature suite).
 
 The gated verification tasks (all require `-PenableClang`):
 
 | Task | What it proves |
 | --- | --- |
-| `:cppfrontend:goldenCompare` | Runs both front-ends over one fixture and tree-diffs their `SerializedElement` models under the documented normalizer ledger; non-zero exit on unexplained divergence. |
-| `:cppfrontend:handoffGenerate` | `krapper_gen --frontend=cpp` loads the cppfrontend model (libclang never called), runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
-| `:cppfrontend:handoffInstDiff` | Two gates on `--frontend=cpp --instantiate`. **Gate 1 (oracle):** libclang's own dumped models, reloaded through the cpp file-handoff, must regenerate **byte-identical** output (path-modulo the `.def` dir) — proves the handoff itself is lossless. **Gate 2 (functional):** cppfrontend's *own* parses generate + compile, but are deliberately **not** byte-identical (matching libclang's lossy spellings byte-for-byte would mean emulating the lossiness the rewrite exists to delete). |
-| `:cppfrontend:featuregenParity` | The parity oracle: runs every featuregen unit through both front-ends and fails when a unit's verdict is *worse* than `cppfrontend/parity-expectations.txt` records (the ratcheting expected-state ledger). |
+| `:cppfrontend:handoffGenerate` | `krapper_gen` loads the cppfrontend model via `--parsedModel`, runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
+| `:cppfrontend:handoffInstGenerate` | The cpp **instantiation-forcing** path end-to-end (`--instantiate std::vector<Item*>` over `--parsedModel` + `--forcingModel`): generates + **compiles** the wrapper, then functionally asserts pass-3 forcing recovered `Bag::items()` and the vector specialization materialized its core container surface. |
 | `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
 
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the

@@ -19,11 +19,11 @@ import kotlinx.serialization.Serializable
 
 // THE CANONICAL JSON projection of the parse-output model (#44 bricks 2+7). The
 // WrappedElement hierarchy itself is NOT @Serializable (parent back-links + non-data
-// classes), so front-ends serialize this one-way structural DTO: kind + per-kind payload +
-// children, types spelled via WrappedType.toString(). It is emitted by BOTH front-ends —
-// krapper_gen's libclang-C path (--dumpParsedModel) and :cppfrontend's C++-AST path — and
-// is what the Phase C golden tree-diff (:cppfrontend:goldenCompare) compares, which is why
-// it lives here in :krapper_model rather than in either front-end.
+// classes), so the cpp front-end serializes this one-way structural DTO: kind + per-kind
+// payload + children, types spelled via WrappedType.toString(). It was the comparison key
+// for the Phase C golden tree-diff against krapper_gen's libclang-C reducer; that reducer
+// (and the diff) were removed in the self-hosting flip (B5, #88) / cleanup (#92). The DTO
+// remains :cppfrontend's --golden-emit projection and lives here in :krapper_model.
 @Serializable
 data class SerializedElement(
     val kind: String,
