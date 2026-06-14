@@ -399,19 +399,20 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 args += fixupFile.absolutePath
             }
         }
-        args += "--frontend"
-        args += "cpp"
+        // krapper_gen has a single front-end (the libclang-C reducer was removed in flip
+        // B5, #47): it consumes the cppfrontend-produced ModelIo model via --parsedModel.
+        // The legacy --frontend flag is gone.
         args += "--parsedModel"
         args += baseModel.absolutePath
         args += forcingArgs
         println(
-            "kplusplusSync[$moduleName]: --frontend=cpp over ${requested.size} " +
+            "kplusplusSync[$moduleName]: krapper_gen (cpp model) over ${requested.size} " +
                 "instantiation(s) from $headerPath -> $krappedDir"
         )
         val exit = ProcessBuilder(args).inheritIO().start().waitFor()
         if (exit != 0) {
             throw GradleException(
-                "kplusplusSync[$moduleName]: krapper_gen --frontend=cpp failed: exit $exit"
+                "kplusplusSync[$moduleName]: krapper_gen (--parsedModel) failed: exit $exit"
             )
         }
 
