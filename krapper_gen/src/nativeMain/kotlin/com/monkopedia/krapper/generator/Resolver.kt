@@ -42,6 +42,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referen
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.CAST
 import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.NATIVE
 import com.monkopedia.krapper.generator.resolvedmodel.type.CastMethod.POINTED_STRING_CAST
@@ -382,30 +383,41 @@ suspend fun List<WrappedElement>.resolveForcing(
 }
 
 /**
- * Collapse the per-instantiation class copies to ONE entry per class type-key (#60).
+ * Collapse the per-instantiation copies of each accumulating top-level element to ONE entry
+ * (#60 classes, #62 namespace free functions).
  *
- * Each `requestInstantiation` appends a re-resolved copy of every already-bound class
- * (that's how pass-3 recovery upgrades them), so after featuregen's header parse + 17
- * instantiation requests the element list carries 18 copies of each main-bound class.
- * KotlinWriter already collapses these via `associateBy { it.type.toString() }` —
- * last copy wins — but HeaderWriter/CppWriter iterated the raw list, emitting a full
- * wrapper section per copy: 18 identical declarations per symbol in the .h (legal
- * redeclarations) and 18 definitions in the .cc that only compiled because the
- * builder's `Scope.allocateName` `_`-uniquified the colliding names into dead
- * `_timespec_new`/`__timespec_new`/... variants.
+ * Each `requestInstantiation` appends a re-resolved copy of every already-bound class AND
+ * every already-bound namespace free function (that's how pass-3 recovery upgrades them), so
+ * after featuregen's header parse + 17 instantiation requests the element list carries 18
+ * copies of each main-bound class and each main-bound free function. KotlinWriter already
+ * collapses CLASSES via `associateBy { it.type.toString() }` — last copy wins — but
+ * HeaderWriter/CppWriter iterated the raw list, emitting a full wrapper section per copy: 18
+ * identical declarations per symbol in the .h (legal redeclarations) and 18 definitions in
+ * the .cc that only compiled because the builder's `Scope.allocateName` `_`-uniquified the
+ * colliding names into dead `_timespec_new`/`__timespec_new`/... variants. Free functions
+ * escaped #60's class-only dedup entirely: the KotlinWriter's free-function path (one
+ * `<ns>_Functions.kt` per namespace) emits EVERY copy too, so a single `hh::default_handler`
+ * surfaced as `default_handler`, `_default_handler`, `__default_handler`, ... 18 deep.
  *
- * Mirror the KotlinWriter semantics exactly: LAST copy wins (the most recent pass-3
- * re-resolution is the most completely resolved one — cumulative forcing guarantees the
- * final copy carries every recovered range accessor regardless of request order), kept
- * at the key's FIRST position (matching `associateBy`'s LinkedHashMap order, so the
- * Kotlin output is unchanged). Non-class elements pass through untouched.
+ * Mirror the KotlinWriter class semantics exactly: LAST copy wins (the most recent pass-3
+ * re-resolution is the most completely resolved one — cumulative forcing guarantees the final
+ * copy carries every recovered range accessor regardless of request order), kept at the key's
+ * FIRST position (matching `associateBy`'s LinkedHashMap order, so the class Kotlin output is
+ * unchanged). Classes are keyed by type-string; free functions by their full
+ * [forcingIdentity] (qualified name + simple name + C++ argument-type signature + uniqueCName)
+ * so genuine OVERLOADS — same name, different parameters — stay distinct and survive as
+ * separate sections. Any other top-level element passes through untouched.
  */
 fun List<ResolvedElement>.dedupClassesLastWins(): List<ResolvedElement> {
-    val lastByKey = filterIsInstance<ResolvedClass>().associateBy { it.type.toString() }
+    fun ResolvedElement.dedupKey(): String? = when (this) {
+        is ResolvedClass -> "class:$type"
+        is ResolvedMethod -> "fn:$forcingIdentity"
+        else -> null
+    }
+    val lastByKey = mapNotNull { e -> e.dedupKey()?.let { it to e } }.toMap()
     val seen = mutableSetOf<String>()
     return mapNotNull { element ->
-        if (element !is ResolvedClass) return@mapNotNull element
-        val key = element.type.toString()
+        val key = element.dedupKey() ?: return@mapNotNull element
         if (seen.add(key)) lastByKey.getValue(key) else null
     }
 }

@@ -59,7 +59,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 // re-parse was ALREADY main-bound (keep) or is incidental (drop). Two distinct functions
 // that happen to mangle to the same uniqueCName get different identities here, so a
 // collision can't false-keep an incidental function (which would emit non-compiling Kotlin).
-private val ResolvedMethod.forcingIdentity: String
+internal val ResolvedMethod.forcingIdentity: String
     get() = "$qualified::$name(${args.joinToString(",") { it.type.toString() }})#$uniqueCName"
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
@@ -221,10 +221,12 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             // walk omits. See ResolveContext.forcingTargetKeys.
             forcingTargets = setOf(target)
         )
-        // One entry per class type-key, last copy wins (#60): without this, every
-        // writer received a fresh full copy of each bound class per instantiation
-        // request and the C++ writers emitted a complete wrapper section per copy
-        // (18 sections per class in featuregen). See dedupClassesLastWins.
+        // One entry per class type-key AND per free-function identity, last copy wins
+        // (#60 classes, #62 free functions): without this, every writer received a fresh
+        // full copy of each bound class and each bound namespace free function per
+        // instantiation request and emitted a complete wrapper section per copy (18
+        // sections each in featuregen). Overloads stay distinct (keyed on the full
+        // argument-type signature). See dedupClassesLastWins.
         classes = (
             classes + newClasses.filter {
                 it !is ResolvedMethod || it.forcingIdentity in boundMethodIds
