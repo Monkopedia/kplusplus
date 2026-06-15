@@ -193,22 +193,18 @@ kplusplus {
         removeMethod("v8_Maybe_void_from_just")
         removeMethod("v8_Maybe_void_from_maybe")
 
-        // v8 brick 3 (#99): these methods generate Kotlin bindings that DON'T COMPILE
+        // v8 brick 3 (#99): these methods generated Kotlin bindings that DON'T COMPILE
         // (brick 1 only proved the C++ WRAPPER compiles; brick 3 is the first to compile +
         // link the Kotlin). They fall into two latent codegen-bug families the v8 surface
-        // exposes; none are on the hello-world path, so drop them by uniqueCName (the same
-        // mechanism used above for the genuinely-uncompilable v8 wrappers). The bug families
-        // are filed as follow-ups for krapper_gen to fix at the source:
+        // exposed (#103); none are on the hello-world path.
         //
         // Family 1 — OUT-POINTER PARAM modeled as a value: a `T* out` / `T& out` parameter
-        // (enum*, size_t&, uint64_t*) is bound as a by-value param, so the call passes a
-        // scalar where the extern's `CValuesRef<...>` pointer is expected.
-        removeMethod("v8_Maybe_v8_PropertyAttribute_to")              // Maybe::To(PropertyAttribute* out)
-        removeMethod("v8_String_get_external_string_resource_base")   // String::GetExternalStringResourceBase(Encoding* out)
-        removeMethod("v8_Isolate_get_code_range")                     // Isolate::GetCodeRange(void**, size_t*)
-        removeMethod("v8_Isolate_get_embedded_code_range")            // Isolate::GetEmbeddedCodeRange(void**, size_t*)
-        removeMethod("v8_platform_tracing_TraceBufferChunk_add_trace_event") // TraceBufferChunk::AddTraceEvent(size_t& index)
-        removeMethod("v8_ValueSerializer_Delegate_reallocate_buffer_memory") // Delegate::ReallocateBufferMemory(..., size_t* actual)
+        // (enum*, size_t&, size_t*) was bound as a by-value param, so the call passed a
+        // scalar where the extern's `CValuesRef<...>` pointer is expected. FIXED at source
+        // in krapper_gen (#103, `typeToKotlinType`: `size_t*`/`size_t&` -> `CValuesRef<
+        // ULongVar>?`, `enum*` -> the `void*`-backed `COpaquePointer`), so the six
+        // Maybe::To / GetExternalStringResourceBase / GetCodeRange / GetEmbeddedCodeRange /
+        // TraceBufferChunk::AddTraceEvent / ReallocateBufferMemory workarounds are dropped.
         //
         // Family 2 — REFERENCE-RETURN of a value-reduced type: an `operator|=` / `operator&=`
         // / `operator^=` returning `T&` (where T reduces to a Kotlin enum or UByte) is bound

@@ -111,7 +111,17 @@ private val pointerTypeMap = mapOf(
     "wchar_t" to "kotlinx.cinterop.IntVar",
     "ptrdiff_t" to "kotlinx.cinterop.LongVar",
     "ssize_t" to "kotlinx.cinterop.LongVar",
-    "intptr_t" to "kotlinx.cinterop.LongVar"
+    "intptr_t" to "kotlinx.cinterop.LongVar",
+    // size_t is native (so its wrapper C signature is `size_t*`/`size_t&`), but it had no
+    // *Var entry, so a `size_t*`/`size_t&` out-param collapsed through the `?:` fallback
+    // below to a BARE `size_t` scalar — the Kotlin facade then passed a value where the
+    // extern's `CValuesRef<...>` pointer is expected and did NOT compile (issue #103,
+    // Family 1: v8 Isolate::GetCodeRange(..., size_t*), TraceBufferChunk::AddTraceEvent(
+    // size_t&), ValueSerializer::Delegate::ReallocateBufferMemory(..., size_t*)). size_t
+    // is unsigned long on LP64 (its by-value form is `platform.posix.size_t` = ULong), so
+    // its pointer rides ULongVar — identical to `uint64_t*` and to cinterop's own
+    // `CValuesRef<size_tVar>` (size_tVar aliases ULongVar), matching the `size_t*` extern.
+    "size_t" to "kotlinx.cinterop.ULongVar"
 )
 
 // The Kotlin-facing spelling of a model type. An extension (not a member) because the
@@ -204,6 +214,19 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                     listOf(fullyQualifiedType(pointerType))
                 )
             )
+        }
+        // A POINTER to a value-reduced enum (issue #103, Family 1: v8 Maybe::To(
+        // PropertyAttribute*), String::GetExternalStringResourceBase(Encoding*)). The
+        // enum collapses to its underlying integer at the boundary and is NOT a
+        // `.ptr`-backed wrapper, so the wrapper's cType is `void*` (see
+        // WrappedModifiedType.cType: a non-native pointee yields `void*`). Surfacing the
+        // generated `enum class` here would make KotlinWriter.reference() emit `arg.value`
+        // (an Int) where the extern expects a pointer — uncompilable. Expose it as the
+        // opaque `void*` the caller fills/reads, exactly as a by-value `void*` arg above.
+        // Guarded on `isPointer`: an enum REFERENCE (`&`) is deliberately a by-value enum
+        // at the boundary (WrappedModifiedType.isEnum), so it must keep the enum class.
+        if (type.isPointer && baseType.isEnum) {
+            return fullyQualifiedType(C_OPAQUE_POINTER)
         }
         return nullable(WrappedKotlinType(baseType))
     }
