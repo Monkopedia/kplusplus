@@ -24,6 +24,7 @@ import com.monkopedia.krapper.generator.model.WrappedElement
 import com.monkopedia.krapper.generator.model.WrappedField
 import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
+import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.serialized
@@ -307,6 +308,64 @@ private val FORCING_FIXTURE_HEADER = """
 // The fixture's instantiation requests — one per `--instantiate` the generate step makes.
 private val FORCING_TARGETS = listOf("std::vector<Item*>")
 
+// #101 — the NONCOPYABLE DETERMINISM fixture. A self-contained reduction of v8::Persistent's
+// exact shape: a NON-COPYABLE base (`= delete`d copy ctor + copy assignment), a traits class
+// whose `Copy` is a `static_assert(sizeof(T) < 0)` (un-instantiable on use), and the NC
+// template that USER-DECLARES a copy ctor + copy assignment whose bodies call the trap. The
+// `ForceNC` struct's `value` member implicitly INSTANTIATES `NC<Value>` — the same trigger
+// the synthesized forcing header (ForcingHeader) is for `v8::Persistent<v8::Value>`.
+//
+// THE INVARIANT THIS LOCKS (#101): the special-member set of a NonCopyable type must be
+// IDENTICAL across parses. The original report saw `Persistent<v8::Value>` surface its copy
+// ctor on one parse and its copy assignment on another. The root cause that COULD produce
+// that is lazy template-member instantiation: Clang instantiates a specialization's member
+// FUNCTIONS on first use, so an implicitly-instantiated specialization's `decls()` carries
+// only what THIS parse happened to trigger — a parse-dependent set. This front-end is immune
+// BY CONSTRUCTION because it never walks the specialization (ModelBuilder.addContextDecls
+// SKIPS ClassTemplateSpecialization, citing #101): NC's members ride the template PATTERN,
+// whose `decls()` are fixed source-order declarations, and the resolver materializes
+// `NC<Value>` by deterministic param substitution (Parsing.typedAs). This guard parses the
+// fixture repeatedly and asserts the pattern's special-member set never varies — so a future
+// change that started walking the lazily-instantiated specialization would fail here.
+private val NONCOPYABLE_FIXTURE = """
+    struct Value { int x; };
+
+    template <class T>
+    class NCBase {
+     public:
+        void reset();
+        bool isEmpty() const { return ptr_ == nullptr; }
+        NCBase(const NCBase&) = delete;
+        void operator=(const NCBase&) = delete;
+     protected:
+        explicit NCBase(T* p) : ptr_(p) {}
+        T* ptr_;
+    };
+
+    template <class T>
+    struct NonCopyableTraits {
+        template <class S>
+        static void Copy(const S* from, S* to) {
+            static_assert(sizeof(T) < 0, "NonCopyableTraits::Copy is not instantiable");
+        }
+    };
+
+    template <class T, class M = NonCopyableTraits<T> >
+    class NC : public NCBase<T> {
+     public:
+        NC() : NCBase<T>(nullptr) {}
+        NC(const NC& that) : NCBase<T>(nullptr) { M::Copy(that.ptr_, this->ptr_); }
+        NC& operator=(const NC& that) { M::Copy(that.ptr_, this->ptr_); return *this; }
+        ~NC() {}
+        int get() const;
+    };
+
+    struct ForceNC { NC<Value> value; };
+""".trimIndent()
+
+// Parse the NonCopyable fixture this many times; any cross-parse divergence fails the guard.
+private const val NONCOPYABLE_PARSE_COUNT = 8
+
 private var failures = 0
 
 private fun check(name: String, pass: Boolean, detail: String = "") {
@@ -329,6 +388,14 @@ fun main(args: Array<String>): Unit = memScoped {
     if (args.firstOrNull() == "--handoff-emit") {
         val dir = args.getOrNull(1) ?: fail("--handoff-emit <dir>")
         handoffEmit(dir)
+        return@memScoped
+    }
+    if (args.firstOrNull() == "--noncopyable-determinism") {
+        // #101 — parse the NonCopyable fixture NONCOPYABLE_PARSE_COUNT times and assert the
+        // special-member set never varies across parses (the cpp regression lock for the
+        // Persistent<v8::Value> parse-dependent copy-member report). Self-contained: no
+        // external header, so the only gradle wiring is `dependsOn(linkRelease…)`.
+        noncopyableDeterminismCheck()
         return@memScoped
     }
     if (args.firstOrNull() == "--parity-emit") {
@@ -1123,6 +1190,56 @@ fun main(args: Array<String>): Unit = memScoped {
 
     if (failures > 0) fail("$failures self-check(s) failed")
     println("cppfrontend: ALL SELF-CHECKS PASSED")
+}
+
+/**
+ * #101 — NONCOPYABLE SPECIAL-MEMBER DETERMINISM GUARD. Parse [NONCOPYABLE_FIXTURE]
+ * [NONCOPYABLE_PARSE_COUNT] times (each a SEPARATE buildASTWithArgs / ASTContext) and assert:
+ *  1. every parse's full serialized model is byte-identical — the front-end is deterministic
+ *     parse-to-parse for a NonCopyable type (the exact #101 acceptance);
+ *  2. the `NC` template PATTERN carries BOTH special members on EVERY parse — a copy
+ *     constructor AND a copy assignment — so the set is COMPLETE and never the report's
+ *     "one parse the ctor, another the assignment". This holds because the members ride the
+ *     template pattern's fixed source-order `decls()`, not a specialization's lazily-
+ *     instantiated `decls()` (ModelBuilder skips the specialization — see its #101 note).
+ *
+ * Note this guard is at the FRONT-END (model) boundary on purpose: the un-instantiable copy
+ * ops are a body-only `static_assert`, invisible to every copy-constructibility AST query
+ * (`isDeleted()` / `is_copy_constructible` are FALSE/true respectively — the trap only fires
+ * if the body is instantiated), so the front-end cannot faithfully SUPPRESS them; it can only
+ * emit them DETERMINISTICALLY (the consumer drops the un-compilable pair by uniqueCName).
+ */
+private fun MemScope.noncopyableDeterminismCheck() {
+    val parseArgs = "-std=c++17\n-resource-dir=" + commandOutput("clang++ -print-resource-dir")
+    val models = (1..NONCOPYABLE_PARSE_COUNT).map { i ->
+        parseToWrappedTU(NONCOPYABLE_FIXTURE, "noncopyable_$i.cc", parseArgs)
+    }
+    val jsons = models.map { ModelIo.encodeToString(it) }
+    val divergent = jsons.withIndex().filter { it.value != jsons.first() }.map { it.index + 1 }
+    check(
+        "$NONCOPYABLE_PARSE_COUNT parses of the NonCopyable fixture are byte-identical (#101)",
+        divergent.isEmpty(),
+        "parse(s) $divergent diverged from parse 1"
+    )
+    // The special-member set of the NC PATTERN, per parse: the copy-ctor + copy-assignment
+    // signal that survives substitution into NC<Value>. Both must be present on EVERY parse.
+    fun specialMembers(tu: WrappedTU): Pair<Boolean, Boolean> {
+        val members = tu.children.filterIsInstance<WrappedTemplate>()
+            .find { it.name == "NC" }?.children.orEmpty()
+        val hasCopyCtor = members.filterIsInstance<WrappedConstructor>()
+            .any { it.isCopyConstructor }
+        val hasCopyAssign = members.filterIsInstance<WrappedMethod>()
+            .any { it !is WrappedConstructor && it !is WrappedDestructor && it.name == "operator=" }
+        return hasCopyCtor to hasCopyAssign
+    }
+    val sets = models.map { specialMembers(it) }
+    check(
+        "NC pattern carries BOTH copy ctor and copy assignment on every parse (#101)",
+        sets.all { it == (true to true) },
+        "per-parse (copyCtor, copyAssign): $sets"
+    )
+    if (failures > 0) fail("$failures NonCopyable-determinism check(s) failed")
+    println("cppfrontend: NONCOPYABLE DETERMINISM CHECK PASSED ($NONCOPYABLE_PARSE_COUNT parses)")
 }
 
 /**

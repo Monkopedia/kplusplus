@@ -164,6 +164,15 @@ private class ModelBuilder {
             // walk never surfaces IMPLICIT instantiations (they hang off the template's
             // specialization set, not the TU) — guard so one is never mistaken for a
             // plain record. Explicit specializations are brick-6+.
+            // #101 — this skip is also the NONCOPYABLE DETERMINISM guarantee. Clang
+            // instantiates a specialization's member FUNCTIONS LAZILY (on first odr-use), so
+            // an implicitly-instantiated spec's decls() carries only what THIS parse happened
+            // to trigger — a PARSE-DEPENDENT set (the report: Persistent<v8::Value> surfacing
+            // its copy ctor on one parse, its copy assignment on another). By never walking
+            // the specialization and instead materializing it from the template PATTERN's
+            // fixed source-order decls() (the resolver's deterministic param substitution,
+            // Parsing.typedAs), the special-member set is identical every parse. Locked by
+            // the cppfrontend `--noncopyable-determinism` guard.
             if (decl.getKind() == Kind.ClassTemplateSpecialization ||
                 decl.getKind() == Kind.ClassTemplatePartialSpecialization
             ) {

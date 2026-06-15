@@ -169,11 +169,14 @@ kplusplus {
         // v8 methods that generate uncompilable C++ wrappers; drop them by uniqueCName.
         // v8::Persistent<v8::Value> is NonCopyable (NonCopyablePersistentTraits::Copy is a
         // `static_assert(sizeof(S) < 0)`), so neither its copy ctor nor its copy-assignment
-        // may be instantiated. The cpp front-end (brick-1 flip to
-        // -Pkpp.frontend.kotlin_project=cpp) materializes these IMPLICIT special members
-        // parse-dependently — one run surfaces the copy ctor
-        // (`..._new__const_v8_Persistent_and`), another the copy-assignment (`..._op_assign`,
-        // the libclang-era name, still valid) — so drop BOTH to stay robust across parses.
+        // may be instantiated — the generated wrapper that copy-constructs / assigns into the
+        // Holder buffer fails to compile. Both members are USER-DECLARED on the Persistent
+        // template (NOT implicit), so the cpp front-end emits them DETERMINISTICALLY (#101):
+        // it walks the template PATTERN — never the lazily-instantiated specialization — so
+        // BOTH always surface on every parse (proven by the cppfrontend
+        // `--noncopyable-determinism` guard). The un-instantiability is body-only, invisible
+        // to copy-constructibility AST queries, so the front-end can't auto-suppress them;
+        // drop both here by uniqueCName (`op_assign` is the libclang-era name, still valid).
         removeMethod("v8_Persistent_v8_Value_new__const_v8_Persistent_and")
         removeMethod("v8_Persistent_v8_Value_op_assign")
         removeMethod(
