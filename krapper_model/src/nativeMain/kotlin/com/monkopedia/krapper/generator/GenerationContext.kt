@@ -53,9 +53,20 @@ object GenerationContext {
     var rootPackage: String? = null
         private set
 
-    /** Begin a fresh generation pass: clear the intern cache and root [rootPackage]. */
-    fun reset(rootPackage: String?) {
+    /**
+     * True when the target C++ library is compiled `-fno-rtti` (e.g. v8's monolith),
+     * so it exports no `typeinfo` symbols. Under this flag the down-cast helpers must NOT
+     * emit a generic `dynamic_cast<D*>` (it would reference a `typeinfo for D` the library
+     * doesn't provide and fail to LINK); only the LLVM-style `classof` down-cast — which
+     * needs no RTTI — is emitted. Set once per run by [reset] from `config.noRtti`.
+     */
+    var noRtti: Boolean = false
+        private set
+
+    /** Begin a fresh generation pass: clear the intern cache and root [rootPackage]/[noRtti]. */
+    fun reset(rootPackage: String?, noRtti: Boolean = false) {
         internedTypes.clear()
         this.rootPackage = rootPackage
+        this.noRtti = noRtti
     }
 }

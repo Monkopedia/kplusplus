@@ -109,6 +109,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.property("instantiations", e.instantiations.sorted())
                 it.inputs.property("referencePolicy", e.referencePolicy ?: "")
                 it.inputs.property("cppStandard", e.cppStandard ?: "")
+                it.inputs.property("noRtti", e.noRtti)
                 it.inputs.property("rootPackage", e.rootPackage ?: "")
                 it.inputs.property("only", e.only.sorted())
                 it.inputs.property("onlyFile", e.onlyFile ?: "")
@@ -380,6 +381,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         ext?.rootPackage?.let {
             args += "--root-package"
             args += it
+        }
+        if (ext?.noRtti == true) {
+            args += "--no-rtti"
         }
         for (spec in requested) {
             args += "--instantiate"
