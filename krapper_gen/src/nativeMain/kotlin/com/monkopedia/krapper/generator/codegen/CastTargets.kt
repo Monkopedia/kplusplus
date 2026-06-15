@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.generator.GenerationContext
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
@@ -151,6 +152,12 @@ fun downCastTargetsFor(
         }
         if (!reachesBase) continue
         val useLlvmDynCast = hasLlvmClassof(derived)
+        // A `-fno-rtti` target library (config.noRtti) exports no `typeinfo` symbols, so the
+        // generic `dynamic_cast<D*>` path below would reference a `typeinfo for D` the library
+        // doesn't provide and fail to LINK (e.g. v8's TracingController / ExternalStringResource
+        // against the -fno-rtti monolith). The LLVM `classof` path needs no RTTI, so keep it;
+        // drop only the generic-dynamic_cast pairs.
+        if (GenerationContext.noRtti && !useLlvmDynCast) continue
         // The generic `dynamic_cast` path needs a POLYMORPHIC base (RTTI to check). A
         // non-polymorphic base with no LLVM `classof` on the derived has no safe checked
         // down-cast at all — skip it (drop, don't emit non-compiling C). The LLVM path

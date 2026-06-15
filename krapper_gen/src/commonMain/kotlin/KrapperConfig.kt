@@ -60,5 +60,12 @@ data class KrapperConfig(
     // takes the entire import down. Translation-unit-level / fatal diagnostics (a missing
     // include, "too many errors", an error with no attributable cursor) abort regardless,
     // since the recovered AST can't be trusted past them.
-    val strictDiagnostics: Boolean = false
+    val strictDiagnostics: Boolean = false,
+    // When true, the target C++ library is built `-fno-rtti` (e.g. v8's monolith), so it
+    // exports no `typeinfo` symbols. The generated generic `dynamic_cast<D*>` down-cast
+    // helpers would reference a `typeinfo for D` the library doesn't provide and fail to
+    // LINK; under this flag those generic down-casts are skipped (only the RTTI-free
+    // LLVM-style `classof` down-casts survive). Opt-in (default false): an RTTI-on library
+    // keeps emitting the generic checked down-casts.
+    val noRtti: Boolean = false
 )

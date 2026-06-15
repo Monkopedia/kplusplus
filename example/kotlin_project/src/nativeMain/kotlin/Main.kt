@@ -1,10 +1,15 @@
+import kotlinx.cinterop.COpaquePointer
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.memScoped
+import platform.posix.memset
 import v8.Context.Companion.New
-import v8.DeserializeInternalFieldsCallback.Companion.DeserializeInternalFieldsCallback
+import v8.DeserializeInternalFieldsCallback
+import v8.DeserializeInternalFieldsCallback.Companion.DeserializeInternalFieldsCallback_Holder
 import v8.HandleScope.Companion.HandleScope
 import v8.Isolate.Companion.New
 import v8.MaybeLocal__ObjectTemplate.Companion.MaybeLocal__ObjectTemplate
 import v8.MaybeLocal__Value.Companion.MaybeLocal__Value
+import v8.NewStringType
 import v8.Script.Companion.Compile
 import v8.String.Companion.NewFromUtf8
 import v8.V8.Companion.Dispose
@@ -17,8 +22,12 @@ import v8.arrayBuffer.Allocator.Companion.NewDefaultAllocator
 import v8.context.Scope.Companion.Scope
 import v8.isolate.CreateParams.Companion.CreateParams
 import v8.isolate.Scope.Companion.Scope
+import v8.platform.IdleTaskSupport
+import v8.platform.InProcessStackDumping
 import v8.platform.NewSingleThreadedDefaultPlatform
 import v8.string.Utf8Value.Companion.Utf8Value
+import std.Unique_ptr__TracingController
+import std.Unique_ptr__TracingController.Companion.Unique_ptr__TracingController_Holder
 
 /*
  * Copyright 2021 Jason Monk
@@ -36,6 +45,17 @@ import v8.string.Utf8Value.Companion.Utf8Value
  * limitations under the License.
  */
 
+// v8 brick 3 (#99): a `_Holder()` factory only allocates the struct's storage; it does NOT
+// run a C++ constructor. For the two by-value structs we pass to v8 below
+// (std::unique_ptr<TracingController> and DeserializeInternalFieldsCallback) the safe
+// default state is all-zero bits (an empty unique_ptr / a {nullptr, nullptr} callback), and
+// the v8 wrapper consumes them with `std::move(*ptr)` / by copy, so zero the freshly
+// allocated storage before handing it over.
+private fun COpaquePointer.zeroed(size: Int): COpaquePointer {
+    memset(this, 0, size.convert())
+    return this
+}
+
 fun main(args: Array<String>) {
     println("Got args: ${args.size}")
     for (arg in args) {
@@ -45,8 +65,22 @@ fun main(args: Array<String>) {
         println("Executing kotlin")
         InitializeICUDefaultLocation("", "")
         InitializeExternalStartupData("")
-        val platform = NewSingleThreadedDefaultPlatform()
-        InitializePlatform(platform.get())
+        // v8 brick 3 (#99): the cpp front-end does not materialize ENUM-/CLASS-typed default
+        // arguments (only literal ones like `length = -1` survive), so the generated
+        // NewSingleThreadedDefaultPlatform requires all three params that C++ defaults. Pass
+        // the C++ defaults explicitly: kDisabled / kDisabled / an empty TracingController
+        // unique_ptr (zeroed Holder storage — see COpaquePointer.zeroed above).
+        val tracingController = Unique_ptr__TracingController_Holder()
+        tracingController.ptr.zeroed(Unique_ptr__TracingController.size)
+        val platform = NewSingleThreadedDefaultPlatform(
+            IdleTaskSupport.kDisabled,
+            InProcessStackDumping.kDisabled,
+            tracingController
+        )
+        // The generated NewSingleThreadedDefaultPlatform already `.release()`s the
+        // std::unique_ptr<Platform> and returns the raw Platform?, so pass it straight to
+        // InitializePlatform(Platform?) — there is no unique_ptr `.get()` wrapper here.
+        InitializePlatform(platform)
         Initialize()
 
         val createParams = CreateParams()
@@ -55,22 +89,33 @@ fun main(args: Array<String>) {
         memScoped {
             Scope(isolate)
             HandleScope(isolate) { handleScope ->
+                // Empty (no-op) internal-fields deserializer — zeroed Holder storage, see above.
+                val deserializer = DeserializeInternalFieldsCallback_Holder()
+                deserializer.ptr.zeroed(DeserializeInternalFieldsCallback.size)
                 val context = New(
                     isolate,
                     null,
                     MaybeLocal__ObjectTemplate(),
                     MaybeLocal__Value(),
-                    DeserializeInternalFieldsCallback(),
+                    deserializer,
                     null
                 )
                 Scope(context)
                 memScoped {
-                    val source = NewFromUtf8(isolate, "'Hello' + ', Worldy!'").ToLocalChecked()
+                    // v8 brick 3 (#99): `type`'s enum default (NewStringType::kNormal) is not
+                    // materialized by the cpp front-end either — pass it explicitly.
+                    val source = NewFromUtf8(
+                        isolate,
+                        "'Hello' + ', Worldy!'",
+                        NewStringType.kNormal
+                    ).ToLocalChecked()
 
                     val script = Compile(context, source, null).ToLocalChecked()
                     val result = script.reference()?.Run(context)?.ToLocalChecked()
                     val utf8 = Utf8Value(isolate, result ?: error("No result"))
-                    println("Got: ${utf8._reference()}")
+                    // Generated accessor for operator* is `reference()` (was `_reference()`
+                    // under the libclang front-end).
+                    println("Got: ${utf8.reference()}")
                 }
             }
         }

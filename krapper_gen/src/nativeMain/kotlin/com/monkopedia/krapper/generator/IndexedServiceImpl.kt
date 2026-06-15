@@ -103,7 +103,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // package is baked into its ResolvedKotlinType at resolve time, so rooting it later
         // (e.g. in writeTo) would be too late.
         DropLedger.reset()
-        GenerationContext.reset(config.rootPackage)
+        GenerationContext.reset(config.rootPackage, config.noRtti)
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {
@@ -432,7 +432,21 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     private fun applyResult(result: MapResult, element: ResolvedElement) = when (result) {
         RemoveChild -> {
-            element.parent?.removeChild(element)
+            val parent = element.parent
+            if (parent != null) {
+                parent.removeChild(element)
+            } else {
+                // A TOP-LEVEL element (a namespace free function, or a top-level class) is not
+                // a child of any ResolvedElement — it lives directly in `classes`, so its
+                // `parent` is null and `removeChild` can't reach it. removeMethod's RemoveChild
+                // must therefore drop it from the top-level list; without this branch the
+                // fixup silently no-ops on free functions (e.g. the uncompilable std::byte /
+                // <ios> bitmask `operator|=`/`&=`/`^=` wrappers). `classes` is reassigned here,
+                // but executeMappings snapshots `allElements` before the loop, so the in-flight
+                // iteration is unaffected. Identity (`!==`) match: distinct overloads are
+                // distinct instances, and only the one the mapper selected is removed.
+                classes = classes.filter { it !== element }
+            }
         }
 
         RemoveParent -> {

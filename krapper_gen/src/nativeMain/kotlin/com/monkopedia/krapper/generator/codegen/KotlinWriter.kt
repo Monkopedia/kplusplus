@@ -306,13 +306,17 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // Render an enum constant's integer literal (stored as a signed Long) in its
     // underlying Kotlin type. UInt/ULong have literal suffixes; UShort/UByte have
     // none (a `u` suffix would be a UInt, which won't match the property type), so
-    // build them via a cast.
+    // build them via a cast. Boolean is for a `bool`-underlying C++ enum (e.g. v8's
+    // `enum class MessageLoopBehavior : bool { kDoNotWait = false, kWaitForWork = true }`),
+    // which reduces to Kotlin Boolean at the boundary — emit `false`/`true` so the entry
+    // matches the `val value: Boolean` property (an Int `0`/`1` would not compile).
     private fun literalForUnderlying(value: Long, underlying: String): String = when (underlying) {
         "UInt" -> "${value.toUInt()}u"
         "ULong" -> "${value.toULong()}uL"
         "Long" -> "${value}L"
         "UShort" -> "${value.toInt() and 0xFFFF}.toUShort()"
         "UByte" -> "${value.toInt() and 0xFF}.toUByte()"
+        "Boolean" -> (value != 0L).toString()
         else -> value.toString()
     }
 

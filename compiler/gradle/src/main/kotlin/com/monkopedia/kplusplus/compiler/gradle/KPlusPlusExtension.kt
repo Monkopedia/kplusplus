@@ -64,6 +64,16 @@ open class KPlusPlusExtension {
     var cppStandard: String? = null
 
     /**
+     * The target C++ library is built `-fno-rtti` (e.g. v8's monolith) and exports no
+     * `typeinfo` symbols. Forwarded to krapper_gen as `--no-rtti`: the generated generic
+     * `dynamic_cast<D*>` down-cast helpers (`Base.asDerived()`) would reference a missing
+     * `typeinfo for Derived` and fail to LINK, so they are skipped (only RTTI-free LLVM
+     * `classof` down-casts survive). Default false (RTTI-on library keeps the generic
+     * checked down-casts).
+     */
+    var noRtti: Boolean = false
+
+    /**
      * Root Kotlin package for the generated bindings (e.g. "com.acme.app").
      * Forwarded to krapper_gen as `--root-package`; every binding's package
      * becomes `<rootPackage>.<C++ namespace path>` (so `std::vector<int>` lands

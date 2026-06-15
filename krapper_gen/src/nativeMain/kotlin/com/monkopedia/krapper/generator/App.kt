@@ -155,6 +155,13 @@ class KrapperGen : CliktCommand() {
             "Fatal / translation-unit-level errors (missing include, unattributable) abort " +
             "regardless."
     ).flag()
+    val noRtti by option(
+        "--no-rtti",
+        help = "The target C++ library is built -fno-rtti (e.g. v8's monolith) and exports " +
+            "no typeinfo symbols. Skip the generic dynamic_cast<D*> down-cast helpers (they " +
+            "would reference a missing `typeinfo for D` and fail to LINK); only RTTI-free " +
+            "LLVM-style `classof` down-casts are emitted. Default: off (RTTI-on library)."
+    ).flag()
     val parsedModel by option(
         "--parsedModel",
         help = "REQUIRED. Path to the ModelIo JSON WrappedTU to load — the parse-output " +
@@ -220,7 +227,8 @@ class KrapperGen : CliktCommand() {
                     cppStandard = cppStandard,
                     rootPackage = rootPackage,
                     failOnDrop = failOnDrop,
-                    strictDiagnostics = strictDiagnostics
+                    strictDiagnostics = strictDiagnostics,
+                    noRtti = noRtti
                 )
             )
             // Augment the request's include dirs (default = header parents) with the module's
