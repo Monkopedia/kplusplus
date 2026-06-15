@@ -247,6 +247,17 @@ val goldenEmit = tasks.register<Exec>("goldenEmit") {
     commandLine(cppfrontendBinary.absolutePath, "--golden-emit", goldenDir.absolutePath)
 }
 
+// ---- #101: NONCOPYABLE special-member determinism guard ----
+// Runs the cppfrontend binary's `--noncopyable-determinism` mode, which parses a
+// self-contained reduction of v8::Persistent's NonCopyable shape N times (separate
+// ASTContexts) and asserts the special-member set is byte-identical and complete across
+// parses — the standing regression lock for the Persistent<v8::Value> parse-dependent
+// copy-member report (a non-zero exit fails the task). Gated with the module (-PenableClang).
+tasks.register<Exec>("noncopyableDeterminismCheck") {
+    dependsOn("linkReleaseExecutableKlinker")
+    commandLine(cppfrontendBinary.absolutePath, "--noncopyable-determinism")
+}
+
 // ---- #45 brick 2: THE HANDOFF (Phase C) ----
 // The first time generated-bindings-parsed C++ flows through krapper_gen's REAL pipeline:
 //   goldenEmit       — the cppfrontend binary parses the fixture with the Clang C++ AST
