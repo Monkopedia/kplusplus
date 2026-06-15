@@ -142,6 +142,14 @@ kplusplus {
     // (kpp.frontend.kotlin_project=cpp), built with -PenableClang.
     cppStandard = "c++17"
 
+    // v8 brick 2 (#99): force the v8::Maybe<int> model so Value::Int32Value(context) — whose
+    // return is v8::Maybe<int32_t> (int32_t == int) — survives codegen instead of being
+    // dropped (IGNORE_MISSING) for want of a forcing model. Unblocks the richer number→int
+    // demo in Main.kt (`numResult.Int32Value(context).FromJust()`). The Maybe<int> member
+    // set (FromJust/ToChecked/IsJust/…) is the primary Maybe<T> projection — no void-spec
+    // workarounds apply here.
+    instantiate("v8::Maybe<int>")
+
     // v8 brick 3 (#99): the v8 monolith is built `-fno-rtti`, so it exports no `typeinfo`
     // symbols. Without this, the generated generic `dynamic_cast<D*>` down-cast helpers
     // (e.g. TracingController.asTracingController(), ExternalStringResourceBase.as*()) emit
