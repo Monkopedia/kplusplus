@@ -11,6 +11,7 @@ import v8.MaybeLocal__ObjectTemplate.Companion.MaybeLocal__ObjectTemplate
 import v8.MaybeLocal__Value.Companion.MaybeLocal__Value
 import v8.NewStringType
 import v8.Script.Companion.Compile
+import v8.Value
 import v8.String.Companion.NewFromUtf8
 import v8.V8.Companion.Dispose
 import v8.V8.Companion.DisposePlatform
@@ -116,6 +117,32 @@ fun main(args: Array<String>) {
                     // Generated accessor for operator* is `reference()` (was `_reference()`
                     // under the libclang front-end).
                     println("Got: ${utf8.reference()}")
+                }
+                memScoped {
+                    // v8 brick 2 (#99): a RICHER operation beyond string concat — evaluate an
+                    // ARITHMETIC script and read the numeric result back as a 32-bit int via
+                    // Value::Int32Value(context), which returns v8::Maybe<int32_t>. This
+                    // exercises the Maybe<int>/Int32Value path: the FIR manifest discovers the
+                    // method's templated return, and the `instantiate("v8::Maybe<int>")` spec in
+                    // build.gradle.kts forces the Maybe<int> model so the method survives the
+                    // IGNORE_MISSING drop and FromJust() (which yields the unwrapped Int) binds.
+                    val numSource = NewFromUtf8(
+                        isolate,
+                        "40 + 2",
+                        NewStringType.kNormal
+                    ).ToLocalChecked()
+                    val numScript = Compile(context, numSource, null).ToLocalChecked()
+                    val numResult = numScript.reference()?.Run(context)?.ToLocalChecked()
+                    // Local<Value>.reference() returns the EMPTY marker interface ValueApi (a
+                    // polymorphic base gets only `val ptr`, with the real methods on the concrete
+                    // Value class), so the `as? Value` downcast recovers them — reference() does
+                    // construct a real Value under the hood, so the cast always succeeds. See the
+                    // tracked generator gap (#107): a Local<PolymorphicBase>.reference() should
+                    // expose the base's instance methods directly. Int32Value -> Maybe<int>;
+                    // FromJust() unwraps the present value (the script always produces a number).
+                    val numValue = numResult?.reference() as? Value
+                    val computed = numValue?.Int32Value(context)?.FromJust()
+                    println("Computed: $computed")
                 }
             }
         }
