@@ -1,8 +1,0 @@
-headers = desired_wrapper.h
-compilerOpts = -I/home/jmonk/kplusplus/testlib/ -std=c99 -fPIC
-compiler = clang
-#linker = clang++
-linkerOpts = -lstdc++
-staticLibraries = libtestlib.a libtestwrapper.a
-libraryPaths = /home/jmonk/kplusplus/testlib
-package = testlib

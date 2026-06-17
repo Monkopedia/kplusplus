@@ -10,12 +10,8 @@ pluginManagement {
 
 includeBuild("compiler")
 
-include(":testlib_kotlin")
-include(":testlib_kotlin_manual")
 include(":krapper_gen")
 include(":krapper_model")
-include(":plugin")
-include(":slice")
 include(":feature-tests")
 include(":featuregen")
 
@@ -32,8 +28,8 @@ include(":featuregen")
 // REQUIRE this flag — without it :cppfrontend is not in the build and their kplusplusSync
 // fails fast with an actionable "build with -PenableClang" message (runCppFrontendSync).
 // The flag stays opt-in (not default-ON) only so the LLVM-FREE modules — :krapper_gen
-// (now a pure ModelIo consumer), :krapper_model, :plugin — and the committed-seed modules
-// (:cppfrontend/:clangwalk/:slice, kpp.frontend=seed: a plain C++ recompile, no parse)
+// (now a pure ModelIo consumer) and :krapper_model — and the committed-seed modules
+// (:cppfrontend/:clangwalk, kpp.frontend=seed: a plain C++ recompile, no parse)
 // still build/test on a box without an LLVM toolchain.
 //
 // #11(b) — toolchain probe hardening: when the modules ARE enabled, the LLVM toolchain
