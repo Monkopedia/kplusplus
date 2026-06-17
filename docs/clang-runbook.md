@@ -73,14 +73,11 @@ strips the unreferenced functions via `-opt`, so it linked from day one.
 
 - **JDK 17** — the modules the campaign runs on JDK 17: `:krapper_gen`, `:krapper_model`
   (both target JVM 11 bytecode but build/run fine on 17) and `:featuregen` (native-only —
-  no JVM bytecode target; it drives the generated K/N bindings).
-- **JDK 21** — the root **`:plugin`** module *requires* Java 21 (`sourceCompatibility` /
-  `targetCompatibility = VERSION_21`, `jvmTarget = JVM_21`); any build that configures
-  `:plugin` needs a JDK 21.
+  no JVM bytecode target; it drives the generated K/N bindings). The included `compiler/`
+  build targets JVM 1.8 bytecode and builds fine on 17 as well.
 
-Local paths the campaign used: `/usr/lib/jvm/java-17-openjdk` and
-`/usr/lib/jvm/java-21-openjdk` (point `org.gradle.java.home` or `JAVA_HOME` at the right one
-for the task you're running).
+Local paths the campaign used: `/usr/lib/jvm/java-17-openjdk` (point `org.gradle.java.home`
+or `JAVA_HOME` at it for the task you're running).
 
 ## 5. The single front-end and the gated tasks
 
