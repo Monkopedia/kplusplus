@@ -72,7 +72,7 @@ tasks.matching { it.name.startsWith("cinteropFeature_testsNative") }.configureEa
 
 // ---------------------------------------------------------------------------
 // matrixReport: run the feature tests, then write each row's Status back into
-// docs/v2-features/matrix.md so the matrix's "Status is set by the harness, not
+// docs/features.md so the matrix's "Status is set by the harness, not
 // by hand" promise is real. Row id -> test class is a deterministic forward
 // derivation (PR-int-rt -> PrIntRtTest). Status rollup is per row (test class):
 // any failure/error -> 🔴, otherwise 🟢. A manual 🟡 ("passes with a documented
@@ -82,7 +82,7 @@ tasks.matching { it.name.startsWith("cinteropFeature_testsNative") }.configureEa
 // ---------------------------------------------------------------------------
 val matrixReport by tasks.registering {
     group = "verification"
-    description = "Run feature tests and write per-row status back into matrix.md"
+    description = "Run feature tests and write per-row status back into features.md"
     dependsOn(tasks.named("nativeTest"))
     // The generator-backed harness (:featuregen) contributes std::-type rows;
     // include its results so those rows get statused too.
@@ -94,7 +94,7 @@ val matrixReport by tasks.registering {
         layout.buildDirectory.dir("test-results/nativeTest").get().asFile,
         rootProject.file("featuregen/build/test-results/nativeTest")
     )
-    val matrixFile = rootProject.file("docs/v2-features/matrix.md")
+    val matrixFile = rootProject.file("docs/features.md")
     resultDirs.filter { it.exists() }.forEach { inputs.dir(it) }
     inputs.file(matrixFile)
     outputs.file(matrixFile)

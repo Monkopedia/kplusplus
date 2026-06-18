@@ -1,237 +1,141 @@
 # K++
 
-K++ lets you call C++ libraries from Kotlin/Native. It parses C++ headers and generates the necessary C interop wrappers automatically, handling the complexity of types, templates, and references so you don't have to write them by hand.
+K++ lets you call C++ libraries from Kotlin/Native. It parses C++ headers and generates the
+C-interop wrappers automatically — handling types, templates, references, and ownership so you
+don't have to write them by hand.
+
+> **Status:** K++ now **self-hosts** — it parses C++ using bindings it generated of Clang's own
+> C++ AST, rather than the C `libclang` API it used to depend on. One consequence: building K++
+> (and the C++ front-end it ships) requires an LLVM/Clang toolchain. See
+> [docs/clang-runbook.md](docs/clang-runbook.md). The high-level story is in
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quickstart
 
-Add the Gradle plugin:
+Apply the Gradle plugin:
 
-```
+```kotlin
 plugins {
-    ...
-    id("com.monkopedia.kplusplus.plugin")
+    kotlin("multiplatform")
+    id("com.monkopedia.kplusplus.compiler")
 }
 ```
 
-Configure your C++ library import:
+Point it at the C++ library you want to bind:
 
-```
+```kotlin
 kplusplus {
-    config {
-        compiler = "./g++" // Compiler path is picked up from konan if unspecified.
-        pkg = "com.monkopedia.example.c++"
-        moduleName = "kplusplus_example"
-        errorPolicy = ErrorPolicy.LOG
-        referencePolicy = ReferencePolicy.INCLUDE_MISSING
-    }
-    import {
-        library.srcDir("../")
-        library.include("libv8_monolith.a")
-        headers.srcDir("../include/")
-        headers.include("v8-combined.h")
-    }
+    header("../include/mylib.h")      // the header(s) to bind
+    headerDirectory("../include/")    // extra -I include roots
+    library("../libmylib.a")          // the native library to link
+
+    cppStandard = "c++17"             // default c++14
+
+    // Force template specializations you use (C++ instantiates templates at
+    // compile time, so each concrete type you call needs to be requested).
+    instantiate("std::vector<int>")
 }
 ```
 
-For a complete example of usage, see the [example](example) which wraps and calls into v8 code.
+Build, and the generated Kotlin bindings are on the classpath — call your C++ API directly.
 
-# Tools
+For a complete, runnable example that binds and executes **V8** (Google's JavaScript engine), see
+[`example/kotlin_project`](example/kotlin_project). It's the heavyweight demo (it links the ~62 MB
+`libv8_monolith.a`); run it with `./gradlew runDebugExecutableKlinker -PenableClang`.
 
-Currenttly K++ contains 2 tools, and also is frequently used with
-[klinker](https://github.com/Monkopedia/klinker) for builds. The parsing and wrapping of code is
-done using krapper, and integration of krapper into gradle builds is done with the K++ gradle
-plugin.
+### Fixups
 
-## Krapper
+Real libraries have a few shapes the generator can't bind cleanly on its own. Rather than
+hand-edit generated code, you adjust the model declaratively in a `fixup { }` block:
 
-Krapper gen (pronounced wrapper) is a standalone executable that creates the wrapping code for
-C++ and kotlin. It handles it in 3 stages, it parses the header into methods and types, then
-resolves references contained within those types, then generates code which wraps all of classes
-and methods.
-
-The executable can be controlled as much as possible from the command line, however the design is
-to be used in a service mode, using `-s` where it hosts a ksrpc service an stdin/out with the
-interface defined in [KrapperService](krapper_gen/src/commonMain/kotlin/KrapperService.kt).
-
-### Parsing
-
-Parsing of the code is done using libclang's C indexing API. Then it traverses the tree produced
-and the classes included into its own wrapping implementation (Wrapped\* classes).
-
-### Resolving
-
-Resolving ensures references from the wrapped instances exist before turning them into Resolved\*
-classes, and allows custom mapping through the ksrpc service. Custom mappings can add, remove, or
-modify the structure of the Resolved\* tree/instances, which will modify what code is generated in
-the third step.
-
-### Output
-
-During output, krapper generates C/C++ headers that wrap the relevant C++ classes, then it compiles
-the code into a static library and generates the kotlin code to call into the C-interop compatible
-headers.
-
-## K++ Gradle Plugin
-
-The K++ gradle plugin is mostly designed at making it easy to embed Krapper in a gradle build.
-However it does do a bit of work to support a clean API for doing the custom mappings needed by
-krapper from a gradle build script, this allows for a very integrated interop experience. For
-example, the following clears the const return type off a number of methods to correct the
-generated code.
-
-```
+```kotlin
 kplusplus {
-    config {
-        referencePolicy = ReferencePolicy.INCLUDE_MISSING
-    }
-    import {
-        ...
-        map(ResolvedMethod) {
-            find {
-                (methodReturnType startsWith "const v8::Local<") or
-                    (methodReturnType startsWith "const v8::Maybe<") or
-                    (methodReturnType startsWith "const v8::MaybeLocal<") or
-                    (methodReturnType startsWith "const v8::ScriptOrigin<") or
-                    (methodReturnType startsWith "const v8::Location<")
-            }
-            onEach { element ->
-                println("Clearing const return type on $element")
-                val nonConstReturn = element.returnType.copy(
-                    typeString = element.returnType.typeString.removePrefix("const ")
-                )
-                element.replaceWith(element.copy(returnType = nonConstReturn))
-            }
-        }
+    header("../include/v8-combined.h")
+    headerDirectory("../include/")
+    library("../libv8_monolith.a")
+    cppStandard = "c++17"
+
+    fixup {
+        // Strip a leading `const` from value-semantic wrapper returns.
+        stripConstFromReturnType("v8::Local<")
+        stripConstFromReturnType("v8::Maybe<")
+
+        // Drop specific methods (by their generated uniqueCName) that produce
+        // uncompilable wrappers — e.g. copy ops of a NonCopyable type.
+        removeMethod("v8_Persistent_v8_Value_op_assign")
+
+        // Built-in fixups for known v8 / smart-pointer patterns.
+        addUniquePtrGet()
+        scriptOriginOptionsFix()
     }
 }
 ```
 
-The plugin generates an instance of the import for each compilation on the project and connects
-a dependent task to execute krapper as needed. It also generates the necessary cinterop declaration
-that uses the output from krapper.
+Other knobs: `referencePolicy` (`IGNORE_MISSING` / `INCLUDE_MISSING`), `only(...)` / `onlyFile(...)`
+to scope the bound surface, `noRtti` for `-fno-rtti` libraries, `rootPackage` for the generated
+package root, and `compiler` to override the C++ compiler.
 
-# Usage
+## How it works
 
-The common config block declares how to handle errors, where the compiler lives, etc.
+K++ runs a three-stage pipeline:
 
-```
-kplusplus {
-    config {
-        compiler = "./g++" // Compiler path is picked up from konan if unspecified.
-        pkg = "com.monkopedia.example.c++"
-        moduleName = "kplusplus_example"
-        errorPolicy = ErrorPolicy.LOG
-        referencePolicy = ReferencePolicy.INCLUDE_MISSING
-        debug = true // Sets extra debugging inside krapper gen executable
-    }
-    ...
-}
-```
+1. **Parse** — the C++ front-end (`cppfrontend`) reads the headers and produces a structural model
+   of the declarations and types. This front-end is itself built from K++-generated bindings of
+   Clang's C++ AST (the self-hosting part).
+2. **Resolve** — `krapper_gen` takes that model, makes sure every referenced type is materialized,
+   forces the requested template instantiations, and applies your `fixup { }` directives.
+3. **Generate** — it emits a C/C++ wrapper, compiles it into a static library, and generates the
+   Kotlin/Native cinterop bindings that call into it.
 
-Then a number of imports may be defined, although its likely its just one. Imports are primarily
-the definition of the headers and library being imported, followed by a series of mappings that get
-executed during wrapping.
+The `com.monkopedia.kplusplus.compiler` Gradle plugin wires all of this into the Kotlin/Native
+build so it runs as part of normal compilation. K++ is frequently paired with
+[klinker](https://github.com/Monkopedia/klinker) for the final native link.
 
-```
-kplusplus {
-    ...
-    import {
-        // library and headers sourcesets specify the target files
+## Repository layout
 
-        // Mappings are filtered with a DSL for selection to speed up the process
-        // then executed with arbitrary code as a callback into the gradle process.
-        // All resolved types are immutable, so changes can only be made by calling add, remove, or
-        // replaceWith from within a mapping function.
-        // This simply targets a number of methods that didn't wrap properly and are preventing
-        // compiling
-        map(ResolvedMethod) {
-            find {
-                parent(qualified eq "v8::Persistent<v8::Value>") or
-                    parent(qualified eq "v8::platform::tracing::TraceWriter")
-            }
-            onEach { element ->
-                if (element.uniqueCName == "_v8_Persistent_v8_Value_new" ||
-                    element.uniqueCName == "v8_Persistent_v8_Value_op_assign" ||
-                    element.uniqueCName == "v8_platform_tracing_TraceWriter_create_system_instrumentation_trace_writer"
-                ) {
-                    println("Removing $element")
-                    element.remove()
-                }
-            }
-        }
-    }
-}
-```
+| Module | What it is |
+|--------|------------|
+| `krapper_gen/` | The core generator: resolve + codegen, driven by the parsed model. |
+| `krapper_model/` | The shared parse-output model (the data both stages speak). |
+| `cppfrontend/` | The self-hosted C++ front-end (parses headers → model), built on generated Clang-AST bindings. |
+| `compiler/` | The v2 Kotlin/Gradle compiler plugin (`com.monkopedia.kplusplus.compiler`). |
+| `featuregen/`, `feature-tests/` | Test harnesses: the generated-binding feature suite, and the raw-cinterop baseline. |
+| `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module. |
+| `clangwalk/` | A self-host proof: walks a real Clang AST entirely on generated bindings. |
+| `example/kotlin_project/` | The V8 sample. |
 
-# Limitations / Problems
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture and
+[docs/features.md](docs/features.md) for the supported-C++-feature matrix.
 
-## User intervention
+## Limitations
 
-The biggest limitation is the problem that usage/wrappers of any given library generally require
-some hand crafting of the wrappers for it. It would be nice to remove this, but doesn't seem
-feasible for me at the moment.
+- **Last-mile fixups.** Binding a real library still needs a handful of `fixup { }` directives for
+  shapes that don't map cleanly. The goal is to make that last mile small and declarative, not to
+  eliminate it.
+- **Template instantiations are explicit.** Because C++ specializes templates at compile time, each
+  concrete specialization you call must be requested via `instantiate(...)` (or referenced from a
+  bound signature). There's no automatic discovery of arbitrary specializations.
+- **Unbindable shapes are dropped, not faked.** When the generator hits a construct it can't model
+  faithfully, it skips it (and logs) rather than emit something that won't compile.
 
-## Template specialization
+## Background
 
-Currently template specialization wrappers are generated for any reference to a specialization of
-a template detected during resolving. In the future this should be expanded to have an easy way to
-add new ones at the mapping step, but for now this is quite a limatiton as extra references to
-dummy specializations would be needed for those wrappers to be generated.
+This started because I wanted some Kotlin/Native code to call into V8, and assumed it'd be easy —
+Kotlin/Native has C interop, after all. But V8 has no C API, and Kotlin/Native only interops with C
+and Objective-C, not C++. I went looking for a general way to bridge C++ and found nothing
+generalizable — just instructions for hand-writing a few wrapper methods. So I tried to do it
+myself.
 
-## Inheritance
+Each layer revealed a harder one: parsing out type information to handle constants, pointers, and
+references; then the special handling for native types and strings; then templates. I'd hoped to
+shelve templates, but hadn't reckoned with how much of C++ is STL, or how fundamentally C++
+templates (compile-time specialization) differ from Kotlin generics. Early attempts hardcoded
+pieces of STL; that obviously couldn't scale to, say, a template method returning a template type
+that might be native, a pointer, a const, or some combination.
 
-Currently base classes are handled by adding wrappers of the base classes to the wrapper of the
-class itself. This works for giving access to the basic methods, but does not handle casting at all
-and causes problems in calling methods.
-
-## Abstract Classes/Interfaces
-
-Currently there is no support for extending classes, let alone the case where methods need to be
-implemented.
-
-# Background
-
-This is a bit of pointless story about K++ becoming what it is, skip it if you find it boring.
-
-This all started because I wanted some kotlin/native code I was writing to call into v8. I thought
-no problem, kotlin/native has C interop, so it shouldn't be a big deal. However it turns out that
-v8 does not have a C API, and kotlin/native does not interop with C++, only C and Objective-C.
-
-I did countless hours of research thinking this must be a mistake. Someone out there must be
-using C++ with Kotlin/Native, I could have sworn I had even heard of it. However, I found nothing
-generalizable, just instructions on how to write a couple of wrapping methods to call from C.
-I thought this must be an oversight, it can't be that hard, I'll just go do it myself.
-
-Well I created this repository over a year before writing this README, and now finally have
-something which, might work, in just a few cases, sometimes, and that was not easy.
-
-At first, I thought that I simply needed to create typeless wrappers that manually casted to the
-correct things, and it would magically work. The hardest thing about that would be tying into
-MemScoped and make sure that allocations/frees happened in the right places. Then I realized I
-had to parse out the type information so I could handle constants, pointers, references, etc.
-After this I realized all of the special handling required for native types and strings.
-
-After several layers of finding new complexities to make the project even harder, I finally ran
-into templates. At the beginning I thought templates were something I could shelve until later
-on, however I hadn't accounted for how much STL is used throughout C++ code (I have never really
-used C++ in a professional setting, and have a lot of gaps in knowledge with it). I also had not
-considered the fact that C++ templates and kotlin templates were so fundamentally different,
-because C++ generates the specializations of templates at compile time.
-
-My early attempts at templates were as silly as hardcoding pieces of STL into my wrapper program,
-and then to generate them for any referenced types. This quickly became clear that this was not
-nearly sufficient, hard coding still couldn't handle the complexity required when a template class
-has a method that returns a template type. That method would return something that could be native,
-or a pointer, or a const, or some other combination of thengs that affect how the code should
-be wrapped.
-
-At this point I realized why no one more familiar with C++ had done this, and I thought
-my attempts were dead. There was simply no way to create a problem that could handle wrapping more
-than one C++ library because of the innate complexity and special cases needed to support even one
-moderate size library.
-
-The revival came while realizing not to solve it for all libraries, instead solve it part of the
-way for all, and use well-tooled manual intervention for the last mile of special cases. This
-involved switching to a 3-stage system, parse, resolve, and generate, which allows for easy
-customization at the resolve stage. This customization is indended to be as light weight as
-possible and easy to do from the build system.
+The revival came from giving up on solving it for *all* libraries automatically, and instead
+solving most of it for all of them — with light, well-tooled manual intervention for the last mile.
+That's the three-stage parse / resolve / generate design, with customization concentrated at the
+resolve stage (the `fixup { }` block). The most recent chapter took it further still: K++ replaced
+its dependency on the C `libclang` API by generating its own bindings of Clang's full C++ AST — so
+the tool now parses C++ using a binding it produced itself.
