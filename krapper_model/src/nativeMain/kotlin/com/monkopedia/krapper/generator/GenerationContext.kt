@@ -34,7 +34,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType
  * without threading a handle through every signature. [reset] re-establishes a
  * clean pass (called from `IndexedServiceImpl.init`, next to [DropLedger.reset]) so
  * sequential in-process runs no longer leak the intern cache into one another — the
- * order-sensitivity called out in docs/clang-bootstrap.md and issue #11.
+ * order-sensitivity called out in docs/campaigns/self-hosting.md and issue #11.
  */
 object GenerationContext {
     /**

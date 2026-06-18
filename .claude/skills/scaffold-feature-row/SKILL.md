@@ -1,25 +1,25 @@
 ---
 name: scaffold-feature-row
-description: This skill should be used when the user asks to "scaffold row PR-XYZ", "add row XYZ", "scaffold feature-test row", "land row XYZ", or otherwise refers to materializing a signed-off row from docs/v2-features/matrix.md into actual test files under :feature-tests. Drives the C++ surface + Kotlin tests + status update workflow.
+description: This skill should be used when the user asks to "scaffold row PR-XYZ", "add row XYZ", "scaffold feature-test row", "land row XYZ", or otherwise refers to materializing a signed-off row from docs/features.md into actual test files under :feature-tests. Drives the C++ surface + Kotlin tests + status update workflow.
 version: 0.1.0
 ---
 
 # scaffold-feature-row
 
-Translates a signed-off row in `docs/v2-features/matrix.md` into real test
+Translates a signed-off row in `docs/features.md` into real test
 artifacts under `:feature-tests` and updates the row's status when the test
 runs.
 
 ## When this skill applies
 
 - User says "scaffold row PR-XYZ" / "land row PR-XYZ" / "add row XYZ".
-- User signs off on a new row in `matrix.md` and asks to materialize it.
+- User signs off on a new row in `features.md` and asks to materialize it.
 - User asks to "run the matrix" or "catch the harness up to the matrix" —
   in which case loop over every `⚪`-status row.
 
 ## Source of truth
 
-- **Rows:** `docs/v2-features/matrix.md`. Status column owns the row state
+- **Rows:** `docs/features.md`. Status column owns the row state
   (`⚪` not scaffolded → `🟢` / `🟡` / `🔴`).
 - **Tests:** `feature-tests/`. C++ in `src/cppMain/`, Kotlin in
   `src/nativeTest/kotlin/`. One `.cc` per row in `rows/`, one Kotlin test
@@ -30,7 +30,7 @@ runs.
 
 ## Procedure (do these in order)
 
-1. **Read the row** from `matrix.md`. Extract: id, C++ signature, test-case
+1. **Read the row** from `features.md`. Extract: id, C++ signature, test-case
    bullets, notes.
 2. **Pick the family.** Match the C++ signature shape against the family
    templates in `families/`:

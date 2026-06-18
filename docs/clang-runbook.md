@@ -4,7 +4,7 @@ Operational setup for building and running the clang self-bootstrap modules (`:c
 `:cppfrontend`). These are the stage1 consumers that bind Clang's own C++ AST
 (`libclang-cpp`) and run on kplusplus-generated bindings. They are **off by default** and
 require an LLVM/Clang toolchain a plain build host won't have. The campaign strategy/log
-lives in [`clang-bootstrap.md`](clang-bootstrap.md); this is the how-to-build companion.
+lives in [`campaigns/self-hosting.md`](campaigns/self-hosting.md); this is the how-to-build companion.
 
 ## 1. LLVM/Clang toolchain
 
@@ -137,4 +137,4 @@ normal build picks up the generated bindings.
 - **Known issue — `:clangwalk` release generation against LLVM-22.1.6.** There is a current
   codegen gap around `clang.attr.Kind` / `clang.attr.value` in the gated `:clangwalk`
   release generation, tracked separately. If you hit it, it's known — see the
-  [#11 campaign](clang-bootstrap.md) for status.
+  [#11 campaign](campaigns/self-hosting.md) for status.
