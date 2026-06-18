@@ -37,7 +37,7 @@ repositories {
 
 // ---- v8 brick 3 (#99): LINK the executable against the system libstdc++ ----
 // PORT of featuregen's #78 recipe (see featuregen/build.gradle.kts). The cpp front-end
-// (kpp.frontend.kotlin_project=cpp) parses v8 against the SYSTEM libstdc++ (gcc-16 here),
+// (kpp.frontend.v8=cpp) parses v8 against the SYSTEM libstdc++ (gcc-16 here),
 // so the faithful generated wrapper references newer-libstdc++ internals that K/N's
 // BUNDLED gcc-8.3 sysroot (caps at GLIBCXX_3.4.25) cannot resolve. The system libstdc++
 // HAS those symbols and is backward-ABI-compatible, so point K/N's own linker at the REAL
@@ -134,12 +134,12 @@ kotlin {
 // Kotlin closures running against the krapper IR model. Same four fixups
 // here, expressed declaratively. No Kotlin closures, no krapper-IR imports.
 kplusplus {
-    header("../include/v8-combined.h")
-    headerDirectory("../include/")
-    library("../libv8_monolith.a")
+    header("include/v8-combined.h")
+    headerDirectory("include/")
+    library("libv8_monolith.a")
     // v8 needs C++17 (the default is c++14); the cpp front-end parses AND the wrapper
     // compiles under this standard. The frontend flip itself is in gradle.properties
-    // (kpp.frontend.kotlin_project=cpp), built with -PenableClang.
+    // (kpp.frontend.v8=cpp), built with -PenableClang.
     cppStandard = "c++17"
 
     // v8 brick 2 (#99): force the v8::Maybe<int> model so Value::Int32Value(context) — whose

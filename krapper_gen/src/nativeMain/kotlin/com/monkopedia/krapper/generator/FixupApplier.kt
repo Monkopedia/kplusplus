@@ -45,7 +45,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
  *
  * Each fixup type maps to one mapping registration. The bodies are lifted
  * verbatim from the v1 hardcoded v8-specific mappings in App.kt (now removed)
- * and the v1 DSL mappings in example/kotlin_project/build.gradle.kts — same
+ * and the v1 DSL mappings in samples/v8/build.gradle.kts — same
  * semantics, just expressed as a narrow data API instead of arbitrary
  * closures.
  *

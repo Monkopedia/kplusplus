@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-rootProject.name = "kotlin_project"
+rootProject.name = "v8"
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -23,7 +23,7 @@ pluginManagement {
     // v2 plugin lives in the main repo as an included build. Two layouts
     // are supported:
     //   * The canonical /home/jmonk/git/kplusplus checkout — `../../`.
-    //   * A worktree under .claude/worktrees/<id>/example/kotlin_project,
+    //   * A worktree under .claude/worktrees/<id>/samples/v8,
     //     where `../../` is the worktree root.
     // Either way, `../../` is the kplusplus root that knows about the
     // compiler subplugin via its own settings.gradle.kts.
