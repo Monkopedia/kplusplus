@@ -31,11 +31,10 @@ import org.gradle.api.Action
  *      forwarded to krapper_gen via --fixup-file.
  *   3. (future) Per-spec compiler options, package overrides, etc.
  *
- * This block intentionally does not re-introduce the v1 mapping DSL. If
- * you need arbitrary FIR introspection or per-method closures, that's a
- * signal to either (a) extend the [Fixup] sealed type with a new narrow
- * directive or (b) drop back to the legacy `com.monkopedia.kplusplus.plugin`
- * (which is still maintained for backwards compatibility).
+ * This block intentionally does not re-introduce the v1 mapping DSL (the v1
+ * `com.monkopedia.kplusplus.plugin` was removed). If you need a semantic
+ * correction the current fixups can't express, extend the [Fixup] sealed type
+ * with a new narrow directive rather than reaching for arbitrary closures.
  */
 open class KPlusPlusExtension {
 
