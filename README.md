@@ -39,9 +39,11 @@ kplusplus {
 
 Build, and the generated Kotlin bindings are on the classpath — call your C++ API directly.
 
-For a complete, runnable example that binds and executes **V8** (Google's JavaScript engine), see
-[`example/kotlin_project`](example/kotlin_project). It's the heavyweight demo (it links the ~62 MB
-`libv8_monolith.a`); run it with `./gradlew runDebugExecutableKlinker -PenableClang`.
+Runnable samples live under [`samples/`](samples). Start with
+[`samples/minimal`](samples/minimal) — a tiny hand-written C++ geometry library bound and run
+end-to-end (no stdlib, no monolith), the fastest first contact. For the heavyweight demo that
+binds and executes **V8** (Google's JavaScript engine), see [`samples/v8`](samples/v8); it links
+the ~62 MB `libv8_monolith.a`. Run either with `./gradlew runReleaseExecutableKlinker -PenableClang`.
 
 ### Fixups
 
@@ -102,7 +104,8 @@ build so it runs as part of normal compilation. K++ is frequently paired with
 | `featuregen/`, `feature-tests/` | Test harnesses: the generated-binding feature suite, and the raw-cinterop baseline. |
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module. |
 | `clangwalk/` | A self-host proof: walks a real Clang AST entirely on generated bindings. |
-| `example/kotlin_project/` | The V8 sample. |
+| `samples/minimal/` | A tiny standalone sample binding a hand-written C++ geometry library — the newcomer's first contact. |
+| `samples/v8/` | The heavyweight V8 sample. |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture and
 [docs/features.md](docs/features.md) for the supported-C++-feature matrix.

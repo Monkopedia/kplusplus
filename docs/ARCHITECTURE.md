@@ -41,7 +41,8 @@ Kotlin/Native build so it runs as part of normal compilation.
 | `feature-tests/` | The raw-cinterop baseline: hand-written `.def` files compiled directly, no generator. Proves the C++ interop works before the generator is in the picture. Its `matrixReport` task drives [features.md](features.md). |
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module (a regression guard for the generation orchestration). |
 | `clangwalk/` | A self-host proof: parses C++ and walks the Clang AST entirely on generated bindings, with assertions. The smallest end-to-end demonstration that the bootstrap works. |
-| `example/kotlin_project/` | The V8 sample (standalone; not in the main build). Binds and runs Google's V8 JavaScript engine. |
+| `samples/minimal/` | A tiny standalone sample (not in the main build) binding a hand-written C++ geometry library — no stdlib, no monolith; the newcomer's first contact. |
+| `samples/v8/` | The V8 sample (standalone; not in the main build). Binds and runs Google's V8 JavaScript engine. |
 
 ## Self-hosting and the build-time LLVM dependency
 
