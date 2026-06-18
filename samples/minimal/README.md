@@ -30,7 +30,7 @@ Expected output:
 ```
 Rect area: 6.0
 distance (0,0)->(3,4): 5.0
-center: (1.0, 1.0)
+center: (1.0, 1.5)
 ```
 
 ## Requirements
