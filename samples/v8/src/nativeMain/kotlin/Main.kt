@@ -11,7 +11,6 @@ import v8.MaybeLocal__ObjectTemplate.Companion.MaybeLocal__ObjectTemplate
 import v8.MaybeLocal__Value.Companion.MaybeLocal__Value
 import v8.NewStringType
 import v8.Script.Companion.Compile
-import v8.Value
 import v8.String.Companion.NewFromUtf8
 import v8.V8.Companion.Dispose
 import v8.V8.Companion.DisposePlatform
@@ -133,15 +132,12 @@ fun main(args: Array<String>) {
                     ).ToLocalChecked()
                     val numScript = Compile(context, numSource, null).ToLocalChecked()
                     val numResult = numScript.reference()?.Run(context)?.ToLocalChecked()
-                    // Local<Value>.reference() returns the EMPTY marker interface ValueApi (a
-                    // polymorphic base gets only `val ptr`, with the real methods on the concrete
-                    // Value class), so the `as? Value` downcast recovers them — reference() does
-                    // construct a real Value under the hood, so the cast always succeeds. See the
-                    // tracked generator gap (#107): a Local<PolymorphicBase>.reference() should
-                    // expose the base's instance methods directly. Int32Value -> Maybe<int>;
-                    // FromJust() unwraps the present value (the script always produces a number).
-                    val numValue = numResult?.reference() as? Value
-                    val computed = numValue?.Int32Value(context)?.FromJust()
+                    // Local<Value>.reference() now returns the CONCRETE Value (#107 fixed):
+                    // the deref accessor keeps the concrete type, so Value's instance methods
+                    // (here the NON-virtual Int32Value) are reachable directly — no `as? Value`
+                    // downcast. Int32Value -> Maybe<int>; FromJust() unwraps the present value
+                    // (the script always produces a number).
+                    val computed = numResult?.reference()?.Int32Value(context)?.FromJust()
                     println("Computed: $computed")
                 }
             }

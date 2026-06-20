@@ -1714,6 +1714,14 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // `fun in(...)` (won't parse). Back-tick-escape it (mirrors the param/field path).
         .escapeKotlinKeyword()
 
+    // The C++ dereference operators `operator*` ([ResolvedOperator.REFERENCE]) and
+    // `operator->` ([ResolvedOperator.POINTER_REFERENCE]) on a `Local<T>`/pointer wrapper.
+    // Their declared return must stay CONCRETE (not the base-interface remap) — see #107 and
+    // the retType comment in [generateBasicMethod].
+    private fun isDerefAccessor(method: ResolvedMethod): Boolean =
+        method.operator == ResolvedOperator.REFERENCE ||
+            method.operator == ResolvedOperator.POINTER_REFERENCE
+
     private fun KotlinCodeBuilder.generateBasicMethod(
         method: ResolvedMethod,
         uniqueCName: Symbol,
@@ -1726,16 +1734,30 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             name = methodName.kotlinMethodName()
             // Declared return upcast to a base interface when applicable; body keeps the
             // concrete returnType (constructs the concrete wrapper). See onGenerate(method).
-            // EXCEPT the index get: it returns a CONTAINER ELEMENT, which must stay
-            // CONCRETE — the synthesized `Iterable<Elem>`/`iterator()` (detectIndexIterable)
-            // declares the raw element type, and the element's own methods (e.g. a walked
-            // `clang::Decl`'s getDeclKindName/asNamedDecl) live on the concrete class, not the
-            // (member-less) base interface. Remapping the get to `DeclApi` both mismatched
-            // `next()` and made the elements useless. This covers BOTH the `[]` operator
-            // ([ResolvedOperator.IND]) AND the `get`/`at`-keyed fallbacks (via the
-            // [keepConcreteElement] flag the named-method path sets from [isIndexGetMethod]).
+            // EXCEPT positions that must stay CONCRETE:
+            //  - the index get: it returns a CONTAINER ELEMENT — the synthesized
+            //    `Iterable<Elem>`/`iterator()` (detectIndexIterable) declares the raw element
+            //    type, and the element's own methods (e.g. a walked `clang::Decl`'s
+            //    getDeclKindName/asNamedDecl) live on the concrete class, not the (member-less)
+            //    base interface. Remapping the get to `DeclApi` both mismatched `next()` and
+            //    made the elements useless. Covers BOTH the `[]` operator ([ResolvedOperator.IND])
+            //    AND the `get`/`at`-keyed fallbacks (via the [keepConcreteElement] flag the
+            //    named-method path sets from [isIndexGetMethod]).
+            //  - the dereference accessors `reference()`/`pointer_reference()` (operator*/->
+            //    on a `Local<T>`/pointer wrapper, [isDerefAccessor]): they yield the WRAPPED
+            //    element, which must stay CONCRETE. The base interface only carries VIRTUAL
+            //    methods (baseInterfaceMethods, #107), so for a base whose instance methods are
+            //    NON-virtual (e.g. v8::Value's Int32Value/IsString) `<Base>Api` is an EMPTY
+            //    marker — widening the deref return to it makes every concrete method
+            //    unreachable (forcing a manual `as? Value` downcast). The body already builds
+            //    the concrete `Value(ptr, memScope)`, so keep the declared type concrete too;
+            //    genuine polymorphic METHOD positions (a method returning/taking a base) still
+            //    remap, so subclass substitution there is unaffected.
             retType = type(
-                if (method.operator == ResolvedOperator.IND || keepConcreteElement) {
+                if (method.operator == ResolvedOperator.IND ||
+                    isDerefAccessor(method) ||
+                    keepConcreteElement
+                ) {
                     method.returnType
                 } else {
                     remapReturnType(method.returnType)
