@@ -47,6 +47,15 @@ jobs:
           sudo ln -sf "$(command -v llvm-config-${{ matrix.llvm }})" /usr/local/bin/llvm-config
           echo "clang++:     $(clang++ --version | head -1)"
           echo "llvm-config: $(llvm-config --version)  libdir=$(llvm-config --libdir)"
+          # The committed seed wrapper (#include <clang/AST/...>) is compiled with only
+          # `-I krapped`; it assumes the Clang/LLVM headers are on the default include
+          # path (true on Arch, our dev box). apt.llvm.org installs them under
+          # /usr/lib/llvm-<v>/include, so surface that via CPATH (honored by clang) to
+          # every compile in the build — no plugin change needed.
+          echo "CPATH=$(llvm-config --includedir)" >> "$GITHUB_ENV"
+          # Runtime: let the freshly-built binary find libLLVM/libclang-cpp for the
+          # inspect step (they live in the versioned libdir, not a default -L path).
+          echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
       - name: Build cppfrontend (release, klinker)
         run: |
