@@ -61,6 +61,39 @@ jobs:
           # inspect step (they live in the versioned libdir, not a default -L path).
           echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
+      # Probe 2 build-compatibility diagnostic: run the SEED WRAPPER COMPILE
+      # directly, ahead of Gradle, mirroring the exact command the
+      # :cppfrontend:kplusplusSync task issues (KPlusPlusCompilerGradlePlugin.kt:
+      # clang++ -std=c++17 -c -fPIE -I krapped -DV8_COMPRESS_POINTERS
+      # cppfrontend.cc). The seed's Clang-AST bindings were generated against LLVM
+      # 22's headers; this surfaces the raw clang++ diagnostic (Gradle's inheritIO
+      # buffering can drop it from the CI log) so a non-22 compile FAILURE shows its
+      # root cause (renamed/removed AST API) directly. Non-fatal — the Gradle build
+      # below is still the job's real pass/fail gate; this only captures the WHY.
+      - name: Seed compile diagnostic (raw clang++ on cppfrontend.cc)
+        run: |
+          set -uxo pipefail
+          KR=cppfrontend/krapped
+          echo "### Seed wrapper compile against LLVM ${{ matrix.llvm }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          clang++ -std=c++17 -fsyntax-only -fPIE \
+            -I"$KR" -DV8_COMPRESS_POINTERS "$KR/cppfrontend.cc" \
+            > seed-compile.out 2>&1
+          rc=$?
+          echo "clang++ exit=$rc" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            echo "-- first errors --" | tee -a "$GITHUB_STEP_SUMMARY"
+            grep -E 'error:' seed-compile.out | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "seed compiles clean against LLVM ${{ matrix.llvm }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # Always print the full diagnostic to the raw log for the record.
+          echo "===== full clang++ output ====="
+          cat seed-compile.out
+          exit 0
+
       - name: Build cppfrontend (release, klinker)
         run: |
           set -euxo pipefail
