@@ -132,7 +132,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     }
 
     override suspend fun requestInstantiation(req: InstantiationRequest) {
-        val target = "${req.base}<${req.args.joinToString(", ")}>"
+        val target = req.spec
         requested.add(target)
         // The forcing struct's name + header content are SHARED with the cpp front-end
         // (ForcingHeader, :krapper_model): the cppfrontend binary synthesizes the same

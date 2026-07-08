@@ -30,7 +30,14 @@ data class IndexRequest(
 )
 
 @Serializable
-data class InstantiationRequest(val base: String, val args: List<String>)
+data class InstantiationRequest(val base: String, val args: List<String>) {
+    /**
+     * The canonical `base<arg, arg>` specialization spelling. This is the string every
+     * consumer keys instantiations on (forcing-model paths, the requested set), so it lives
+     * here to keep those sites in lockstep instead of being hand-rebuilt at each one.
+     */
+    val spec: String get() = "$base<${args.joinToString(", ")}>"
+}
 
 @KsService
 interface KrapperService : RpcBidiService {
