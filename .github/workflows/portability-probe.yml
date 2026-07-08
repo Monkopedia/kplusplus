@@ -101,13 +101,13 @@ jobs:
           # bases of varying glibc/libstdc++ age — expected PASS, tests the runtime floor.
           - name: "ubuntu-24.04 + llvm.org 22"
             image: "ubuntu:24.04"
-            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils software-properties-common && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
           - name: "ubuntu-22.04 + llvm.org 22"
             image: "ubuntu:22.04"
-            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils software-properties-common && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
           - name: "debian-12 + llvm.org 22"
             image: "debian:12"
-            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils software-properties-common && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
           # Native distro LLVM — different majors + different SONAME conventions.
           - name: "archlinux + native llvm (~22)"
             image: "archlinux:latest"
