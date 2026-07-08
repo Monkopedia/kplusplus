@@ -20,6 +20,9 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     id("com.monkopedia.kplusplus.compiler")
     id("com.monkopedia.klinker.plugin") version "0.2.0"
+    // #122 step 1.2 — publish the stage-0 cppfrontend binary to mavenLocal as an
+    // immutable bootstrap anchor. See the stage-0 publication block near the bottom.
+    `maven-publish`
 }
 
 repositories {
@@ -395,5 +398,136 @@ tasks.register<Exec>("handoffInstGenerate") {
             "handoffInstGenerate: cpp instantiation-forcing run compiled + materialized " +
                 "the specialization and recovered items()"
         )
+    }
+}
+
+// ---- #122 step 1.2: the STAGE-0 mavenLocal bootstrap anchor ----
+//
+// Publish the cppfrontend release binary to mavenLocal as an IMMUTABLE, non-SNAPSHOT
+// versioned artifact so the `=cpp` self-generating build can resolve its stage-0 parser
+// from a Maven coordinate instead of a hand-typed filesystem path. This is a ONE-TIME
+// transitional anchor (steady-state, #122 later makes "the last release" the stage-0):
+// deliberately the simplest thing that works, an artifact-only publication (a K/N linuxX64
+// executable is not a jar, so there is no software-component to wire — we attach the raw
+// binary with a `linuxX64` classifier + no extension).
+//
+// The published binary MUST come from the bootstrap SOURCE — the committed seed
+// (kpp.frontend.cppfrontend=seed, the gradle.properties default) — NEVER from =cpp, which
+// would be circular (a =cpp build needs a stage-0 to parse against). linkReleaseExecutableKlinker
+// under the default properties already builds from seed, so the publish task just depends on it.
+//
+// Everything here is additive + gated with the module (-PenableClang). The default build is
+// untouched: nothing sets kpp.stageZeroCppFrontend, and publishing/consuming is opt-in.
+val stage0Group = "com.monkopedia.kplusplus"
+val stage0Artifact = "cppfrontend-stage0"
+val stage0Version = "0.2.3-stage0"
+val stage0Classifier = "linuxX64"
+
+// Refuse to publish a binary that was built via the cpp self-generation path — that would
+// bake a =cpp-produced parser in as the "seed" anchor, defeating the point. The default
+// (gradle.properties) is =seed; only an explicit -Pkpp.frontend.cppfrontend=cpp trips this.
+val stage0BuiltFromCpp = findProperty("kpp.frontend.cppfrontend") == "cpp"
+
+publishing {
+    publications {
+        create<MavenPublication>("stage0") {
+            groupId = stage0Group
+            artifactId = stage0Artifact
+            version = stage0Version
+            // Artifact-only: attach the raw K/N executable. No `extension` (it is a bare
+            // ELF binary), classifier names the platform.
+            artifact(cppfrontendBinary) {
+                classifier = stage0Classifier
+                extension = ""
+            }
+        }
+    }
+}
+
+// Build the stage-0 binary from seed, then publish ONLY the stage0 publication to mavenLocal.
+// `publishStage0PublicationToMavenLocal` is the maven-publish-generated task; we wrap it in a
+// clearly-named entry point that also enforces the from-seed invariant and the binary build.
+tasks.named("publishStage0PublicationToMavenLocal") {
+    dependsOn("linkReleaseExecutableKlinker")
+    doFirst {
+        check(!stage0BuiltFromCpp) {
+            "publishStage0ToMavenLocal: refusing to publish a stage-0 anchor built with " +
+                "-Pkpp.frontend.cppfrontend=cpp — the anchor must be built FROM SEED (the " +
+                "gradle.properties default). Drop the =cpp override and re-run."
+        }
+        check(cppfrontendBinary.exists()) {
+            "publishStage0ToMavenLocal: expected the cppfrontend release binary at " +
+                "$cppfrontendBinary — linkReleaseExecutableKlinker should have produced it."
+        }
+    }
+}
+
+tasks.register("publishStage0ToMavenLocal") {
+    group = "kplusplus"
+    description =
+        "Build the cppfrontend release binary FROM SEED and publish it to mavenLocal as the " +
+            "immutable stage-0 bootstrap anchor $stage0Group:$stage0Artifact:$stage0Version " +
+            "(classifier $stage0Classifier). See #122 step 1.2."
+    dependsOn("publishStage0PublicationToMavenLocal")
+    doLast {
+        println(
+            "publishStage0ToMavenLocal: published $stage0Group:$stage0Artifact:$stage0Version " +
+                "(:$stage0Classifier) to mavenLocal (~/.m2/repository)."
+        )
+    }
+}
+
+// ---- Consumption seam: resolve the mavenLocal stage-0 for the =cpp build ----
+//
+// A resolvable configuration that pulls the published artifact by coordinate. Any =cpp
+// cppfrontend build can now resolve its stage-0 parser from mavenLocal instead of a hand-
+// typed path, and the `resolveStage0Path` task prints the resolved File so a self-generation
+// run can feed it into -Pkpp.stageZeroCppFrontend=<path> (the #122 step 1.1 override seam).
+//
+// This declares a dependency on an artifact-only (no-component) publication, so we ask for
+// the exact classifier + empty extension via an artifact selector; without it Gradle would
+// look for the default `.jar` that this publication never produces.
+val stage0 by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+dependencies {
+    // The published artifact has NO extension (a bare ELF binary), so the consumer must
+    // request the classifier + empty extension explicitly — otherwise Gradle appends the
+    // default `.jar` and misses the file. The `artifact { }` selector on the module
+    // dependency is the reliable way to pin classifier + empty extension.
+    stage0("$stage0Group:$stage0Artifact:$stage0Version") {
+        artifact {
+            name = stage0Artifact
+            classifier = stage0Classifier
+            extension = ""
+        }
+        // Artifact-only publication (no metadata/component); don't chase transitive deps.
+        isTransitive = false
+    }
+}
+
+// Where resolveStage0Path stages the executable copy of the resolved artifact.
+val stage0ExecFile = layout.buildDirectory.file("stage0/cppfrontend-stage0").get().asFile
+
+tasks.register("resolveStage0Path") {
+    group = "kplusplus"
+    description =
+        "Resolve the mavenLocal stage-0 cppfrontend binary ($stage0Group:$stage0Artifact:" +
+            "$stage0Version), stage an executable copy, and print its path for " +
+            "-Pkpp.stageZeroCppFrontend."
+    val stage0Files = stage0
+    val out = stage0ExecFile
+    doLast {
+        val resolved = stage0Files.singleFile
+        check(resolved.exists()) { "resolveStage0Path: resolved a non-existent file: $resolved" }
+        // A Maven repo does NOT preserve the executable bit, so the resolved artifact comes
+        // back mode 0644. runCppFrontendSync launches the parser via ProcessBuilder, which
+        // needs +x — copy it out to the build dir and mark it executable.
+        out.parentFile.mkdirs()
+        resolved.copyTo(out, overwrite = true)
+        out.setExecutable(true)
+        println("STAGE0_CPPFRONTEND=${out.absolutePath}")
     }
 }
