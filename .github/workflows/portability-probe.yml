@@ -83,3 +83,65 @@ jobs:
           name: cppfrontend-llvm${{ matrix.llvm }}
           path: cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend
           if-no-files-found: error
+
+  # Phase 1 run-matrix: take the LLVM-22 binary and see which {distro × LLVM}
+  # environments can actually load + start it. Driven via `docker run` from the host
+  # (not GH `container:`) so musl/Alpine and node-less images work, and one binary
+  # is tested everywhere. Each cell PRINTS a RESULT line (data, not a job failure),
+  # so the workflow stays green regardless of load outcome.
+  run-matrix:
+    name: Run — ${{ matrix.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # apt.llvm.org LLVM 22 (upstream SONAME libLLVM.so.22.1) across Debian-family
+          # bases of varying glibc/libstdc++ age — expected PASS, tests the runtime floor.
+          - name: "ubuntu-24.04 + llvm.org 22"
+            image: "ubuntu:24.04"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+          - name: "ubuntu-22.04 + llvm.org 22"
+            image: "ubuntu:22.04"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+          - name: "debian-12 + llvm.org 22"
+            image: "debian:12"
+            llvm_install: "apt-get update && apt-get install -y wget lsb-release gnupg ca-certificates binutils && wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && /tmp/llvm.sh 22"
+          # Native distro LLVM — different majors + different SONAME conventions.
+          - name: "archlinux + native llvm (~22)"
+            image: "archlinux:latest"
+            llvm_install: "pacman -Sy --noconfirm llvm clang binutils"
+          - name: "fedora-41 + native llvm (~19)"
+            image: "fedora:41"
+            llvm_install: "dnf install -y llvm-libs clang-libs libclang-cpp binutils findutils || dnf install -y llvm clang binutils findutils"
+          - name: "rockylinux-9 + native llvm"
+            image: "rockylinux:9"
+            llvm_install: "dnf install -y llvm-libs clang binutils findutils || dnf install -y llvm clang binutils findutils"
+          # musl boundary — glibc binary can't run here; documents the edge.
+          - name: "alpine (musl boundary)"
+            image: "alpine:latest"
+            llvm_install: "apk add --no-cache llvm-libs clang binutils || true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download cppfrontend binary (built against LLVM 22)
+        uses: actions/download-artifact@v4
+        with:
+          name: cppfrontend-llvm22
+          path: bin
+
+      - name: Probe ${{ matrix.name }}
+        run: |
+          set -uxo pipefail
+          chmod +x bin/cppfrontend .github/probe/run-in-container.sh
+          docker run --rm \
+            -e LLVM_INSTALL="${{ matrix.llvm_install }}" \
+            -e IMAGE_NAME="${{ matrix.name }}" \
+            -v "$PWD/bin/cppfrontend:/probe/cppfrontend:ro" \
+            -v "$PWD/.github/probe/run-in-container.sh:/run.sh:ro" \
+            "${{ matrix.image }}" sh /run.sh 2>&1 | tee probe-out.txt
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^RESULT=' probe-out.txt >> "$GITHUB_STEP_SUMMARY" || echo "RESULT=unknown (no RESULT line — see logs)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
