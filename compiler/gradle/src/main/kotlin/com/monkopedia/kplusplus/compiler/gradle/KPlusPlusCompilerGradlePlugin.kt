@@ -546,6 +546,16 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      */
     private fun resolveCppFrontend(target: Project): Pair<Any?, File> {
         val relBinary = "cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend"
+        // Bootstrap override (#122, step 1.1): when an EXTERNAL stage-0 cppfrontend binary is
+        // supplied via -Pkpp.stageZeroCppFrontend=<abs-path>, use it and declare NO task
+        // dependency (null link task). This is what breaks the self-hosting cycle: building
+        // :cppfrontend via -Pkpp.frontend.cppfrontend=cpp would otherwise resolve the parser
+        // to :cppfrontend's own link task -> a Gradle dependency cycle. With a null task the
+        // caller (dependsOn only when non-null) wires no self-edge, and runCppFrontendSync
+        // uses this .second path as the parser. Additive + gated: absent property = today's
+        // behavior exactly.
+        (target.findProperty("kpp.stageZeroCppFrontend") as? String)?.takeIf { it.isNotBlank() }
+            ?.let { return null to File(it) }
         val direct = target.rootProject.findProject(":cppfrontend")
         if (direct != null) {
             return direct.tasks.findByName("linkReleaseExecutableKlinker") to
