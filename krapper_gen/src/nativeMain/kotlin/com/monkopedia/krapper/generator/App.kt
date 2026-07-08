@@ -202,10 +202,10 @@ class KrapperGen : CliktCommand() {
             val idx = entry.indexOf('=')
             require(idx > 0) { "--forcingModel must be '<spec>=<path>', got: $entry" }
             val req = parseInstantiation(entry.substring(0, idx))
-            "${req.base}<${req.args.joinToString(", ")}>" to entry.substring(idx + 1)
+            req.spec to entry.substring(idx + 1)
         }
         val missing = instantiate.map { parseInstantiation(it) }
-            .map { "${it.base}<${it.args.joinToString(", ")}>" }
+            .map { it.spec }
             .filter { it !in cppForcingModelPaths }
         require(missing.isEmpty()) {
             "Every --instantiate spec requires a matching --forcingModel '<spec>=<path>' " +

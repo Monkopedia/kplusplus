@@ -25,8 +25,10 @@ class WrappedTemplateType(val baseType: WrappedType, val templateArgs: List<Wrap
         }
 
     init {
-        if (baseType.toString().endsWith("<${templateArgs.joinToString(", ")}>")) {
-            IllegalArgumentException("Looping templates $baseType $templateArgs").printStackTrace()
+        // A base whose spelling already ends in this exact `<args>` is a self-referential
+        // (looping) template we can't model; fail loudly rather than build a degenerate type.
+        require(!baseType.toString().endsWith("<${templateArgs.joinToString(", ")}>")) {
+            "Looping templates $baseType $templateArgs"
         }
     }
 
