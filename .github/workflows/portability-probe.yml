@@ -21,9 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Phase 1 builds against a single major (22 — the one our committed
-        # Clang-AST bindings target). Phase 2 widens this list.
-        llvm: [22]
+        # Phase 2 (build-compatibility probe): the committed seed Clang-AST
+        # bindings were generated against LLVM 22's headers. Attempt building
+        # them against a representative low/mid/current spread to learn whether a
+        # non-22 major is a cheap rebuild (seed compiles) or needs regenerated
+        # bindings (seed fails on renamed/removed AST API). fail-fast:false so
+        # every major attempts even if one fails to compile.
+        llvm: [18, 20, 22]
     steps:
       - uses: actions/checkout@v4
 
@@ -84,11 +88,16 @@ jobs:
           path: cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend
           if-no-files-found: error
 
-  # Phase 1 run-matrix: take the LLVM-22 binary and see which {distro × LLVM}
-  # environments can actually load + start it. Driven via `docker run` from the host
-  # (not GH `container:`) so musl/Alpine and node-less images work, and one binary
-  # is tested everywhere. Each cell PRINTS a RESULT line (data, not a job failure),
-  # so the workflow stays green regardless of load outcome.
+  # Phase 1 run-matrix (UNCHANGED): take the LLVM-22 binary and see which
+  # {distro × LLVM} environments can actually load + start it. Probe 2 does not
+  # re-open the run/load question (Phase 1 already established the SONAME-match
+  # load rule), so this stays pinned to the llvm-22 artifact — it exists as long
+  # as the matrix.llvm==22 build cell passes. The 18/20 build cells feed the
+  # build-compatibility finding only; they are not run here.
+  # Driven via `docker run` from the host (not GH `container:`) so musl/Alpine and
+  # node-less images work, and one binary is tested everywhere. Each cell PRINTS a
+  # RESULT line (data, not a job failure), so the workflow stays green regardless
+  # of load outcome.
   run-matrix:
     name: Run — ${{ matrix.name }}
     needs: build
