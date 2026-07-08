@@ -554,8 +554,19 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // caller (dependsOn only when non-null) wires no self-edge, and runCppFrontendSync
         // uses this .second path as the parser. Additive + gated: absent property = today's
         // behavior exactly.
-        (target.findProperty("kpp.stageZeroCppFrontend") as? String)?.takeIf { it.isNotBlank() }
-            ?.let { return null to File(it) }
+        //
+        // SCOPE (#122 capstone): the override applies ONLY when resolving the front-end for
+        // :cppfrontend ITSELF — that is the sole module whose self-cycle the stage-0 breaks.
+        // A DOWNSTREAM consumer (featuregen/cppfixture) on the cpp path must resolve the LIVE
+        // :cppfrontend link task/binary so that, when :cppfrontend is simultaneously =cpp, the
+        // consumer is fed :cppfrontend's SELF-GENERATED binary — not the stage-0 seed directly.
+        // Without this scope the global property would short-circuit every consumer to the
+        // stage-0 seed, and the "cppfrontend=cpp feeding featuregen=cpp" composition could never
+        // exercise the self-generated parser. Absent property = today's behavior exactly.
+        if (target.name == "cppfrontend") {
+            (target.findProperty("kpp.stageZeroCppFrontend") as? String)?.takeIf { it.isNotBlank() }
+                ?.let { return null to File(it) }
+        }
         val direct = target.rootProject.findProject(":cppfrontend")
         if (direct != null) {
             return direct.tasks.findByName("linkReleaseExecutableKlinker") to
