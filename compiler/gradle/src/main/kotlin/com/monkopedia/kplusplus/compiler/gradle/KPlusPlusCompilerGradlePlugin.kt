@@ -553,6 +553,16 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     .file("bin/klinker/cppfrontendRelease/cppfrontend").get().asFile
         }
         for (included in target.gradle.includedBuilds) {
+            // Only the build that actually HOSTS the cppfrontend module is a candidate.
+            // The root kplusplus build ALWAYS pulls in the `compiler` build via
+            // includeBuild("compiler"), and IncludedBuild.task(":cppfrontend:...") returns
+            // a LAZY reference that does NOT validate the project exists — so without this
+            // guard the `compiler` build (which has no :cppfrontend) falsely matches when
+            // :cppfrontend isn't in the root build (no -PenableClang) yet the module is on
+            // the cpp front-end, and we wire a dependsOn to a project that lives in neither
+            // build → "Project with path ':cppfrontend' not found in build ':compiler'" at
+            // graph-resolution time (breaking even IDE sync). Filter on the module dir.
+            if (!File(included.projectDir, "cppfrontend").isDirectory) continue
             val taskRef = try {
                 included.task(":cppfrontend:linkReleaseExecutableKlinker")
             } catch (_: Throwable) {
