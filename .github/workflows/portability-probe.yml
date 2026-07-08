@@ -27,7 +27,7 @@ jobs:
         # non-22 major is a cheap rebuild (seed compiles) or needs regenerated
         # bindings (seed fails on renamed/removed AST API). fail-fast:false so
         # every major attempts even if one fails to compile.
-        llvm: [18, 20, 22]
+        llvm: [19, 20, 21, 22]
     steps:
       - uses: actions/checkout@v4
 
@@ -77,14 +77,18 @@ jobs:
           echo "### Seed wrapper compile against LLVM ${{ matrix.llvm }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           set +e
-          clang++ -std=c++17 -fsyntax-only -fPIE \
+          # -ferror-limit=0: capture the COMPLETE error set (no cap) so the full
+          # cross-major drift can be measured, not just the first handful.
+          clang++ -std=c++17 -fsyntax-only -fPIE -ferror-limit=0 \
             -I"$KR" -DV8_COMPRESS_POINTERS "$KR/cppfrontend.cc" \
             > seed-compile.out 2>&1
           rc=$?
           echo "clang++ exit=$rc" | tee -a "$GITHUB_STEP_SUMMARY"
+          nerr=$(grep -c -E 'error:' seed-compile.out)
+          echo "distinct 'error:' lines = $nerr" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$rc" -ne 0 ]; then
-            echo "-- first errors --" | tee -a "$GITHUB_STEP_SUMMARY"
-            grep -E 'error:' seed-compile.out | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "-- errors --" | tee -a "$GITHUB_STEP_SUMMARY"
+            grep -E 'error:' seed-compile.out | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "seed compiles clean against LLVM ${{ matrix.llvm }}" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
@@ -94,13 +98,26 @@ jobs:
           cat seed-compile.out
           exit 0
 
+      - name: Upload seed-compile diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-compile-llvm${{ matrix.llvm }}
+          path: seed-compile.out
+          if-no-files-found: error
+
+      # The non-22 matrix cells exist only to capture the seed-compile diagnostic
+      # above; the heavy Gradle build/inspect/upload only needs to run for the
+      # baseline (22) cell. Gating them keeps the non-22 cells fast (diagnostic-only)
+      # and avoids wasting builder time on majors whose seed won't compile anyway.
       - name: Build cppfrontend (release, klinker)
+        if: ${{ matrix.llvm == 22 }}
         run: |
           set -euxo pipefail
           ./gradlew :cppfrontend:linkReleaseExecutableKlinker -PenableClang \
             --no-daemon --stacktrace
 
       - name: Inspect the binary — the actual portability contract
+        if: ${{ matrix.llvm == 22 }}
         run: |
           set -euxo pipefail
           BIN=cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend
@@ -115,6 +132,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload cppfrontend binary
+        if: ${{ matrix.llvm == 22 }}
         uses: actions/upload-artifact@v4
         with:
           name: cppfrontend-llvm${{ matrix.llvm }}
