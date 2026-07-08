@@ -1,0 +1,76 @@
+name: Portability probe
+
+# Empirically maps how portable a dynamically-linked cppfrontend binary is across
+# Linux distros + LLVM versions (Model 1 distribution: ship a prebuilt binary that
+# dynamic-links the consumer's LLVM). Phase 1 here is the gating step: prove
+# cppfrontend even BUILDS on a stock GitHub runner, and record the exact shared-lib
+# SONAMEs the resulting binary hard-requires. The distro run-matrix is added once
+# this is green.
+#
+# Manual / branch-scoped only for now — this is exploratory, not a merge gate.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "ci/portability-probe-**"
+
+jobs:
+  build:
+    name: Build cppfrontend (LLVM ${{ matrix.llvm }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Phase 1 builds against a single major (22 — the one our committed
+        # Clang-AST bindings target). Phase 2 widens this list.
+        llvm: [22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install LLVM/Clang ${{ matrix.llvm }} (apt.llvm.org)
+        run: |
+          set -euxo pipefail
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh ${{ matrix.llvm }} all
+          # apt.llvm.org installs versioned binaries (clang++-22, llvm-config-22);
+          # the build's settings probe looks for bare `clang++` / `llvm-config` on
+          # PATH (or -PllvmConfig). Expose unversioned names.
+          sudo ln -sf "$(command -v clang++-${{ matrix.llvm }})" /usr/local/bin/clang++
+          sudo ln -sf "$(command -v clang-${{ matrix.llvm }})"   /usr/local/bin/clang
+          sudo ln -sf "$(command -v llvm-config-${{ matrix.llvm }})" /usr/local/bin/llvm-config
+          echo "clang++:     $(clang++ --version | head -1)"
+          echo "llvm-config: $(llvm-config --version)  libdir=$(llvm-config --libdir)"
+
+      - name: Build cppfrontend (release, klinker)
+        run: |
+          set -euxo pipefail
+          ./gradlew :cppfrontend:linkReleaseExecutableKlinker -PenableClang \
+            --no-daemon --stacktrace
+
+      - name: Inspect the binary — the actual portability contract
+        run: |
+          set -euxo pipefail
+          BIN=cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend
+          test -f "$BIN"
+          echo "## cppfrontend built against LLVM ${{ matrix.llvm }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "== NEEDED (hard-required SONAMEs) ==" | tee -a "$GITHUB_STEP_SUMMARY"
+          readelf -d "$BIN" | grep NEEDED | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "== ldd (resolved on this builder) ==" | tee -a "$GITHUB_STEP_SUMMARY"
+          ldd "$BIN" | grep -iE 'llvm|clang|stdc' | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload cppfrontend binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppfrontend-llvm${{ matrix.llvm }}
+          path: cppfrontend/build/bin/klinker/cppfrontendRelease/cppfrontend
+          if-no-files-found: error
