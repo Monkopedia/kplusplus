@@ -20,9 +20,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     id("com.monkopedia.kplusplus.compiler")
     id("com.monkopedia.klinker.plugin") version "0.2.0"
-    // #122 step 1.2 — publish the stage-0 krapper_parse binary to mavenLocal as an
-    // immutable bootstrap anchor. See the stage-0 publication block near the bottom.
+    // Publish the krapper_parse native binary. The stage-0 anchor (#122) is a mavenLocal-only
+    // bootstrap; the `releaseBinary` (0.3.0) is a normal release artifact that ALSO goes to
+    // the Central Portal. A K/N .kexe is not a jar, so both are hand-rolled artifact-only
+    // MavenPublications; the vanniktech BASE plugin adds the Portal upload + signing that make
+    // the release artifact Central-valid (full POM + stub sources/javadoc jars below).
     `maven-publish`
+    alias(libs.plugins.vannik.publish.base)
 }
 
 repositories {
@@ -428,6 +432,45 @@ val stage0Classifier = "linuxX64"
 // (gradle.properties) is =seed; only an explicit -Pkpp.frontend.krapper_parse=cpp trips this.
 val stage0BuiltFromCpp = findProperty("kpp.frontend.krapper_parse") == "cpp"
 
+// Empty sources + javadoc jars: the Central Portal requires them per coordinate, but a
+// native binary has neither. Attached to the `releaseBinary` publication (the one that goes
+// to Central); the stage0 anchor is mavenLocal-only and does not need them.
+val emptySourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+}
+val emptyJavadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+}
+
+// Central-valid POM shared by the release publication (name/description set per publication).
+fun MavenPublication.kplusplusReleasePom() = pom {
+    name.set("krapper_parse")
+    description.set(
+        "The kplusplus self-hosted C++ front-end: walks a real Clang AST (on generated " +
+            "Clang-AST bindings) and emits a krapper_model tree as JSON (linuxX64 native " +
+            "binary)."
+    )
+    url.set("https://github.com/Monkopedia/kplusplus")
+    licenses {
+        license {
+            name.set("The Apache License, Version 2.0")
+            url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+        }
+    }
+    developers {
+        developer {
+            id.set("Monkopedia")
+            name.set("Jason Monk")
+            email.set("monkopedia@gmail.com")
+        }
+    }
+    scm {
+        url.set("https://github.com/Monkopedia/kplusplus")
+        connection.set("scm:git:git://github.com/Monkopedia/kplusplus.git")
+        developerConnection.set("scm:git:ssh://git@github.com/Monkopedia/kplusplus.git")
+    }
+}
+
 publishing {
     publications {
         create<MavenPublication>("stage0") {
@@ -435,17 +478,19 @@ publishing {
             artifactId = stage0Artifact
             version = stage0Version
             // Artifact-only: attach the raw K/N executable. No `extension` (it is a bare
-            // ELF binary), classifier names the platform.
+            // ELF binary), classifier names the platform. mavenLocal-only bootstrap anchor —
+            // NOT published to Central, so no sources/javadoc/POM enrichment needed.
             artifact(krapperParseBinary) {
                 classifier = stage0Classifier
                 extension = ""
             }
         }
-        // R1 (#128): the NORMAL release artifact a from-published consumer resolves — the
-        // LLVM parser tool at the project version (com.monkopedia.kplusplus:krapper_parse:
-        // 0.3.0, classifier linuxX64). Same artifact-only shape as stage0 (a K/N .kexe is not
-        // a jar). The stage0 anchor stays as the immutable #122 self-hosting seed; this is the
-        // generalization to "a normal release artifact" the release ships.
+        // The NORMAL release artifact a from-published consumer resolves — the LLVM parser
+        // tool at the project version (com.monkopedia.kplusplus:krapper_parse:0.3.0, classifier
+        // linuxX64). Same artifact-only shape as stage0 (a K/N .kexe is not a jar), but
+        // Central-valid: full POM + stub sources/javadoc jars + (via vanniktech base) GPG
+        // signing. The stage0 anchor stays the immutable #122 self-hosting seed; this is the
+        // generalization to "a normal release artifact" the release ships to Central.
         create<MavenPublication>("releaseBinary") {
             groupId = "com.monkopedia.kplusplus"
             artifactId = "krapper_parse"
@@ -454,8 +499,36 @@ publishing {
                 classifier = "linuxX64"
                 extension = ""
             }
+            artifact(emptySourcesJar)
+            artifact(emptyJavadocJar)
+            kplusplusReleasePom()
         }
     }
+}
+
+// vanniktech base: Central Portal endpoint + sign all publications. Sign only when a key is
+// present (CI) — otherwise the sign task fails with "no configured signatory", breaking even a
+// plain unsigned publishToMavenLocal / the stage0 anchor. So local mavenLocal stays
+// credential-free; CI supplies the in-memory GPG key. See docs/releasing.md.
+val signingConfigured =
+    providers.gradleProperty("signingInMemoryKey").isPresent ||
+        providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent
+
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = false)
+    if (signingConfigured) signAllPublications()
+}
+
+// Ship ONLY the release binary to Central. The Kotlin plugin auto-registers
+// `native`/`kotlinMultiplatform` publications (krapper_parse is a TOOL run as a binary, not a
+// KMP library consumed by coordinate), and the `stage0` publication is a mavenLocal-only
+// bootstrap anchor — none of them belong on Central. Disable their Central-repository publish
+// tasks so vanniktech's Portal bundle contains only the Central-valid `releaseBinary`.
+// (mavenLocal is unaffected — those tasks stay enabled, matching R1 + #122.)
+listOf("KotlinMultiplatform", "Native", "Stage0").forEach { name ->
+    tasks.matching {
+        it.name == "publish${name}PublicationToMavenCentralRepository"
+    }.configureEach { enabled = false }
 }
 
 // Build + guard the release binary before publishing the normal release artifact. Like the

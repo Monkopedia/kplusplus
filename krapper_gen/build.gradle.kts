@@ -23,10 +23,15 @@ plugins {
     alias(libs.plugins.ksrpc)
     id("c")
     id("cpp")
-    // R1 (#128): publish the krapper_gen release binary to mavenLocal as a normal
-    // classified release artifact so a from-published consumer resolves the resolve+codegen
-    // tool by coordinate. See the publication block near the bottom.
+    // Publish the krapper_gen release binary as a classified release artifact so a
+    // from-published consumer resolves the resolve+codegen tool by coordinate. A K/N .kexe
+    // is not a jar (no software-component the vanniktech convenience plugin could wire), so
+    // this stays a hand-rolled artifact-only MavenPublication. We apply the vanniktech BASE
+    // plugin (no auto-config): it contributes the Central Portal upload + `signAllPublications`
+    // bundling that also covers our hand-created publication, making it Central-valid (full
+    // POM + stub sources/javadoc jars below + GPG signing). See the publication block.
     `maven-publish`
+    alias(libs.plugins.vannik.publish.base)
 }
 
 repositories {
@@ -101,17 +106,35 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
     }
 }
 
-// ---- R1 (#128): publish the krapper_gen release binary to mavenLocal ----
+// ---- Publish the krapper_gen release binary ----
 //
 // krapper_gen is the resolve+codegen tool the kplusplus Gradle plugin invokes. A K/N linuxX64
 // .kexe is not a jar (no software-component to wire), so — exactly like the krapper_parse
 // release-binary publication — this is an ARTIFACT-ONLY MavenPublication: attach the raw
-// executable with a `linuxX64` classifier and an empty extension. mavenLocal only; no signing.
+// executable with a `linuxX64` classifier and an empty extension.
+//
+// Central-validity for a classified-binary-only artifact: the Central Portal still requires a
+// complete POM + a sources jar + a javadoc jar + GPG signatures for every file. There is no
+// real source/javadoc for a compiled native binary, so we attach EMPTY (stub) sources+javadoc
+// jars at the base coordinate; the vanniktech base plugin (applied above) signs every
+// publication and uploads the bundle to the Portal. `publishToMavenLocal` still yields the
+// same coordinate/classifier R1 published, so the from-published consumer is unchanged.
 //
 // A Maven repo does NOT preserve the +x bit, so a consumer must chmod the resolved file (the
-// krapper_parse consume-seam already does this for its binary; R2 wires the same for this one).
-val krapperGenBinary = layout.buildDirectory
-    .file("bin/native/releaseExecutable/krapper_gen.kexe").get().asFile
+// consume-seam already does this for the parser binary; the same applies here).
+val krapperGenBinary =
+    layout.buildDirectory
+        .file("bin/native/releaseExecutable/krapper_gen.kexe")
+        .get()
+        .asFile
+
+// Empty sources + javadoc jars: Central requires them, but a native binary has neither.
+val emptySourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+}
+val emptyJavadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+}
 
 publishing {
     publications {
@@ -121,8 +144,67 @@ publishing {
                 classifier = "linuxX64"
                 extension = ""
             }
+            artifact(emptySourcesJar)
+            artifact(emptyJavadocJar)
+            pom {
+                name.set("krapper_gen")
+                description.set(
+                    "The kplusplus resolve + codegen tool: consumes a parsed model, forces " +
+                        "template instantiations, and generates the C++ wrapper + Kotlin/" +
+                        "Native bindings (linuxX64 native binary).",
+                )
+                url.set("https://github.com/Monkopedia/kplusplus")
+                licenses {
+                    license {
+                        name.set("The Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("Monkopedia")
+                        name.set("Jason Monk")
+                        email.set("monkopedia@gmail.com")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/Monkopedia/kplusplus")
+                    connection.set("scm:git:git://github.com/Monkopedia/kplusplus.git")
+                    developerConnection.set(
+                        "scm:git:ssh://git@github.com/Monkopedia/kplusplus.git",
+                    )
+                }
+            }
         }
     }
+}
+
+// vanniktech base: Central Portal endpoint + sign all publications (incl. the hand-rolled
+// releaseBinary above). Sign only when a key is present (CI) — otherwise the sign task fails
+// with "no configured signatory", breaking even a plain unsigned publishToMavenLocal. So
+// local mavenLocal stays credential-free; CI supplies the in-memory GPG key. See
+// docs/releasing.md.
+val signingConfigured =
+    providers.gradleProperty("signingInMemoryKey").isPresent ||
+        providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent
+
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = false)
+    if (signingConfigured) signAllPublications()
+}
+
+// Ship ONLY the release binary to Central. The Kotlin Multiplatform plugin auto-registers
+// `jvm`/`native`/`kotlinMultiplatform` publications for this module, but krapper_gen is a
+// TOOL (invoked as a binary), not a KMP library anyone consumes by coordinate — publishing
+// its .klib/JVM jar to Central would be noise AND fail validation (no sources/javadoc for
+// them). Disable their Central-repository publish tasks so vanniktech's Portal bundle
+// contains only the Central-valid `releaseBinary`. (mavenLocal is unaffected — those tasks
+// stay enabled there, matching R1.)
+listOf("Jvm", "KotlinMultiplatform", "Native").forEach { name ->
+    tasks
+        .matching {
+            it.name == "publish${name}PublicationToMavenCentralRepository"
+        }.configureEach { enabled = false }
 }
 
 // Build the release binary before publishing it, and guard that it exists.
@@ -140,6 +222,6 @@ tasks.register("publishReleaseBinaryToMavenLocal") {
     group = "kplusplus"
     description =
         "Build the krapper_gen release binary and publish it to mavenLocal as " +
-            "com.monkopedia.kplusplus:krapper_gen:$version (classifier linuxX64)."
+        "com.monkopedia.kplusplus:krapper_gen:$version (classifier linuxX64)."
     dependsOn("publishReleaseBinaryPublicationToMavenLocal")
 }
