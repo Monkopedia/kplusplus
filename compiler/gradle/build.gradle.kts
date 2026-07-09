@@ -59,12 +59,13 @@ val signingConfigured =
         providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent
 
 mavenPublishing {
-    // Central Portal endpoint (OSSRH is sunset). automaticRelease=false: the CI upload lands
-    // in a Portal staging deployment the owner releases from central.sonatype.com.
-    publishToMavenCentral(automaticRelease = false)
+    // Central Portal endpoint (OSSRH is sunset). automaticRelease=true: once the upload passes
+    // Portal validation it is released automatically — no manual step at central.sonatype.com.
+    // (A bundle that fails validation is NOT released, so this isn't reckless.)
+    publishToMavenCentral(automaticRelease = true)
     // Sign every publication with the in-memory GPG key supplied by CI env
-    // (ORG_GRADLE_PROJECT_signingInMemoryKey / ...Password, from the SIGNING_KEY /
-    // SIGNING_PASSWORD secrets) — only when that key is present (see above).
+    // (ORG_GRADLE_PROJECT_signingInMemoryKey / ...Password, from the OSSRH_GPG_SECRET_KEY /
+    // OSSRH_GPG_SECRET_KEY_PASSWORD secrets) — only when that key is present (see above).
     if (signingConfigured) signAllPublications()
     // `java-gradle-plugin` already registers a real `javadocJar` + `sourcesJar` on the java
     // component (via withJavadocJar()/withSourcesJar()). Tell vanniktech NOT to add its own
