@@ -31,22 +31,27 @@ mavenLocal-only artifact and is deliberately **not** published to Central.
 
 ## Required GitHub Secrets
 
-Set these in the repository (Settings → Secrets and variables → Actions) before cutting a
-release. Nothing is hardcoded; the workflow reads them all from the environment.
+**These six secrets already exist in the repo** — they were set for the v1 pipeline and were
+never removed (deleting the old `publish.yaml` workflow does not delete repo secrets). The
+restored workflow **reuses the same names**, so in the common case there is nothing new to set:
 
-| Secret | What it is | Where to get it |
-|---|---|---|
-| `MAVEN_CENTRAL_USERNAME` | Central Portal **token username** | central.sonatype.com → Account → Generate User Token |
-| `MAVEN_CENTRAL_PASSWORD` | Central Portal **token password** | (same token pair) |
-| `SIGNING_KEY` | ASCII-armored GPG **private key** (the whole `-----BEGIN PGP PRIVATE KEY BLOCK-----` block) | `gpg --armor --export-secret-keys 5B83421E2338B907` |
-| `SIGNING_PASSWORD` | passphrase for that GPG key | — |
-| `GRADLE_PUBLISH_KEY` | Gradle Plugin Portal API key | plugins.gradle.org → your API keys |
-| `GRADLE_PUBLISH_SECRET` | Gradle Plugin Portal API secret | (same) |
+| Secret (existing) | What it is | Maps to (vanniktech) | If it needs refreshing |
+|---|---|---|---|
+| `OSSRH_USERNAME` | Central Portal **token username** | `mavenCentralUsername` | central.sonatype.com → Account → Generate User Token (only if the old OSSRH token no longer authenticates against the Portal) |
+| `OSSRH_TOKEN` | Central Portal **token password** | `mavenCentralPassword` | (same token pair) |
+| `OSSRH_GPG_SECRET_KEY` | ASCII-armored GPG **private key** (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) | `signingInMemoryKey` | reuse as-is (`gpg --armor --export-secret-keys 5B83421E2338B907` if ever re-exporting) |
+| `OSSRH_GPG_SECRET_KEY_PASSWORD` | passphrase for that GPG key | `signingInMemoryKeyPassword` | reuse as-is |
+| `GRADLE_PUBLISH_KEY` | Gradle Plugin Portal API key | — (passed via `-Pgradle.publish.key`) | reuse as-is |
+| `GRADLE_PUBLISH_SECRET` | Gradle Plugin Portal API secret | — | reuse as-is |
 
-The legacy v1 signing key is `5B83421E2338B907` — export that same key into `SIGNING_KEY` /
-`SIGNING_PASSWORD` so v2 is signed with the established identity. (v2 uses vanniktech's
-**in-memory** key mechanism, not the old `signing.gnupg.keyName` in `gradle.properties`, which
-was removed because its mere presence broke unsigned local `publishToMavenLocal`.)
+The **only** value that might need regenerating is the Central credential (`OSSRH_USERNAME` /
+`OSSRH_TOKEN`): OSSRH (oss.sonatype.org) was sunset in favour of the Central Portal, so if the
+old token no longer authenticates, generate a fresh Portal user token at central.sonatype.com
+and update those two values — the **names stay the same**. GPG signing and the Plugin Portal
+creds are reused unchanged. The signing key is the established v1 identity `5B83421E2338B907`.
+(v2 uses vanniktech's **in-memory** key mechanism, not the old `signing.gnupg.keyName` in
+`gradle.properties`, which was removed because its mere presence broke unsigned local
+`publishToMavenLocal`.)
 
 ## Cutting a release
 

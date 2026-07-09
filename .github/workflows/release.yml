@@ -54,10 +54,15 @@ jobs:
       # in the build and its release binary ships too.
       - name: Publish to the Central Portal (staging)
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+          # Reuse the EXISTING repo secrets (from the v1 pipeline — still set, deleting the old
+          # workflow never removed them) rather than new ones. The Central Portal user token
+          # (central.sonatype.com) maps onto the OSSRH_USERNAME/OSSRH_TOKEN pair; if the old
+          # OSSRH token no longer authenticates against the Portal, only those two VALUES need
+          # regenerating — the names stay. OSSRH_GPG_SECRET_KEY is the same armored key v1 used.
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_TOKEN }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.OSSRH_GPG_SECRET_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
         run: ./gradlew publishAllToMavenCentral -PenableClang --no-configuration-cache
 
       - name: Release notes
