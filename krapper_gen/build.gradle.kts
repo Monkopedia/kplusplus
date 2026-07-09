@@ -189,7 +189,7 @@ val signingConfigured =
         providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent
 
 mavenPublishing {
-    publishToMavenCentral(automaticRelease = false)
+    publishToMavenCentral(automaticRelease = true)
     if (signingConfigured) signAllPublications()
 }
 

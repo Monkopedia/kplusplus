@@ -10,8 +10,10 @@ kplusplus (v2) publishes to two places:
 
 Publishing is wired with [`com.vanniktech.maven.publish`](https://vanniktech.github.io/gradle-maven-publish-plugin/)
 (POM metadata, sources/javadoc jars, GPG signing, Central Portal upload) plus
-`com.gradle.plugin-publish` (the Plugin Portal upload). Everything is GPG-signed and lands in a
-Central Portal **staging deployment** that the owner releases manually.
+`com.gradle.plugin-publish` (the Plugin Portal upload). Everything is GPG-signed; the Central
+Portal deployment **auto-releases once it passes validation** (`automaticRelease = true`), and
+the Gradle plugin publishes live to the Plugin Portal — so a GitHub Release publishes everything
+with no manual release step.
 
 ## The artifact set
 
@@ -63,10 +65,13 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
    - installs the LLVM/Clang toolchain (`krapper_parse` links against `libclang-cpp`/`libLLVM`);
    - `:kplusplus-compiler-gradle:publishPlugins` → Gradle Plugin Portal;
    - `publishAllToMavenCentral -PenableClang` → uploads the signed bundle to the Central Portal
-     **staging** area (`automaticRelease = false`).
-4. Go to https://central.sonatype.com → **Deployments**, verify the staged deployment
-   validated, and **publish** it. (Set `automaticRelease = true` in the `publishToMavenCentral`
-   calls if you prefer it to auto-release.)
+     and **auto-releases it once it passes Portal validation** (`automaticRelease = true`). A
+     bundle that fails validation is NOT released, so an invalid upload can't ship.
+4. Nothing further to do on the Central side — the deployment releases itself after validation.
+   Watch the workflow run (and, if you want, https://central.sonatype.com → **Deployments**) for
+   status. The Gradle plugin publish to the Plugin Portal is also live immediately.
+   (To require a manual release step instead, set `automaticRelease = false` in the four
+   `publishToMavenCentral(...)` calls.)
 
 ## Local dry run (no outward upload)
 

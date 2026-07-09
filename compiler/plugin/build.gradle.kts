@@ -22,7 +22,7 @@ val signingConfigured =
         providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent
 
 mavenPublishing {
-    publishToMavenCentral(automaticRelease = false)
+    publishToMavenCentral(automaticRelease = true)
     if (signingConfigured) signAllPublications()
     configure(KotlinJvm(javadocJar = JavadocJar.Empty(), sourcesJar = true))
     pom {

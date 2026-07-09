@@ -6,9 +6,9 @@
 #   * The FIR kotlinc-plugin jar -> the Central Portal.
 #   * The krapper_gen + krapper_parse native tool binaries (classifier linuxX64) -> Central.
 #
-# Everything is GPG-signed (vanniktech in-memory key) and lands in a Central Portal STAGING
-# deployment the owner then releases from https://central.sonatype.com (automaticRelease is
-# false). See docs/releasing.md for the required GitHub Secrets and the cut-a-release steps.
+# Everything is GPG-signed (vanniktech in-memory key) and uploaded to the Central Portal, which
+# AUTO-RELEASES the deployment once it passes validation (automaticRelease = true; a bundle that
+# fails validation is not released). See docs/releasing.md for the GitHub Secrets + cut steps.
 name: Release
 on:
   release:
@@ -47,12 +47,12 @@ jobs:
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}
           -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }}
 
-      # --- Publish the whole set to the Central Portal (staging) ---
+      # --- Publish the whole set to the Central Portal (auto-released on validation) ---
       # vanniktech reads the Central Portal token + the in-memory GPG key from these env vars
       # (ORG_GRADLE_PROJECT_* -> Gradle properties mavenCentralUsername / mavenCentralPassword
       # / signingInMemoryKey / signingInMemoryKeyPassword). -PenableClang so :krapper_parse is
       # in the build and its release binary ships too.
-      - name: Publish to the Central Portal (staging)
+      - name: Publish to the Central Portal (auto-release on validation)
         env:
           # Reuse the EXISTING repo secrets (from the v1 pipeline — still set, deleting the old
           # workflow never removed them) rather than new ones. The Central Portal user token
@@ -67,6 +67,6 @@ jobs:
 
       - name: Release notes
         run: |
-          echo "Uploaded the kplusplus release set to the Central Portal STAGING area and"
-          echo "published the Gradle plugin to the Plugin Portal."
-          echo "Finish the Central release at https://central.sonatype.com (Deployments)."
+          echo "Published the kplusplus release set to the Central Portal (auto-released on"
+          echo "validation) and the Gradle plugin to the Plugin Portal."
+          echo "Check status at https://central.sonatype.com (Deployments)."
