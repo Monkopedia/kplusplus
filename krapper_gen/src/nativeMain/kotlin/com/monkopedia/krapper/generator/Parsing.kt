@@ -82,7 +82,7 @@ typealias ElementFilter = WrappedElement.() -> Boolean
 
 // THE FRONT-END (#45 brick 2; flip B5), set by KrapperGen --parsedModel <path>.
 // krapper_gen has a SINGLE front-end: it loads its parse-output WrappedTU from this path —
-// the full-fidelity ModelIo JSON the cppfrontend binary emitted from the Clang C++ AST (on
+// the full-fidelity ModelIo JSON the krapper_parse binary emitted from the Clang C++ AST (on
 // kplusplus-generated bindings). The loaded tree enters the pipeline at the post-parse
 // point: the pre-resolution rewrites below run on it, then ParsedResolver wraps it. The
 // in-tree libclang-C reducer was DELETED in B5 (#47) — there is no in-process parse path.
@@ -91,7 +91,7 @@ var cppParsedModelPath: String? = null
 
 // Instantiation forcing (#45 brick 3), set by KrapperGen --forcingModel <spec>=<path>.
 // Maps each normalized instantiation target (e.g. "std::vector<Item*>") to the ModelIo JSON
-// of its FORCING-PARSE WrappedTU — the tree the cppfrontend binary produces by synthesizing
+// of its FORCING-PARSE WrappedTU — the tree the krapper_parse binary produces by synthesizing
 // a `KrapperForce_*` header and parsing it. requestInstantiation loads the tree, and the
 // whole downstream flow (scoping + resolveForcing's 3-pass dance + cumulative keys + dedup)
 // runs over it. CLI-scoped global, same rationale as [cppParsedModelPath].
@@ -477,7 +477,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
 
 /**
  * krapper_gen's SINGLE front-end (flip B5, #47): load the parse-output WrappedTU from the
- * ModelIo JSON the cppfrontend binary produced (--parsedModel) and prepare it for
+ * ModelIo JSON the krapper_parse binary produced (--parsedModel) and prepare it for
  * resolution. The in-tree libclang-C reducer was deleted — there is NO in-process parse
  * path. [cppParsedModelPath] must be set (the CLI requires --parsedModel); calling this
  * with it unset is a misconfiguration and fails loudly.
@@ -492,7 +492,7 @@ suspend fun parseHeader(): Resolver {
         ?: error(
             "krapper_gen has no in-process parse front-end (the libclang-C reducer was " +
                 "removed in flip B5, #47). A parse-output model is required: pass " +
-                "--parsedModel <ModelIo JSON> (the cppfrontend binary produces it)."
+                "--parsedModel <ModelIo JSON> (the krapper_parse binary produces it)."
         )
     Log.i("cpp front-end: loading parsed model from $path")
     return loadParsedModel(path).also { cppBaseModelTu = it.tu }

@@ -23,13 +23,13 @@ include(":featuregen")
 // when an explicit toolchain is pointed at via `-PllvmConfig=<path-to-llvm-config>`.
 //
 // LLVM-MANDATORY (flip B5, #47): krapper_gen's in-tree libclang-C reducer was DELETED, so
-// the only way to PARSE a header into bindings is the LLVM cppfrontend (-Pkpp.frontend.
+// the only way to PARSE a header into bindings is the LLVM krapper_parse (-Pkpp.frontend.
 // <module>=cpp). The default-build cpp consumers (:featuregen, :cppfixture) therefore now
-// REQUIRE this flag — without it :cppfrontend is not in the build and their kplusplusSync
-// fails fast with an actionable "build with -PenableClang" message (runCppFrontendSync).
+// REQUIRE this flag — without it :krapper_parse is not in the build and their kplusplusSync
+// fails fast with an actionable "build with -PenableClang" message (runKrapperParseSync).
 // The flag stays opt-in (not default-ON) only so the LLVM-FREE modules — :krapper_gen
 // (now a pure ModelIo consumer) and :krapper_model — and the committed-seed modules
-// (:cppfrontend/:clangwalk, kpp.frontend=seed: a plain C++ recompile, no parse)
+// (:krapper_parse/:clangwalk, kpp.frontend=seed: a plain C++ recompile, no parse)
 // still build/test on a box without an LLVM toolchain.
 //
 // #11(b) — toolchain probe hardening: when the modules ARE enabled, the LLVM toolchain
@@ -70,7 +70,7 @@ if (clangEnabled) {
     if (llvmConfig == null || clangxx == null) {
         throw GradleException(
             """
-            |The clang modules (:clangwalk, :cppfrontend) are enabled${
+            |The clang modules (:clangwalk, :krapper_parse) are enabled${
                 if (llvmConfigProp != null) " (-PllvmConfig=$llvmConfigProp)" else " (-PenableClang)"
             } but the
             |LLVM/Clang toolchain they link against was not found:
@@ -108,12 +108,12 @@ if (clangEnabled) {
     }
 
     include(":clangwalk")
-    // :cppfrontend is the stage1 front-end scaffold (#44 brick 2): it constructs
+    // :krapper_parse is the stage1 front-end scaffold (#44 brick 2): it constructs
     // :krapper_model's parse-output model from the same gated libclang-cpp bindings.
-    include(":cppfrontend")
+    include(":krapper_parse")
     // :cppfixture is the #47 flip-brick-B2 generality demo: a minimal, std-free binding
     // consumer that proves the GENERIC `-Pkpp.frontend.<module>=cpp` path drives a module's
-    // own config (not just featuregen's). Gated with the clang modules (it needs cppfrontend
+    // own config (not just featuregen's). Gated with the clang modules (it needs krapper_parse
     // for the cpp path); the default build never includes it, so it cannot affect it.
     include(":cppfixture")
 

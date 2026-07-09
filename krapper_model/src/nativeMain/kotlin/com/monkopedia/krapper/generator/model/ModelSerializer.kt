@@ -23,7 +23,7 @@ import kotlinx.serialization.Serializable
 // payload + children, types spelled via WrappedType.toString(). It was the comparison key
 // for the Phase C golden tree-diff against krapper_gen's libclang-C reducer; that reducer
 // (and the diff) were removed in the self-hosting flip (B5, #88) / cleanup (#92). The DTO
-// remains :cppfrontend's --golden-emit projection and lives here in :krapper_model.
+// remains :krapper_parse's --golden-emit projection and lives here in :krapper_model.
 @Serializable
 data class SerializedElement(
     val kind: String,

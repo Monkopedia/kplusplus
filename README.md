@@ -81,7 +81,7 @@ package root, and `compiler` to override the C++ compiler.
 
 K++ runs a three-stage pipeline:
 
-1. **Parse** — the C++ front-end (`cppfrontend`) reads the headers and produces a structural model
+1. **Parse** — the C++ front-end (`krapper_parse`) reads the headers and produces a structural model
    of the declarations and types. This front-end is itself built from K++-generated bindings of
    Clang's C++ AST (the self-hosting part).
 2. **Resolve** — `krapper_gen` takes that model, makes sure every referenced type is materialized,
@@ -99,7 +99,7 @@ build so it runs as part of normal compilation. K++ is frequently paired with
 |--------|------------|
 | `krapper_gen/` | The core generator: resolve + codegen, driven by the parsed model. |
 | `krapper_model/` | The shared parse-output model (the data both stages speak). |
-| `cppfrontend/` | The self-hosted C++ front-end (parses headers → model), built on generated Clang-AST bindings. |
+| `krapper_parse/` | The self-hosted C++ front-end (parses headers → model), built on generated Clang-AST bindings. |
 | `compiler/` | The v2 Kotlin/Gradle compiler plugin (`com.monkopedia.kplusplus.compiler`). |
 | `featuregen/`, `feature-tests/` | Test harnesses: the generated-binding feature suite, and the raw-cinterop baseline. |
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module. |

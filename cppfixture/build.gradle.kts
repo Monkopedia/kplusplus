@@ -15,7 +15,7 @@
  */
 // #47 flip brick B2 — the GENERALITY DEMO. A minimal, std-free binding consumer that
 // proves the GENERIC cpp-front-end path: under `-Pkpp.frontend.cppfixture=cpp` the kplusplus
-// plugin drives THIS module's own kplusplus { header(...) } config through cppfrontend ->
+// plugin drives THIS module's own kplusplus { header(...) } config through krapper_parse ->
 // ModelIo -> krapper_gen --frontend=cpp into build/krapped-cpp, then compiles + runs the
 // tests against those cpp-front-end bindings — exactly the same generic machinery featuregen
 // now uses, on a different module's own config. The default `./gradlew` never sees this

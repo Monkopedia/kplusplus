@@ -165,7 +165,7 @@ class KrapperGen : CliktCommand() {
     val parsedModel by option(
         "--parsedModel",
         help = "REQUIRED. Path to the ModelIo JSON WrappedTU to load — the parse-output " +
-            "model the cppfrontend binary emitted from the Clang C++ AST. krapper_gen has " +
+            "model the krapper_parse binary emitted from the Clang C++ AST. krapper_gen has " +
             "a single front-end: it consumes this model (the in-tree libclang-C reducer was " +
             "removed in flip B5, #47). --header still supplies the #include list for the " +
             "generated C++ wrapper but is NOT parsed in-process."
@@ -174,7 +174,7 @@ class KrapperGen : CliktCommand() {
         "--forcingModel",
         help = "Instantiation forcing: '<spec>=<path>' maps an --instantiate spec (e.g. " +
             "'std::vector<Item*>') to the ModelIo JSON of its FORCING-PARSE WrappedTU — the " +
-            "tree produced by the cppfrontend binary synthesizing a KrapperForce_* header " +
+            "tree produced by the krapper_parse binary synthesizing a KrapperForce_* header " +
             "and parsing it. Repeatable; every --instantiate spec must have a matching entry."
     ).multiple()
     val fixupFile by option(
@@ -194,7 +194,7 @@ class KrapperGen : CliktCommand() {
         // is mandatory — parseHeader loads the WrappedTU from --parsedModel and the
         // resolution+codegen pipeline runs over it.
         cppParsedModelPath = parsedModel
-            ?: error("krapper_gen requires --parsedModel <path> (the cppfrontend-produced model)")
+            ?: error("krapper_gen requires --parsedModel <path> (the krapper_parse-produced model)")
         // Keys are normalized through parseInstantiation so the --forcingModel spelling
         // matches requestInstantiation's target string regardless of arg spacing
         // ('std::vector<Item *>' vs 'std::vector<Item*>').
@@ -209,7 +209,7 @@ class KrapperGen : CliktCommand() {
             .filter { it !in cppForcingModelPaths }
         require(missing.isEmpty()) {
             "Every --instantiate spec requires a matching --forcingModel '<spec>=<path>' " +
-                "(the cppfrontend-produced forcing-parse model); missing: $missing"
+                "(the krapper_parse-produced forcing-parse model); missing: $missing"
         }
         runBlocking {
             val service = KrapperServiceImpl()

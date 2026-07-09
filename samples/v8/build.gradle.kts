@@ -46,7 +46,7 @@ repositories {
 // stay undefined; an absolute path can't be shadowed by search order). The .so is
 // DISCOVERED at configure time from `clang++ -print-file-name=libstdc++.so` (a GNU-ld
 // linker script/symlink), canonicalized to the real shared object — host-portable, not
-// hardcoded. This is the SAME mechanism clangwalk/cppfrontend/featuregen already use for
+// hardcoded. This is the SAME mechanism clangwalk/krapper_parse/featuregen already use for
 // their klinked binaries; here it is applied to the example's EXECUTABLE binary.
 val systemStdcxxSo: File = run {
     val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
@@ -181,7 +181,7 @@ kplusplus {
         // Holder buffer fails to compile. Both members are USER-DECLARED on the Persistent
         // template (NOT implicit), so the cpp front-end emits them DETERMINISTICALLY (#101):
         // it walks the template PATTERN — never the lazily-instantiated specialization — so
-        // BOTH always surface on every parse (proven by the cppfrontend
+        // BOTH always surface on every parse (proven by the krapper_parse
         // `--noncopyable-determinism` guard). The un-instantiability is body-only, invisible
         // to copy-constructibility AST queries, so the front-end can't auto-suppress them;
         // drop both here by uniqueCName (`op_assign` is the libclang-era name, still valid).

@@ -61,11 +61,11 @@ kplusplus {
 // libclang. Under that property the kplusplus plugin points this module's cinterop +
 // generated sources at build/krapped-cpp (NOT the committed krapped/) and — as of flip
 // brick B2 — GENERATES them GENERICALLY from THIS module's own kplusplus{} config inside
-// kplusplusSync (cppfrontend parse -> ModelIo -> krapper_gen --frontend=cpp), auto-wiring
-// :cppfrontend:linkReleaseExecutableKlinker. No featuregen-specific generation task is
-// needed any more (the old :cppfrontend:featuregenCppBindings was the hardcoded special
+// kplusplusSync (krapper_parse parse -> ModelIo -> krapper_gen --frontend=cpp), auto-wiring
+// :krapper_parse:linkReleaseExecutableKlinker. No featuregen-specific generation task is
+// needed any more (the old :krapper_parse:featuregenCppBindings was the hardcoded special
 // case this generic path replaces). The default `./gradlew` never sets the property nor
-// configures :cppfrontend, so krapped/ and the standard test path are completely unaffected.
+// configures :krapper_parse, so krapped/ and the standard test path are completely unaffected.
 //
 // What remains module-specific (below) is purely the RUN link, not the generation:
 if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
