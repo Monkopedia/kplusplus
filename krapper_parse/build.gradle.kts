@@ -441,7 +441,46 @@ publishing {
                 extension = ""
             }
         }
+        // R1 (#128): the NORMAL release artifact a from-published consumer resolves — the
+        // LLVM parser tool at the project version (com.monkopedia.kplusplus:krapper_parse:
+        // 0.3.0, classifier linuxX64). Same artifact-only shape as stage0 (a K/N .kexe is not
+        // a jar). The stage0 anchor stays as the immutable #122 self-hosting seed; this is the
+        // generalization to "a normal release artifact" the release ships.
+        create<MavenPublication>("releaseBinary") {
+            groupId = "com.monkopedia.kplusplus"
+            artifactId = "krapper_parse"
+            // version inherited from the project (0.3.0).
+            artifact(krapperParseBinary) {
+                classifier = "linuxX64"
+                extension = ""
+            }
+        }
     }
+}
+
+// Build + guard the release binary before publishing the normal release artifact. Like the
+// stage0 anchor it must be built FROM SEED, never from the =cpp self-generation path.
+tasks.named("publishReleaseBinaryPublicationToMavenLocal") {
+    dependsOn("linkReleaseExecutableKlinker")
+    doFirst {
+        check(!stage0BuiltFromCpp) {
+            "publishReleaseBinaryToMavenLocal: refusing to publish a krapper_parse release " +
+                "binary built with -Pkpp.frontend.krapper_parse=cpp — build it FROM SEED (the " +
+                "gradle.properties default). Drop the =cpp override and re-run."
+        }
+        check(krapperParseBinary.exists()) {
+            "publishReleaseBinaryToMavenLocal: expected the krapper_parse release binary at " +
+                "$krapperParseBinary — linkReleaseExecutableKlinker should have produced it."
+        }
+    }
+}
+
+tasks.register("publishReleaseBinaryToMavenLocal") {
+    group = "kplusplus"
+    description =
+        "Build the krapper_parse release binary FROM SEED and publish it to mavenLocal as " +
+            "com.monkopedia.kplusplus:krapper_parse:$version (classifier linuxX64)."
+    dependsOn("publishReleaseBinaryPublicationToMavenLocal")
 }
 
 // Build the stage-0 binary from seed, then publish ONLY the stage0 publication to mavenLocal.

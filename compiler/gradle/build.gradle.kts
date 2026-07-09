@@ -4,10 +4,15 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("java-gradle-plugin")
     kotlin("jvm") version "2.4.0"
+    // R1 (#128): publish this Gradle plugin to mavenLocal. With `java-gradle-plugin`,
+    // `maven-publish` auto-creates BOTH the main jar publication (`pluginMaven`) AND the
+    // plugin-marker publication (com.monkopedia.kplusplus.compiler:...gradle.plugin) that
+    // makes `id("com.monkopedia.kplusplus.compiler") version "0.3.0"` resolvable from a repo.
+    `maven-publish`
 }
 
 group = "com.monkopedia.kplusplus"
-version = "0.2.2"
+version = "0.3.0"
 
 dependencies {
     implementation(kotlin("stdlib"))

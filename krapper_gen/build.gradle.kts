@@ -23,6 +23,10 @@ plugins {
     alias(libs.plugins.ksrpc)
     id("c")
     id("cpp")
+    // R1 (#128): publish the krapper_gen release binary to mavenLocal as a normal
+    // classified release artifact so a from-published consumer resolves the resolve+codegen
+    // tool by coordinate. See the publication block near the bottom.
+    `maven-publish`
 }
 
 repositories {
@@ -95,4 +99,47 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
+}
+
+// ---- R1 (#128): publish the krapper_gen release binary to mavenLocal ----
+//
+// krapper_gen is the resolve+codegen tool the kplusplus Gradle plugin invokes. A K/N linuxX64
+// .kexe is not a jar (no software-component to wire), so — exactly like the krapper_parse
+// release-binary publication — this is an ARTIFACT-ONLY MavenPublication: attach the raw
+// executable with a `linuxX64` classifier and an empty extension. mavenLocal only; no signing.
+//
+// A Maven repo does NOT preserve the +x bit, so a consumer must chmod the resolved file (the
+// krapper_parse consume-seam already does this for its binary; R2 wires the same for this one).
+val krapperGenBinary = layout.buildDirectory
+    .file("bin/native/releaseExecutable/krapper_gen.kexe").get().asFile
+
+publishing {
+    publications {
+        create<MavenPublication>("releaseBinary") {
+            artifactId = "krapper_gen"
+            artifact(krapperGenBinary) {
+                classifier = "linuxX64"
+                extension = ""
+            }
+        }
+    }
+}
+
+// Build the release binary before publishing it, and guard that it exists.
+tasks.named("publishReleaseBinaryPublicationToMavenLocal") {
+    dependsOn("linkReleaseExecutableNative")
+    doFirst {
+        check(krapperGenBinary.exists()) {
+            "publishReleaseBinaryToMavenLocal: expected the krapper_gen release binary at " +
+                "$krapperGenBinary — linkReleaseExecutableNative should have produced it."
+        }
+    }
+}
+
+tasks.register("publishReleaseBinaryToMavenLocal") {
+    group = "kplusplus"
+    description =
+        "Build the krapper_gen release binary and publish it to mavenLocal as " +
+            "com.monkopedia.kplusplus:krapper_gen:$version (classifier linuxX64)."
+    dependsOn("publishReleaseBinaryPublicationToMavenLocal")
 }
