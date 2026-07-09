@@ -99,7 +99,15 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             val ext = target.extensions.findByType(KPlusPlusExtension::class.java)
             val hasHeadersAtConfig = ext?.headers?.isNotEmpty() == true
             if (!seedMode) {
-                it.inputs.file(kexe).withPropertyName("krapperGenKexe")
+                // inputs.files (plural), NOT inputs.file (singular): for a from-published
+                // consumer (R2, #128) the kexe is a mavenLocal artifact staged under
+                // build/ (resolvePublishedTool). If a `clean` in the SAME invocation wipes
+                // build/ AFTER configuration staged it, singular inputs.file would abort at
+                // validation on the missing path; the plural form tolerates a non-existent
+                // entry, lets the task run, and the doLast re-stages it via resolveKrapperGen
+                // (idempotent) or fails fast on a genuinely-missing tool. When the file is
+                // present it still drives the up-to-date check identically.
+                it.inputs.files(kexe).withPropertyName("krapperGenKexe")
                     .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
             }
             it.inputs.files(manifestFile).withPropertyName("requestedManifest")
@@ -138,15 +146,22 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     return@doLast
                 }
                 if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
-                    if (!kexe.exists()) {
+                    // Re-resolve at execution time: for the published path this re-stages
+                    // the tool from mavenLocal if build/ was wiped by a same-invocation
+                    // `clean` after configuration staged it (resolvePublishedTool is
+                    // idempotent). For the in-tree paths this returns the same kexe.
+                    val execKexe = resolveKrapperGen(target).second
+                    if (!execKexe.exists()) {
                         throw GradleException(
-                            "kplusplusSync: krapper_gen kexe not found at $kexe. Either run " +
-                                ":krapper_gen:linkDebugExecutableNative in the kplusplus " +
-                                "included build, or check the includeBuild(\"...\") path in " +
-                                "your settings.gradle.kts."
+                            "kplusplusSync: krapper_gen kexe not found at $execKexe. Either " +
+                                "run :krapper_gen:linkDebugExecutableNative in the kplusplus " +
+                                "included build, check the includeBuild(\"...\") path in your " +
+                                "settings.gradle.kts, or (for a from-published consumer) " +
+                                "declare mavenLocal() so " +
+                                "com.monkopedia.kplusplus:krapper_gen:$PLUGIN_VERSION resolves."
                         )
                     }
-                    runKrapperParseSync(target, ext, moduleName, krappedDir, kexe)
+                    runKrapperParseSync(target, ext, moduleName, krappedDir, execKexe)
                     return@doLast
                 }
                 throw GradleException(
@@ -525,11 +540,80 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 return taskRef to kexe
             }
         }
+        // Published-artifact fallback (R2, #128): no in-tree source (sibling or
+        // includedBuild), so this is a TRUE external consumer (declares the plugin +
+        // a repo, NO includeBuild). Resolve the krapper_gen tool from its published
+        // Maven coordinate — the SAME mechanism the #126 stage-0 seam uses for
+        // krapper_parse (resolveStage0Path). Requires mavenLocal() in the consumer's
+        // repositories. Additive + LAST: dev/self-build flows keep their in-tree path.
+        resolvePublishedTool(target, "krapper_gen")?.let { return null to it }
+
         // Final fallback: the legacy hardcoded path. The doLast will throw a
         // helpful error if it doesn't exist.
         return null to target.rootProject.file(
             "krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe"
         )
+    }
+
+    /**
+     * Published-artifact fallback (R2, #128) — resolve a tool binary
+     * (`krapper_gen` / `krapper_parse`) from its published Maven coordinate for a
+     * TRUE external consumer that declares the plugin + a repository but NO
+     * `includeBuild` (neither sibling project nor included build is present).
+     *
+     * Models the #126 stage-0 consume seam (`resolveStage0Path` in
+     * krapper_parse/build.gradle.kts): a resolvable [Configuration] with a single
+     * dependency on `com.monkopedia.kplusplus:<tool>:<PLUGIN_VERSION>` selecting the
+     * `linuxX64` classifier + EMPTY extension (the publications are artifact-only, no
+     * `.jar`), `isTransitive=false`. The resolved artifact comes back mode 0644 (a
+     * Maven repo drops the exec bit), so we copy it into the consumer's build dir and
+     * `setExecutable(true)` — exactly what `resolveStage0Path` does — because the sync
+     * launches these via ProcessBuilder, which needs +x.
+     *
+     * Returns the staged, executable File, or null if resolution fails (no mavenLocal
+     * repo / artifact not published) — the caller then falls through to its
+     * fail-fast-at-execution error path. The consumer must declare `mavenLocal()`.
+     */
+    private fun resolvePublishedTool(target: Project, tool: String): File? {
+        return try {
+            val coordinate = "$PLUGIN_GROUP:$tool:$PLUGIN_VERSION"
+            val configName = "kplusplusTool${tool.replaceFirstChar { it.uppercase() }}"
+            val config = target.configurations.findByName(configName)
+                ?: target.configurations.create(configName) {
+                    it.isCanBeConsumed = false
+                    it.isCanBeResolved = true
+                    it.dependencies.add(
+                        target.dependencies.create(coordinate).also { dep ->
+                            (dep as? org.gradle.api.artifacts.ModuleDependency)?.apply {
+                                isTransitive = false
+                                artifact { art ->
+                                    art.name = tool
+                                    art.classifier = "linuxX64"
+                                    art.extension = ""
+                                }
+                            }
+                        }
+                    )
+                }
+            val resolved = config.resolve().singleOrNull() ?: return null
+            if (!resolved.exists()) return null
+            // Maven drops the exec bit — stage an executable copy under the build dir.
+            val staged = File(
+                target.layout.buildDirectory.get().asFile,
+                "kplusplus/tools/$tool"
+            )
+            staged.parentFile.mkdirs()
+            if (!staged.exists() ||
+                staged.length() != resolved.length() ||
+                staged.lastModified() < resolved.lastModified()
+            ) {
+                resolved.copyTo(staged, overwrite = true)
+                staged.setExecutable(true)
+            }
+            staged
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
@@ -594,6 +678,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 return taskRef to binary
             }
         }
+        // Published-artifact fallback (R2, #128): a TRUE external consumer has neither
+        // a sibling :krapper_parse project nor an includeBuild that hosts it. Resolve
+        // the LLVM parser tool from its published Maven coordinate (needs mavenLocal()).
+        // The published krapper_parse binary is LLVM-linked and needs LLVM present at
+        // RUNTIME — but a standalone consumer has no in-tree LLVM-gated modules, so no
+        // -PenableClang is needed here (that flag only gates in-tree root-build modules).
+        resolvePublishedTool(target, "krapper_parse")?.let { return null to it }
         return null to target.rootProject.file(relBinary)
     }
 

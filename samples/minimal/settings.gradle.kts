@@ -16,13 +16,14 @@
 rootProject.name = "minimal"
 pluginManagement {
     repositories {
+        // A TRUE from-published consumer (R2, #128): NO includeBuild. The kplusplus
+        // compiler subplugin is resolved from its published mavenLocal plugin marker
+        // (com.monkopedia.kplusplus.compiler → kplusplus-compiler-gradle 0.3.0), and
+        // the tool binaries (krapper_gen / krapper_parse) are resolved by coordinate
+        // from mavenLocal by the plugin itself. This is the same standalone path k++
+        // uses to self-host as its own first consumer.
+        mavenLocal()
         gradlePluginPortal()
         mavenCentral()
-        mavenLocal()
     }
-    // The v2 compiler subplugin lives in the main kplusplus repo, pulled in as an
-    // included build. samples/minimal is two levels below the repo root, so `../../`
-    // is that root (whose settings.gradle.kts publishes the subplugin). This holds
-    // both in the canonical checkout and in a .claude/worktrees/<id>/ worktree.
-    includeBuild("../../")
 }

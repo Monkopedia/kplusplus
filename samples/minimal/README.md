@@ -4,6 +4,11 @@ The smallest end-to-end kplusplus sample: a tiny hand-written C++ geometry libra
 to Kotlin/Native and run. No standard-library template surface, no 62 MB monolith — the
 fastest first contact with kplusplus.
 
+This is a **true from-published consumer** (#128, R2): it declares the plugin by version and
+`mavenLocal()` — **no `includeBuild`**. The plugin marker, the FIR plugin, and the
+`krapper_gen` / `krapper_parse` tool binaries are all resolved by Maven coordinate from
+mavenLocal. This is the same standalone path k++ uses to self-host as its own first consumer.
+
 ## What it binds
 
 [`cpp/geometry.h`](cpp/geometry.h) — two plain structs in `namespace geo`:
@@ -21,9 +26,21 @@ The generated Kotlin API and the `main` that drives it live in
 
 ## Run it
 
+First publish the kplusplus consumer set to your local Maven repo (from the repo root, once):
+
 ```
-./gradlew runReleaseExecutableKlinker -PenableClang
+./gradlew publishAllToMavenLocal -PenableClang
 ```
+
+Then, from this directory:
+
+```
+./gradlew runReleaseExecutableKlinker
+```
+
+No `-PenableClang` is needed here: a standalone consumer has no in-tree LLVM-gated modules;
+the `krapper_parse` tool is resolved as a published binary from mavenLocal (`-PenableClang`
+only gates modules inside the kplusplus root build, which this consumer does not include).
 
 Expected output:
 
@@ -36,9 +53,9 @@ center: (1.0, 1.5)
 ## Requirements
 
 kplusplus's front-end is **self-hosted on Clang** (it parses your headers on
-generated Clang-AST bindings), so a build-time **LLVM/Clang toolchain is required** and the
-front-end is gated behind `-PenableClang`. `clang++` must be on `PATH` — it both parses the
-header and compiles `cpp/geometry.cc`. JDK 21 is required to run the build.
+generated Clang-AST bindings). The published `krapper_parse` tool binary is LLVM-linked, so a
+**LLVM/Clang toolchain must be present at runtime**; `clang++` must be on `PATH` — it both
+parses the header and compiles `cpp/geometry.cc`. JDK 21 is required to run the build.
 
 The first build is slow (it builds the self-hosted front-end, generates the bindings, then
 compiles and links the generated C++ wrapper); later runs are incremental.
