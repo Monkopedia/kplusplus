@@ -16,7 +16,7 @@
 #pragma once
 
 // #47 flip brick B2 — the GENERALITY-DEMO surface. A deliberately std-free, single-header
-// C++ struct so the cpp front-end (:cppfrontend) parses it cleanly: it proves the generic
+// C++ struct so the cpp front-end (:krapper_parse) parses it cleanly: it proves the generic
 // `-Pkpp.frontend.<module>=cpp` path drives a module's OWN kplusplus{} config (NOT just
 // featuregen's std-heavy strings_feature.h). Mirrors the proven `geo::Vec` shape (NsSingle):
 // default + args ctor, fields, a const method, a by-value method, a static factory.

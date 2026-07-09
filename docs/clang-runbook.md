@@ -1,7 +1,7 @@
 # Clang self-bootstrap runbook
 
 Operational setup for building and running the clang self-bootstrap modules (`:clangwalk`,
-`:cppfrontend`). These are the stage1 consumers that bind Clang's own C++ AST
+`:krapper_parse`). These are the stage1 consumers that bind Clang's own C++ AST
 (`libclang-cpp`) and run on kplusplus-generated bindings. They are **off by default** and
 require an LLVM/Clang toolchain a plain build host won't have. The campaign strategy/log
 lives in [`campaigns/self-hosting.md`](campaigns/self-hosting.md); this is the how-to-build companion.
@@ -31,7 +31,7 @@ The clang modules are gated two equivalent ways:
 - **`-PllvmConfig=<path>`** — both an opt-in (its presence enables the modules) *and* the
   override that points the probe at a specific `llvm-config`.
 
-Without either, `settings.gradle.kts` never includes `:clangwalk`/`:cppfrontend`, so the
+Without either, `settings.gradle.kts` never includes `:clangwalk`/`:krapper_parse`, so the
 default `./gradlew` build needs no LLVM and stays green everywhere.
 
 ### Failure behavior (hardened in #11b)
@@ -54,7 +54,7 @@ headers **must** be compiled with `clang++`, not the Kotlin/Native-bundled GCC 8
 ## 3. Release builds, not debug
 
 The gated verification tasks all build and run the **release** binaries
-(`cppfrontendRelease`, `krapper_gen` `releaseExecutable`, `linkReleaseExecutableKlinker`,
+(`krapper_parseRelease`, `krapper_gen` `releaseExecutable`, `linkReleaseExecutableKlinker`,
 `runReleaseExecutableKlinker`).
 
 Background: klinker links the executable with the **system `clang++`** (needed for modern
@@ -83,7 +83,7 @@ or `JAVA_HOME` at it for the task you're running).
 
 `krapper_gen` has a **single** front-end since the self-hosting flip (B5, #88): the in-tree
 libclang-C reducer was deleted. It loads the `WrappedTU` from `--parsedModel` (the ModelIo
-JSON emitted by the `cppfrontend` binary, which is built on kplusplus-generated
+JSON emitted by the `krapper_parse` binary, which is built on kplusplus-generated
 `libclang-cpp` bindings); `--header` now only supplies the `#include` list for the generated
 C++ wrapper, it is not parsed in-process. There is no `--frontend` flag and no `--dumpModels`
 /`--dumpParsedModel` flag any more.
@@ -97,8 +97,8 @@ The gated verification tasks (all require `-PenableClang`):
 
 | Task | What it proves |
 | --- | --- |
-| `:cppfrontend:handoffGenerate` | `krapper_gen` loads the cppfrontend model via `--parsedModel`, runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
-| `:cppfrontend:handoffInstGenerate` | The cpp **instantiation-forcing** path end-to-end (`--instantiate std::vector<Item*>` over `--parsedModel` + `--forcingModel`): generates + **compiles** the wrapper, then functionally asserts pass-3 forcing recovered `Bag::items()` and the vector specialization materialized its core container surface. |
+| `:krapper_parse:handoffGenerate` | `krapper_gen` loads the krapper_parse model via `--parsedModel`, runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
+| `:krapper_parse:handoffInstGenerate` | The cpp **instantiation-forcing** path end-to-end (`--instantiate std::vector<Item*>` over `--parsedModel` + `--forcingModel`): generates + **compiles** the wrapper, then functionally asserts pass-3 forcing recovered `Bag::items()` and the vector specialization materialized its core container surface. |
 | `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
 
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the

@@ -53,7 +53,7 @@ import kotlinx.coroutines.runBlocking
  *
  * This test relocates the guard onto the surviving boundary: it runs the real
  * deserialize -> resolve -> codegen pipeline (the path the self-hosted CLI takes from a
- * cppfrontend-produced ModelIo, minus the clang COMPILE) TWICE in one process and asserts
+ * krapper_parse-produced ModelIo, minus the clang COMPILE) TWICE in one process and asserts
  * byte-identical output. Each run DESERIALIZES A FRESH model from the same ModelIo JSON and
  * resets the process-scoped state (as `IndexedServiceImpl.init` does) before resolving, so
  * the only thing carried between runs is leaked global state — if the intern cache,

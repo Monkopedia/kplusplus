@@ -135,14 +135,14 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         val target = req.spec
         requested.add(target)
         // The forcing struct's name + header content are SHARED with the cpp front-end
-        // (ForcingHeader, :krapper_model): the cppfrontend binary synthesizes the same
+        // (ForcingHeader, :krapper_model): the krapper_parse binary synthesizes the same
         // bytes for its forcing parse, so both paths force the same specialization from
         // the same translation unit.
         val forceName = ForcingHeader.forceName(target)
         // Record only the target spec; writeTo synthesizes the bytes once it knows the output
         // dir (the consumer #include must be relative to where the header lands — #86).
         forcingHeaders[forceName] = target
-        // The forcing-parse tree is produced by the cppfrontend binary (which synthesizes
+        // The forcing-parse tree is produced by the krapper_parse binary (which synthesizes
         // the SAME forcing header and parses it with the Clang C++ AST); load it. The
         // forcing header content above is still recorded: writeTo re-materializes it so the
         // generated wrapper can #include the specialization's declaration. Everything
@@ -157,7 +157,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             "No forcing model for instantiation '$target'. krapper_gen has no in-process " +
                 "parse front-end (libclang-C reducer removed in flip B5, #47); every " +
                 "--instantiate spec needs a matching --forcingModel '<spec>=<path>' " +
-                "(produced by the cppfrontend binary)."
+                "(produced by the krapper_parse binary)."
         )
         // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
         // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the

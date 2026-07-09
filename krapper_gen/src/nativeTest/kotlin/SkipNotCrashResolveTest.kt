@@ -41,7 +41,7 @@ import kotlinx.coroutines.runBlocking
  * the in-process libclang reducer that the self-hosting flip (B5, #88) deleted. That parse
  * path is gone, so the test can't be ported as-is. The invariant itself is unchanged and
  * now lives on the self-hosted pipeline: a [WrappedElement] model (whatever produced it —
- * the cppfrontend binary in production, a hand-built model here) flows through
+ * the krapper_parse binary in production, a hand-built model here) flows through
  * resolve+codegen, and any element it can't model must be dropped through the central
  * [ResolveContext.notifyFailed] choke point into the [DropLedger] rather than throwing.
  *
