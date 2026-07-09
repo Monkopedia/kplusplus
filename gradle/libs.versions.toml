@@ -9,7 +9,7 @@ ktlint-gradle = "14.0.1"
 ktlint-cli = "1.8.0"
 klinker = "0.2.0"
 gradle-plugin-publish = "2.1.0"
-vannik = "0.36.0"
+vannik = "0.37.0"
 
 [libraries]
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -31,3 +31,4 @@ ksrpc = { id = "com.monkopedia.ksrpc.plugin", version.ref = "ksrpc" }
 klinker = { id = "com.monkopedia.klinker.plugin", version.ref = "klinker" }
 gradle-plugin-publish = { id = "com.gradle.plugin-publish", version.ref = "gradle-plugin-publish" }
 vannik-publish = { id = "com.vanniktech.maven.publish", version.ref = "vannik" }
+vannik-publish-base = { id = "com.vanniktech.maven.publish.base", version.ref = "vannik" }
