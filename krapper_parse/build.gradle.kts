@@ -483,6 +483,7 @@ publishing {
             artifact(krapperParseBinary) {
                 classifier = stage0Classifier
                 extension = ""
+                builtBy(tasks.named("linkReleaseExecutableKlinker"))
             }
         }
         // The NORMAL release artifact a from-published consumer resolves — the LLVM parser
@@ -498,6 +499,9 @@ publishing {
             artifact(krapperParseBinary) {
                 classifier = "linuxX64"
                 extension = ""
+                // Producing task on the artifact so the sign task + both publish tasks depend
+                // on it (Gradle 9 rejects the sign task's undeclared use of the link output).
+                builtBy(tasks.named("linkReleaseExecutableKlinker"))
             }
             artifact(emptySourcesJar)
             artifact(emptyJavadocJar)

@@ -143,6 +143,11 @@ publishing {
             artifact(krapperGenBinary) {
                 classifier = "linuxX64"
                 extension = ""
+                // Declare the producing task on the artifact so EVERY consumer of the .kexe —
+                // the sign task AND the publish tasks (mavenLocal + Central) — depends on it.
+                // (A per-publish-task dependsOn missed signReleaseBinaryPublication, which
+                // Gradle 9 rejects as an undeclared implicit dependency.)
+                builtBy(tasks.named("linkReleaseExecutableNative"))
             }
             artifact(emptySourcesJar)
             artifact(emptyJavadocJar)
