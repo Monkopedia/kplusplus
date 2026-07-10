@@ -531,9 +531,14 @@ listOf("KotlinMultiplatform", "Native", "Stage0").forEach { name ->
     }.configureEach { enabled = false }
 }
 
-// Build + guard the release binary before publishing the normal release artifact. Like the
+// Build + guard the release binary before publishing the normal release artifact — to EITHER
+// mavenLocal or Central (the dependency must cover the Central repository task; wiring it only
+// onto mavenLocal let a clean-CI Central publish fail "artifact file does not exist"). Like the
 // stage0 anchor it must be built FROM SEED, never from the =cpp self-generation path.
-tasks.named("publishReleaseBinaryPublicationToMavenLocal") {
+tasks.matching {
+    it.name == "publishReleaseBinaryPublicationToMavenLocal" ||
+        it.name == "publishReleaseBinaryPublicationToMavenCentralRepository"
+}.configureEach {
     dependsOn("linkReleaseExecutableKlinker")
     doFirst {
         check(!stage0BuiltFromCpp) {
