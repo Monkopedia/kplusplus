@@ -25,11 +25,14 @@ with no manual release step.
 | `com.monkopedia.kplusplus:krapper_gen` (classifier `linuxX64`) | Central | resolve+codegen tool binary |
 | `com.monkopedia.kplusplus:krapper_parse` (classifier `linuxX64`) | Central | LLVM parser tool binary |
 
-The two native tool binaries are classified, extension-less artifacts (a Kotlin/Native `.kexe`
-is not a jar). Central still requires a complete POM + a sources jar + a javadoc jar + GPG
-signatures per coordinate, so each ships **empty (stub) sources + javadoc jars** alongside the
-binary. The `krapper_parse` stage-0 bootstrap anchor (`krapper_parse-stage0:0.2.3-stage0`) is a
-mavenLocal-only artifact and is deliberately **not** published to Central.
+The two native tool binaries are classified `.kexe` artifacts (a Kotlin/Native `.kexe` is not a
+jar). They carry a real `.kexe` extension, **not** an empty one: an empty extension produces the
+filename `krapper_gen-<v>-linuxX64.` (trailing dot), which the Central Portal's manifest builder
+rejects as a missing file. Central still requires a complete POM + a sources jar + a javadoc jar
++ GPG signatures per coordinate, so each ships **empty (stub) sources + javadoc jars** alongside
+the binary. The `krapper_parse` stage-0 bootstrap anchor (`krapper_parse-stage0:0.2.3-stage0`)
+is a mavenLocal-only artifact (extension-less is fine — it never reaches the Portal) and is
+deliberately **not** published to Central.
 
 ## Required GitHub Secrets
 

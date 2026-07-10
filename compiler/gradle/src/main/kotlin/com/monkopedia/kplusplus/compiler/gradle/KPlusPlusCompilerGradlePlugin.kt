@@ -564,7 +564,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * Models the #126 stage-0 consume seam (`resolveStage0Path` in
      * krapper_parse/build.gradle.kts): a resolvable [Configuration] with a single
      * dependency on `com.monkopedia.kplusplus:<tool>:<PLUGIN_VERSION>` selecting the
-     * `linuxX64` classifier + EMPTY extension (the publications are artifact-only, no
+     * `linuxX64` classifier + `.kexe` extension (the publications are artifact-only, no
      * `.jar`), `isTransitive=false`. The resolved artifact comes back mode 0644 (a
      * Maven repo drops the exec bit), so we copy it into the consumer's build dir and
      * `setExecutable(true)` — exactly what `resolveStage0Path` does — because the sync
@@ -589,7 +589,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                                 artifact { art ->
                                     art.name = tool
                                     art.classifier = "linuxX64"
-                                    art.extension = ""
+                                    // Real `.kexe` extension — the published release binary
+                                    // uses it (an empty extension makes a trailing-dot filename
+                                    // the Central Portal rejects). Must match the `extension`
+                                    // on the releaseBinary publications in krapper_gen/
+                                    // krapper_parse build.gradle.kts.
+                                    art.extension = "kexe"
                                 }
                             }
                         }

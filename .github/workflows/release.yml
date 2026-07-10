@@ -14,6 +14,20 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      central_scope:
+        description: >-
+          Which coordinates to push to the Central Portal. `all` = the full set
+          (a fresh release). `native-binaries` = only the krapper_gen +
+          krapper_parse release binaries — use this to COMPLETE a partial release
+          where the jar coordinates already published but the native-binary
+          upload failed (the Portal rejects re-publishing an existing coordinate,
+          so a full re-run would fail on the already-live jars).
+        type: choice
+        default: all
+        options:
+          - all
+          - native-binaries
 
 jobs:
   publish:
@@ -81,7 +95,18 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_TOKEN }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.OSSRH_GPG_SECRET_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
-        run: ./gradlew publishAllToMavenCentral -PenableClang --no-configuration-cache
+        run: |
+          set -euxo pipefail
+          # `native-binaries` publishes ONLY the two native release-binary coordinates
+          # (krapper_gen + krapper_parse) — for completing a partial release. A release event
+          # (or the `all` default) publishes the whole set. Empty input (release event) => all.
+          scope="${{ github.event.inputs.central_scope || 'all' }}"
+          if [ "$scope" = "native-binaries" ]; then
+            ./gradlew :krapper_gen:publishToMavenCentral :krapper_parse:publishToMavenCentral \
+              -PenableClang --no-configuration-cache
+          else
+            ./gradlew publishAllToMavenCentral -PenableClang --no-configuration-cache
+          fi
 
       - name: Release notes
         run: |
