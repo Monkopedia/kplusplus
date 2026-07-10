@@ -523,6 +523,19 @@ mavenPublishing {
     if (signingConfigured) signAllPublications()
 }
 
+// Gradle 9 strict input/output validation: the KMP plugin auto-registers per-target SOURCES
+// jars (`metadataSourcesJar`/`nativeSourcesJar`/`sourcesJar`) that package this module's
+// Kotlin — which INCLUDES the klinker-GENERATED source (build/gen/klinker/krapper_parse/kotlin,
+// produced by `generateKotlinSourcekrapper_parse`) — but the KMP-registered jars don't declare
+// that producing task, so Gradle 9 rejects the undeclared use of its output. We don't ship
+// these KMP publications outward (only `releaseBinary` -> Central, `stage0` -> mavenLocal), but
+// `signAllPublications()` signs EVERY publication in CI, which builds their sources jars and so
+// surfaces the error there (and in a signed local publishToMavenLocal). Declare the generator
+// on each — the same class of fix as #135's `builtBy` on the binary artifacts, one level up.
+listOf("metadataSourcesJar", "nativeSourcesJar", "sourcesJar").forEach { jar ->
+    tasks.named(jar) { dependsOn("generateKotlinSourcekrapper_parse") }
+}
+
 // Ship ONLY the release binary to Central. The Kotlin plugin auto-registers
 // `native`/`kotlinMultiplatform` publications (krapper_parse is a TOOL run as a binary, not a
 // KMP library consumed by coordinate), and the `stage0` publication is a mavenLocal-only
