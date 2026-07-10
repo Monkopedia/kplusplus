@@ -111,7 +111,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
 // krapper_gen is the resolve+codegen tool the kplusplus Gradle plugin invokes. A K/N linuxX64
 // .kexe is not a jar (no software-component to wire), so — exactly like the krapper_parse
 // release-binary publication — this is an ARTIFACT-ONLY MavenPublication: attach the raw
-// executable with a `linuxX64` classifier and an empty extension.
+// executable with a `linuxX64` classifier and a `.kexe` extension.
 //
 // Central-validity for a classified-binary-only artifact: the Central Portal still requires a
 // complete POM + a sources jar + a javadoc jar + GPG signatures for every file. There is no
@@ -142,7 +142,14 @@ publishing {
             artifactId = "krapper_gen"
             artifact(krapperGenBinary) {
                 classifier = "linuxX64"
-                extension = ""
+                // A real extension, NOT "" — an empty extension yields the filename
+                // `krapper_gen-<v>-linuxX64.` (trailing dot), which the Central Portal's
+                // manifest builder rejects as a missing file ("...-linuxX64. is missing").
+                // `.kexe` is the honest Kotlin/Native executable extension; the consumer
+                // resolves the same classifier + extension and chmod +x's it (a filename
+                // extension has no bearing on executing the staged binary). Kept in lockstep
+                // with resolvePublishedTool in the Gradle plugin.
+                extension = "kexe"
                 // Declare the producing task on the artifact so EVERY consumer of the .kexe —
                 // the sign task AND the publish tasks (mavenLocal + Central) — depends on it.
                 // (A per-publish-task dependsOn missed signReleaseBinaryPublication, which

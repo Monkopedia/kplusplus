@@ -498,7 +498,14 @@ publishing {
             // version inherited from the project (0.3.0).
             artifact(krapperParseBinary) {
                 classifier = "linuxX64"
-                extension = ""
+                // A real extension, NOT "" — an empty extension yields the filename
+                // `krapper_parse-<v>-linuxX64.` (trailing dot), which the Central Portal's
+                // manifest builder rejects as a missing file. `.kexe` is the honest K/N
+                // executable extension; the consumer resolves the same classifier + extension
+                // and chmod +x's it. (The stage0 anchor above stays extension-less: it is
+                // mavenLocal-only and never reaches the Central Portal.) Kept in lockstep with
+                // resolvePublishedTool in the Gradle plugin.
+                extension = "kexe"
                 // Producing task on the artifact so the sign task + both publish tasks depend
                 // on it (Gradle 9 rejects the sign task's undeclared use of the link output).
                 builtBy(tasks.named("linkReleaseExecutableKlinker"))
