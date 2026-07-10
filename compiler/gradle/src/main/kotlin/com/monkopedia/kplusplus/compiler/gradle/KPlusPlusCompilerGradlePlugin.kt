@@ -519,6 +519,39 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * disk in that case) plus the kexe File. The caller is expected to fail
      * fast at execution time if the kexe doesn't exist.
      */
+    /**
+     * Extract the tool binary BUNDLED in the plugin jar — the 0.4.0 distribution model. The
+     * released plugin carries its own `krapper_gen`/`krapper_parse` binaries on its classpath at
+     * `/com/monkopedia/kplusplus/tools/linuxX64/<tool>`, so a consumer NEVER resolves a separate
+     * tool Maven coordinate (that coordinate resolution is what collided with an in-build
+     * `:krapper_parse` project). Copy the binary to a per-plugin-version cache under the Gradle
+     * user home, chmod +x (jar entries carry no exec bit), and return it. Returns null when the
+     * jar carries no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through
+     * to the sibling/includedBuild/published paths.
+     */
+    private fun extractBundledTool(target: Project, tool: String): File? {
+        val cache = File(
+            target.gradle.gradleUserHomeDir,
+            "kplusplus/tools/$PLUGIN_VERSION/$tool",
+        )
+        if (cache.exists() && cache.length() > 0L) return cache
+        val stream = javaClass.getResourceAsStream(
+            "/com/monkopedia/kplusplus/tools/linuxX64/$tool",
+        ) ?: return null
+        return try {
+            cache.parentFile.mkdirs()
+            val tmp = File(cache.parentFile, "$tool.part")
+            stream.use { input -> tmp.outputStream().use { out -> input.copyTo(out) } }
+            tmp.copyTo(cache, overwrite = true)
+            tmp.delete()
+            cache.setExecutable(true)
+            cache
+        } catch (e: Exception) {
+            target.logger.warn("kplusplus: failed to extract bundled $tool: ${e.message}")
+            null
+        }
+    }
+
     private fun resolveKrapperGen(target: Project): Pair<Any?, File> {
         val direct = target.rootProject.findProject(":krapper_gen")
         if (direct != null) {
@@ -540,12 +573,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 return taskRef to kexe
             }
         }
-        // Published-artifact fallback (R2, #128): no in-tree source (sibling or
-        // includedBuild), so this is a TRUE external consumer (declares the plugin +
-        // a repo, NO includeBuild). Resolve the krapper_gen tool from its published
-        // Maven coordinate — the SAME mechanism the #126 stage-0 seam uses for
-        // krapper_parse (resolveStage0Path). Requires mavenLocal() in the consumer's
-        // repositories. Additive + LAST: dev/self-build flows keep their in-tree path.
+        // Consumer path (no in-tree source): a TRUE external consumer that declares the plugin
+        // but no includeBuild. Prefer the binary BUNDLED in the plugin jar (0.4.0 model — the
+        // released plugin carries its tools). The published-coordinate resolution stays as a
+        // fallback for a plugin whose jar has no bundled binary (e.g. a 0.3.0 consumer).
+        extractBundledTool(target, "krapper_gen")?.let { return null to it }
         resolvePublishedTool(target, "krapper_gen")?.let { return null to it }
 
         // Final fallback: the legacy hardcoded path. The doLast will throw a
@@ -689,6 +721,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // The published krapper_parse binary is LLVM-linked and needs LLVM present at
         // RUNTIME — but a standalone consumer has no in-tree LLVM-gated modules, so no
         // -PenableClang is needed here (that flag only gates in-tree root-build modules).
+        // Consumer path: prefer the binary bundled in the plugin jar (0.4.0 model), then the
+        // published Maven coordinate (fallback for an unbundled/0.3.0 plugin jar).
+        extractBundledTool(target, "krapper_parse")?.let { return null to it }
         resolvePublishedTool(target, "krapper_parse")?.let { return null to it }
         return null to target.rootProject.file(relBinary)
     }
