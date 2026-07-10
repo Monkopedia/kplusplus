@@ -40,8 +40,12 @@ jobs:
           sudo apt-get install -y clang llvm llvm-dev libclang-cpp-dev gcc-multilib
 
       # --- Publish the Gradle plugin to the Gradle Plugin Portal ---
-      # publishPlugins uses gradle.publish.key / gradle.publish.secret.
+      # publishPlugins uses gradle.publish.key / gradle.publish.secret. Runs ONLY on an actual
+      # release event: the Plugin Portal rejects re-publishing an existing version, so a manual
+      # workflow_dispatch re-run (e.g. to retry a failed Central upload) skips this step and does
+      # Central only — the plugin is already published from the original release.
       - name: Publish Gradle plugin to the Plugin Portal
+        if: github.event_name == 'release'
         run: >-
           ./gradlew -p compiler :kplusplus-compiler-gradle:publishPlugins
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}

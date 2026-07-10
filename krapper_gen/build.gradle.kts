@@ -207,12 +207,18 @@ listOf("Jvm", "KotlinMultiplatform", "Native").forEach { name ->
         }.configureEach { enabled = false }
 }
 
-// Build the release binary before publishing it, and guard that it exists.
-tasks.named("publishReleaseBinaryPublicationToMavenLocal") {
+// Build the release binary before publishing it — to EITHER mavenLocal or Central — and guard
+// that it exists. The dependency must cover the Central repository task too: wiring it only onto
+// the mavenLocal task let a clean-CI Central publish fail with "artifact file does not exist"
+// (it passed locally only because a stale release binary happened to be present).
+tasks.matching {
+    it.name == "publishReleaseBinaryPublicationToMavenLocal" ||
+        it.name == "publishReleaseBinaryPublicationToMavenCentralRepository"
+}.configureEach {
     dependsOn("linkReleaseExecutableNative")
     doFirst {
         check(krapperGenBinary.exists()) {
-            "publishReleaseBinaryToMavenLocal: expected the krapper_gen release binary at " +
+            "publishReleaseBinary: expected the krapper_gen release binary at " +
                 "$krapperGenBinary — linkReleaseExecutableNative should have produced it."
         }
     }
