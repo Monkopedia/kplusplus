@@ -26,7 +26,7 @@ plugins {
     // The kplusplus compiler subplugin, resolved from its published mavenLocal marker
     // (R2, #128) — no includeBuild. Everything kplusplus-specific lives in the narrow
     // `kplusplus { ... }` block at the bottom of this file.
-    id("com.monkopedia.kplusplus.compiler") version "0.3.0"
+    id("com.monkopedia.kplusplus.compiler") version "0.3.1"
     id("com.monkopedia.klinker.plugin") version "0.2.0"
 }
 
