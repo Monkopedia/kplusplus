@@ -2,9 +2,9 @@
 #
 #   * The Gradle plugin (com.monkopedia.kplusplus.compiler) -> the Gradle Plugin Portal
 #     AND the Central Portal (so both `gradlePluginPortal()` and `mavenCentral()` consumers
-#     resolve `id("...") version "..."`).
+#     resolve `id("...") version "..."`). The krapper_gen + krapper_parse native tool binaries
+#     are BUNDLED INSIDE this plugin jar (0.4.0 model), not shipped as separate coordinates.
 #   * The FIR kotlinc-plugin jar -> the Central Portal.
-#   * The krapper_gen + krapper_parse native tool binaries (classifier linuxX64) -> Central.
 #
 # Everything is GPG-signed (vanniktech in-memory key) and uploaded to the Central Portal, which
 # AUTO-RELEASES the deployment once it passes validation (automaticRelease = true; a bundle that
@@ -14,20 +14,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      central_scope:
-        description: >-
-          Which coordinates to push to the Central Portal. `all` = the full set
-          (a fresh release). `native-binaries` = only the krapper_gen +
-          krapper_parse release binaries — use this to COMPLETE a partial release
-          where the jar coordinates already published but the native-binary
-          upload failed (the Portal rejects re-publishing an existing coordinate,
-          so a full re-run would fail on the already-live jars).
-        type: choice
-        default: all
-        options:
-          - all
-          - native-binaries
 
 jobs:
   publish:
@@ -67,49 +53,55 @@ jobs:
           echo "CPATH=$(llvm-config --includedir)" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
-      # --- Publish the Gradle plugin to the Gradle Plugin Portal ---
+      # Build the two native tool binaries so the publish steps can BUNDLE them into the plugin
+      # jar (the 0.4.0 distribution model — the released plugin carries its own tools; consumers
+      # no longer resolve separate krapper_gen/krapper_parse coordinates). -PenableClang brings
+      # :krapper_parse into the build and links it against the LLVM installed above.
+      - name: Build the tool binaries (to bundle into the plugin)
+        run: >-
+          ./gradlew
+          :krapper_gen:linkReleaseExecutableNative
+          :krapper_parse:linkReleaseExecutableKlinker
+          -PenableClang --no-configuration-cache
+
+      # --- Publish the Gradle plugin (tools bundled) to the Gradle Plugin Portal ---
       # publishPlugins uses gradle.publish.key / gradle.publish.secret. Runs ONLY on an actual
       # release event: the Plugin Portal rejects re-publishing an existing version, so a manual
       # workflow_dispatch re-run (e.g. to retry a failed Central upload) skips this step and does
-      # Central only — the plugin is already published from the original release.
+      # Central only. -Pkpp.bundleTools.<tool>=<abs-path> packs the just-built binaries into the
+      # plugin jar (see compiler/gradle/build.gradle.kts + extractBundledTool in the plugin).
       - name: Publish Gradle plugin to the Plugin Portal
         if: github.event_name == 'release'
         run: >-
           ./gradlew -p compiler :kplusplus-compiler-gradle:publishPlugins
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}
           -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }}
+          -Pkpp.bundleTools.krapperGen=$GITHUB_WORKSPACE/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe
+          -Pkpp.bundleTools.krapperParse=$GITHUB_WORKSPACE/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse
 
-      # --- Publish the whole set to the Central Portal (auto-released on validation) ---
-      # vanniktech reads the Central Portal token + the in-memory GPG key from these env vars
-      # (ORG_GRADLE_PROJECT_* -> Gradle properties mavenCentralUsername / mavenCentralPassword
-      # / signingInMemoryKey / signingInMemoryKeyPassword). -PenableClang so :krapper_parse is
-      # in the build and its release binary ships too.
+      # --- Publish the plugin set (tools bundled) to the Central Portal (auto-released) ---
+      # `-p compiler publishToMavenCentral` uploads ONLY the compiler build's coordinates — the
+      # Gradle plugin (+ marker) and the FIR plugin jar — as one signed bundle. The native tool
+      # binaries ride INSIDE the plugin jar (bundleTools), so there are NO standalone
+      # krapper_gen/krapper_parse Central artifacts anymore (that whole classified-binary path is
+      # gone — it was the source of the 0.3.0 firefight). vanniktech reads the Portal token + the
+      # in-memory GPG key from the ORG_GRADLE_PROJECT_* env vars below.
       - name: Publish to the Central Portal (auto-release on validation)
         env:
-          # Reuse the EXISTING repo secrets (from the v1 pipeline — still set, deleting the old
-          # workflow never removed them) rather than new ones. The Central Portal user token
-          # (central.sonatype.com) maps onto the OSSRH_USERNAME/OSSRH_TOKEN pair; if the old
-          # OSSRH token no longer authenticates against the Portal, only those two VALUES need
-          # regenerating — the names stay. OSSRH_GPG_SECRET_KEY is the same armored key v1 used.
+          # Reuse the EXISTING repo secrets (from the v1 pipeline). The Central Portal user token
+          # (central.sonatype.com) maps onto the OSSRH_USERNAME/OSSRH_TOKEN pair; OSSRH_GPG_SECRET_KEY
+          # is the same armored key v1 used.
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_TOKEN }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.OSSRH_GPG_SECRET_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
-        run: |
-          set -euxo pipefail
-          # `native-binaries` publishes ONLY the two native release-binary coordinates
-          # (krapper_gen + krapper_parse) — for completing a partial release. A release event
-          # (or the `all` default) publishes the whole set. Empty input (release event) => all.
-          scope="${{ github.event.inputs.central_scope || 'all' }}"
-          if [ "$scope" = "native-binaries" ]; then
-            ./gradlew :krapper_gen:publishToMavenCentral :krapper_parse:publishToMavenCentral \
-              -PenableClang --no-configuration-cache
-          else
-            ./gradlew publishAllToMavenCentral -PenableClang --no-configuration-cache
-          fi
+        run: >-
+          ./gradlew -p compiler publishToMavenCentral --no-configuration-cache
+          -Pkpp.bundleTools.krapperGen=$GITHUB_WORKSPACE/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe
+          -Pkpp.bundleTools.krapperParse=$GITHUB_WORKSPACE/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse
 
       - name: Release notes
         run: |
-          echo "Published the kplusplus release set to the Central Portal (auto-released on"
-          echo "validation) and the Gradle plugin to the Plugin Portal."
+          echo "Published the kplusplus plugin set (native tools bundled in the plugin jar) to"
+          echo "the Central Portal (auto-released on validation) and the Gradle Plugin Portal."
           echo "Check status at https://central.sonatype.com (Deployments)."

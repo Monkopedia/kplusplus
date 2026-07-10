@@ -20,19 +20,21 @@ with no manual release step.
 | Coordinate | Where | Notes |
 |---|---|---|
 | `com.monkopedia.kplusplus.compiler` (plugin marker) | Plugin Portal + Central | resolves `id(...) version "..."` |
-| `com.monkopedia.kplusplus:kplusplus-compiler-gradle` | Plugin Portal + Central | the Gradle plugin jar |
+| `com.monkopedia.kplusplus:kplusplus-compiler-gradle` | Plugin Portal + Central | the Gradle plugin jar — **carries the bundled tool binaries** |
 | `com.monkopedia.kplusplus:kplusplus-compiler-plugin` | Central | the FIR kotlinc-plugin jar |
-| `com.monkopedia.kplusplus:krapper_gen` (classifier `linuxX64`) | Central | resolve+codegen tool binary |
-| `com.monkopedia.kplusplus:krapper_parse` (classifier `linuxX64`) | Central | LLVM parser tool binary |
 
-The two native tool binaries are classified `.kexe` artifacts (a Kotlin/Native `.kexe` is not a
-jar). They carry a real `.kexe` extension, **not** an empty one: an empty extension produces the
-filename `krapper_gen-<v>-linuxX64.` (trailing dot), which the Central Portal's manifest builder
-rejects as a missing file. Central still requires a complete POM + a sources jar + a javadoc jar
-+ GPG signatures per coordinate, so each ships **empty (stub) sources + javadoc jars** alongside
-the binary. The `krapper_parse` stage-0 bootstrap anchor (`krapper_parse-stage0:0.2.3-stage0`)
-is a mavenLocal-only artifact (extension-less is fine — it never reaches the Portal) and is
-deliberately **not** published to Central.
+That's the whole set — three jars, no separate native artifacts. The `krapper_gen` +
+`krapper_parse` **native tool binaries are bundled INSIDE the Gradle plugin jar** (under
+`/com/monkopedia/kplusplus/tools/linuxX64/`), so a consumer just applies the plugin and it
+extracts + runs its own tools — no separate classified `.kexe` coordinates to resolve or chmod.
+This is the 0.4.0 distribution model; it replaced the standalone
+`com.monkopedia.kplusplus:krapper_gen` / `krapper_parse` classified artifacts that 0.3.0 shipped
+(those remain published + immutable for 0.3.0 consumers, but are not produced going forward).
+
+The release builds the binaries in the root build, then passes their paths to the plugin publish
+via `-Pkpp.bundleTools.krapperGen=<path>` / `-Pkpp.bundleTools.krapperParse=<path>` (the compiler
+build is a separate included build, so it can't depend on the tool modules directly). The plugin
+jar is a normal jar — no classified-binary / empty-sources-jar machinery.
 
 ## Required GitHub Secrets
 
@@ -66,10 +68,14 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
    (`release: published`), or run the workflow manually via **workflow_dispatch**.
 3. The workflow, on an LLVM-equipped runner:
    - installs the LLVM/Clang toolchain (`krapper_parse` links against `libclang-cpp`/`libLLVM`);
-   - `:kplusplus-compiler-gradle:publishPlugins` → Gradle Plugin Portal;
-   - `publishAllToMavenCentral -PenableClang` → uploads the signed bundle to the Central Portal
-     and **auto-releases it once it passes Portal validation** (`automaticRelease = true`). A
-     bundle that fails validation is NOT released, so an invalid upload can't ship.
+   - **builds the two tool binaries** (`:krapper_gen:linkReleaseExecutableNative` +
+     `:krapper_parse:linkReleaseExecutableKlinker -PenableClang`) so the publish steps can bundle
+     them into the plugin jar (`-Pkpp.bundleTools.<tool>=<path>`);
+   - `:kplusplus-compiler-gradle:publishPlugins` → Gradle Plugin Portal (bundled);
+   - `-p compiler publishToMavenCentral` → uploads the signed bundle (plugin + marker + FIR jar,
+     tools bundled inside the plugin) to the Central Portal and **auto-releases it once it passes
+     Portal validation** (`automaticRelease = true`). A bundle that fails validation is NOT
+     released, so an invalid upload can't ship.
 4. Nothing further to do on the Central side — the deployment releases itself after validation.
    Watch the workflow run (and, if you want, https://central.sonatype.com → **Deployments**) for
    status. The Gradle plugin publish to the Plugin Portal is also live immediately.
@@ -82,9 +88,12 @@ Everything is validated locally against `~/.m2` without any credentials:
 
 ```sh
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
-# Full consumer set to mavenLocal (add -PenableClang to include krapper_parse):
-./gradlew publishAllToMavenLocal -PenableClang
-# Prove the from-published consumer still resolves + runs from mavenLocal:
+# 1. Build the tool binaries, then publish the plugin (tools bundled) to mavenLocal:
+./gradlew :krapper_gen:linkReleaseExecutableNative :krapper_parse:linkReleaseExecutableKlinker -PenableClang
+./gradlew -p compiler publishToMavenLocal \
+  -Pkpp.bundleTools.krapperGen="$PWD/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe" \
+  -Pkpp.bundleTools.krapperParse="$PWD/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
+# 2. Prove a from-published consumer resolves the bundled tools + runs from mavenLocal:
 (cd samples/minimal && ./gradlew runReleaseExecutableKlinker)
 ```
 
