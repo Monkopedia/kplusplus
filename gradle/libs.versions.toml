@@ -31,4 +31,3 @@ ksrpc = { id = "com.monkopedia.ksrpc.plugin", version.ref = "ksrpc" }
 klinker = { id = "com.monkopedia.klinker.plugin", version.ref = "klinker" }
 gradle-plugin-publish = { id = "com.gradle.plugin-publish", version.ref = "gradle-plugin-publish" }
 vannik-publish = { id = "com.vanniktech.maven.publish", version.ref = "vannik" }
-vannik-publish-base = { id = "com.vanniktech.maven.publish.base", version.ref = "vannik" }

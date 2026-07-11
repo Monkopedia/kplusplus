@@ -540,10 +540,18 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         ) ?: return null
         return try {
             cache.parentFile.mkdirs()
-            val tmp = File(cache.parentFile, "$tool.part")
-            stream.use { input -> tmp.outputStream().use { out -> input.copyTo(out) } }
-            tmp.copyTo(cache, overwrite = true)
-            tmp.delete()
+            // Per-invocation UNIQUE temp file (issue #149): two parallel first-time builds for
+            // the same plugin version both see cache.exists()==false; a FIXED "$tool.part" name
+            // let them race on one path so one could copyTo(cache) a torn write → corrupt cache
+            // binary. createTempFile hands each invocation its own name; delete it on all paths.
+            val tmp = java.nio.file.Files.createTempFile(cache.parentFile.toPath(), tool, ".part")
+                .toFile()
+            try {
+                stream.use { input -> tmp.outputStream().use { out -> input.copyTo(out) } }
+                tmp.copyTo(cache, overwrite = true)
+            } finally {
+                tmp.delete()
+            }
             cache.setExecutable(true)
             cache
         } catch (e: Exception) {
