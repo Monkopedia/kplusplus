@@ -20,12 +20,12 @@ pluginManagement {
         mavenCentral()
         mavenLocal()
     }
-    // v2 plugin lives in the main repo as an included build. Two layouts
-    // are supported:
-    //   * The canonical /home/jmonk/git/kplusplus checkout — `../../`.
-    //   * A worktree under .claude/worktrees/<id>/samples/v8,
-    //     where `../../` is the worktree root.
-    // Either way, `../../` is the kplusplus root that knows about the
-    // compiler subplugin via its own settings.gradle.kts.
+    // This example is the IN-TREE dev loop: it composites the whole repo so edits to the
+    // plugin AND the tools take effect immediately. `../../` supplies the tool modules
+    // (krapper_gen/krapper_parse); `../../compiler` supplies the plugin itself. (The main repo is
+    // now a FLAT build that consumes the PUBLISHED plugin, so it no longer includeBuilds compiler
+    // — the composite lives here in the example, per design.) `../../` also works from a worktree
+    // under .claude/worktrees/<id>/samples/v8, where it is the worktree root.
     includeBuild("../../")
+    includeBuild("../../compiler")
 }

@@ -6,9 +6,17 @@ pluginManagement {
         gradlePluginPortal()
         mavenCentral()
     }
+    // FLAT build (no composite): the repo consumes the PUBLISHED kplusplus plugin rather than
+    // includeBuild("compiler"). A composite substitutes any com.monkopedia.kplusplus:* module
+    // dependency with the matching in-build project — which is what shadowed our own coordinates
+    // and blocked krapper_parse from ever resolving a published tool. Flat has no such
+    // substitution. The tool modules (krapper_gen/krapper_parse/krapper_model) stay siblings here,
+    // so their dev loop is still immediate; PLUGIN development happens in an example (samples/*)
+    // that includeBuilds compiler. Bump this version on each release.
+    plugins {
+        id("com.monkopedia.kplusplus.compiler") version "0.3.1"
+    }
 }
-
-includeBuild("compiler")
 
 include(":krapper_gen")
 include(":krapper_model")
