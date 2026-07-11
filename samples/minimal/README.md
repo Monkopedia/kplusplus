@@ -5,9 +5,11 @@ to Kotlin/Native and run. No standard-library template surface, no 62 MB monolit
 fastest first contact with kplusplus.
 
 This is a **true from-published consumer** (#128, R2): it declares the plugin by version and
-`mavenLocal()` — **no `includeBuild`**. The plugin marker, the FIR plugin, and the
-`krapper_gen` / `krapper_parse` tool binaries are all resolved by Maven coordinate from
-mavenLocal. This is the same standalone path k++ uses to self-host as its own first consumer.
+`mavenLocal()` — **no `includeBuild`**. The plugin marker and the FIR plugin are resolved by
+Maven coordinate from mavenLocal, and the `krapper_gen` / `krapper_parse` tool binaries ride
+**bundled inside the plugin jar** (the 0.4.0 distribution model, #139/#140) — the plugin
+extracts and runs them itself. This is the same standalone path k++ uses to self-host as its
+own first consumer.
 
 ## What it binds
 
@@ -26,10 +28,17 @@ The generated Kotlin API and the `main` that drives it live in
 
 ## Run it
 
-First publish the kplusplus consumer set to your local Maven repo (from the repo root, once):
+First publish the kplusplus plugin (with the tool binaries bundled in) to your local Maven
+repo. From the repo root, once — build the two tool binaries, then publish the compiler
+plugin set with them bundled (this is the release "local dry run"; see
+[docs/releasing.md](../../docs/releasing.md)):
 
 ```
-./gradlew publishAllToMavenLocal -PenableClang
+./gradlew :krapper_gen:linkReleaseExecutableNative \
+          :krapper_parse:linkReleaseExecutableKlinker -PenableClang
+./gradlew -p compiler publishToMavenLocal \
+  -Pkpp.bundleTools.krapperGen="$PWD/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe" \
+  -Pkpp.bundleTools.krapperParse="$PWD/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
 ```
 
 Then, from this directory:
@@ -39,8 +48,8 @@ Then, from this directory:
 ```
 
 No `-PenableClang` is needed here: a standalone consumer has no in-tree LLVM-gated modules;
-the `krapper_parse` tool is resolved as a published binary from mavenLocal (`-PenableClang`
-only gates modules inside the kplusplus root build, which this consumer does not include).
+the `krapper_parse` tool comes from the bundled plugin jar (`-PenableClang` only gates modules
+inside the kplusplus root build, which this consumer does not include).
 
 Expected output:
 

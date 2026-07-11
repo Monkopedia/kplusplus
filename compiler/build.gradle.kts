@@ -14,10 +14,11 @@ allprojects {
     version = "0.3.2"
 }
 
-// Aggregate publish for the two consumer-facing JVM artifacts that live in this (included)
+// Aggregate publish for the two consumer-facing JVM artifacts that live in this
 // `compiler` build — the Gradle plugin (+ its plugin marker) and the FIR kotlinc plugin jar.
-// The root build's `publishAllToMavenLocal` invokes this via the included build so a single
-// command publishes the whole consumer set to mavenLocal. mavenLocal only.
+// A convenience wrapper over the per-module publish tasks; the release/local-dry-run path
+// (docs/releasing.md) drives `-p compiler publishToMavenLocal -Pkpp.bundleTools.*` directly,
+// which also bundles the tool binaries into the plugin jar. mavenLocal only.
 tasks.register("publishCompilerToMavenLocal") {
     group = "kplusplus"
     description =

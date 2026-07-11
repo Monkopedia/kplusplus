@@ -3,8 +3,9 @@
 kplusplus (v2) publishes to two places:
 
 - **The Central Portal** (`central.sonatype.com`, the successor to the sunset OSSRH) — the FIR
-  plugin jar, the two native tool binaries, and the Gradle plugin + its marker (so
-  `mavenCentral()` consumers can resolve `id("com.monkopedia.kplusplus.compiler") version "…"`).
+  plugin jar and the Gradle plugin + its marker (so `mavenCentral()` consumers can resolve
+  `id("com.monkopedia.kplusplus.compiler") version "…"`). The two native tool binaries ride
+  bundled inside the Gradle plugin jar, not as separate coordinates.
 - **The Gradle Plugin Portal** (`plugins.gradle.org`) — the Gradle plugin, so
   `gradlePluginPortal()` consumers resolve it too.
 
