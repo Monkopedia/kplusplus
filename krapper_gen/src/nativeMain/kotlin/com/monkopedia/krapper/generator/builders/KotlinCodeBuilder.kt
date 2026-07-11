@@ -246,6 +246,9 @@ class ClassStartSymbol(
     }
 }
 
+/** A Kotlin context parameter (`name: Type`) for `context(...)` on a generated function. */
+class ContextParam(val name: String, val type: Symbol)
+
 class KotlinFunctionSig(
     private val name: String,
     private val retType: Symbol,
@@ -254,10 +257,28 @@ class KotlinFunctionSig(
     SymbolContainer {
     var receiver: Symbol? = null
 
+    // Kotlin context parameters (`context(name: Type, …)`), emitted before `fun`. Used to
+    // supply the ambient MemScope to allocating/cleanup-registering members instead of
+    // carrying it as a per-object field. Empty => a plain `fun`.
+    var contextParams: List<ContextParam> = emptyList()
+
     override val symbols: List<Symbol>
-        get() = listOfNotNull(receiver) + retType + args
+        get() = listOfNotNull(receiver) + contextParams.map { it.type } + retType + args
+
+    private fun CodeStringBuilder.appendContext() {
+        if (contextParams.isEmpty()) return
+        append("context(")
+        for ((index, cp) in contextParams.withIndex()) {
+            if (index != 0) append(", ")
+            append(cp.name)
+            append(": ")
+            cp.type.build(this)
+        }
+        append(") ")
+    }
 
     override fun build(builder: CodeStringBuilder) {
+        builder.appendContext()
         builder.append("fun ")
         receiver?.let {
             it.build(builder)
@@ -276,6 +297,16 @@ class KotlinFunctionSig(
     }
 
     override fun toString(): String = buildString {
+        if (contextParams.isNotEmpty()) {
+            append("context(")
+            for ((index, cp) in contextParams.withIndex()) {
+                if (index != 0) append(", ")
+                append(cp.name)
+                append(": ")
+                append(cp.type)
+            }
+            append(") ")
+        }
         append("fun ")
         receiver?.let {
             append(it)
@@ -482,6 +513,11 @@ class Package(private val target: String) : Symbol {
 class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
     FunctionSymbol<KotlinFactory>(functionBuilder) {
     var receiver: Symbol? = null
+
+    // Context parameters emitted as `context(name: Type, …)` before `fun` (Kotlin 2.4
+    // -Xcontext-parameters). Set on the builder; propagated to the signature in init().
+    var contextParams: List<ContextParam> = emptyList()
+
     val thiz: LocalVar
         get() = object : LocalVar {
             override val name: String
@@ -494,7 +530,10 @@ class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
 
     override fun init() {
         super.init()
-        (signature as? KotlinFunctionSig)?.receiver = receiver
+        (signature as? KotlinFunctionSig)?.let {
+            it.receiver = receiver
+            it.contextParams = contextParams
+        }
     }
 
     override fun toString(): String = "Func@${hashCode()}"
