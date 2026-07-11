@@ -685,8 +685,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // stage-0 seed, and the "krapper_parse=cpp feeding featuregen=cpp" composition could never
         // exercise the self-generated parser. Absent property = today's behavior exactly.
         if (target.name == "krapper_parse") {
+            // (1) Explicit path override — offline / a locally-built stage-0.
             (target.findProperty("kpp.stageZeroKrapperParse") as? String)?.takeIf { it.isNotBlank() }
                 ?.let { return null to File(it) }
+            // (2) SELF-HOST: krapper_parse builds its own bindings by parsing them with the
+            // krapper_parse binary BUNDLED in the applied (published) plugin — the same last-release
+            // tool any consumer gets. This is a resource read from the plugin's own jar (no Gradle
+            // coordinate), so it never self-references the in-build :krapper_parse project (the
+            // circular sibling below). Present only when the applied plugin is a bundled RELEASE; a
+            // dev-composite unbundled plugin returns null and falls through (use =seed or an
+            // override there).
+            extractBundledTool(target, "krapper_parse")?.let { return null to it }
         }
         val direct = target.rootProject.findProject(":krapper_parse")
         if (direct != null) {
@@ -877,7 +886,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         const val PLUGIN_ID = "com.monkopedia.kplusplus.compiler"
         const val PLUGIN_GROUP = "com.monkopedia.kplusplus"
         const val PLUGIN_NAME = "kplusplus-compiler-plugin"
-        const val PLUGIN_VERSION = "0.3.1"
+        const val PLUGIN_VERSION = "0.3.2"
         const val MIN_KOTLIN_VERSION = "2.3.20"
 
         // The C++ standard the cpp front-end parses (and krapper_gen compiles the wrapper)

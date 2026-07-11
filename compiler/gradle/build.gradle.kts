@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "com.monkopedia.kplusplus"
-version = "0.3.1"
+version = "0.3.2"
 
 dependencies {
     implementation(kotlin("stdlib"))
