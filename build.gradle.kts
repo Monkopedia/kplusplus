@@ -1,9 +1,5 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
-    // The native-binary modules (:krapper_gen, :krapper_parse) apply the vanniktech BASE
-    // plugin to add the Central Portal upload + signing to their hand-rolled artifact-only
-    // publications. Declared apply-false here so their `alias(...)` resolves the version once.
-    alias(libs.plugins.vannik.publish.base) apply false
     alias(libs.plugins.ktlint)
 }
 
