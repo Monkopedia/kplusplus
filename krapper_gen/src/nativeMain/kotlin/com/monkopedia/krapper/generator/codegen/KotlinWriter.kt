@@ -431,9 +431,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // For any class with a destructor we surface the dispose C wrapper (`Type_dispose`, the
     // same one the `_Holder` factory's `defer` calls) as two members:
     //   * `dispose()` — delete now, explicitly.
-    //   * `owned()`   — register `memScope.defer { Type_dispose(ptr) }` so the object is
-    //                   deleted at scope end, and return `this` for chaining
-    //                   (`makeFoo().owned()`).
+    //   * `owned()`   — `context(scope: MemScope) fun owned()` that registers
+    //                   `scope.defer { Type_dispose(ptr) }` so the object is deleted at scope
+    //                   end, and returns `this` for chaining (`makeFoo().owned()`).
     // Emitted for abstract classes too: `Type_dispose` runs `~Type()`, which is virtual-aware,
     // so disposing a base wrapper over a derived correctly runs the derived destructor.
     private fun KotlinCodeBuilder.generateDisposeMethods(cls: ResolvedClass) {
@@ -490,7 +490,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
 
     // Uniform offset-correct upcast methods (IH-multi-inherit). For every (transitive)
     // public, non-virtual base B of D, emit
-    //   fun asB(): B = B(D_as_B(ptr), memScope)
+    //   fun asB(): B = B(D_as_B(ptr))
     // returning a NON-owning wrapper over the same object viewed as its base subobject.
     // The `D_as_B` C helper does `static_cast<B*>(reinterpret_cast<D*>(p))`, which applies
     // B's (possibly non-zero) subobject offset — correct for a 2nd base and for a single
@@ -524,7 +524,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // reaching it as a (transitive) base B gets the NULLABLE
     //   fun asB(): B? {
     //       val raw = D_dyncast_B(ptr) ?: return null   // C shim: dyn_cast / dynamic_cast
-    //       return B(raw, memScope)                      // BORROWED, non-owning view
+    //       return B(raw)                                // BORROWED, non-owning view
     //   }
     // The result is the SAME object viewed as the derived type, so (like the up-cast) it is
     // a non-owning wrapper — no dispose. `?: return null` propagates the shim's null when the
@@ -1839,7 +1839,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             //    NON-virtual (e.g. v8::Value's Int32Value/IsString) `<Base>Api` is an EMPTY
             //    marker — widening the deref return to it makes every concrete method
             //    unreachable (forcing a manual `as? Value` downcast). The body already builds
-            //    the concrete `Value(ptr, memScope)`, so keep the declared type concrete too;
+            //    the concrete `Value(ptr)`, so keep the declared type concrete too;
             //    genuine polymorphic METHOD positions (a method returning/taking a base) still
             //    remap, so subclass substitution there is unaffected.
             retType = type(
@@ -2699,7 +2699,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         when {
             // Check enum BEFORE wrapper: an enum-typed FIELD getter (e.g. ASTContext::TUKind:
             // TranslationUnitKind) resolves its type with isWrapper ALSO set, so the wrapper
-            // branch would emit an illegal `Enum(ptr, memScope)` construction ("enum cannot be
+            // branch would emit an illegal `Enum(ptr)` construction ("enum cannot be
             // instantiated"). An enum is never wrapper-constructed; its `fromValue` path always
             // wins. (Method-return enums have isWrapper=false, so the old ordering didn't break
             // them — this only corrects the field-getter path.)
