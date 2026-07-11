@@ -418,6 +418,20 @@ to resolve a nested-scope ambiguity.
 
 ## 7. Opportunities unlocked
 
+**Status (Stage 5, post-#146):** the allocating-operator and "one scoping mechanism"
+opportunities below are **already realized by the #146 migration** — no follow-up codegen was
+needed. A value-returning operator flows through the same `defineArgsAndBody` predicate as any
+other by-value member (`allocatesByValueReturn`, which is operator-agnostic), so it emits
+`inline operator context(scope: MemScope) fun plus(...)` and allocates its `_Holder()` on the
+ambient scope. This is locked by the `FullKotlinTests` goldens (`operator context(scope:
+MemScope) fun plus/minus/times/…`) and exercised end-to-end by featuregen `OpArithmeticTest`
+(`val c = a + b` inside `memScoped { }`, result lands in the caller's arena). The three former
+scoping mechanisms are already collapsed onto the single `scopeContext()`/`scope.defer{}`
+primitive in `KotlinWriter`. The remaining bullets (copy-construction, smaller wrappers) are
+likewise inherent in the shipped design. The one genuinely-future item is the parked
+operator-decisions work (`operator==` → `equals`/`hashCode`, `operator<` → `compareTo`), which
+is a *separate* initiative gated on a product decision — see `project_operator_decisions`.
+
 - **Allocating operators become natural.** `Vec2.plus` today is
   `inline operator fun plus(o: Vec2): Vec2 { val r = memScope.Vec2_Holder(); … }` — it needs
   the receiver to carry a scope, which is exactly the lifetime footgun. With context params
