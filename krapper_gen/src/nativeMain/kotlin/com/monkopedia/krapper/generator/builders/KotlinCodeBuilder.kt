@@ -514,9 +514,8 @@ class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
     FunctionSymbol<KotlinFactory>(functionBuilder) {
     var receiver: Symbol? = null
 
-    // Context parameters emitted as `context(name: Type, …)` before `fun` (Kotlin 2.4
-    // -Xcontext-parameters). Set on the builder; propagated to the signature in init().
-    var contextParams: List<ContextParam> = emptyList()
+    // Context parameters (`context(name: Type, …)`) are inherited from FunctionBuilder and
+    // propagated to the signature by FunctionSymbol.init(); only `receiver` needs wiring here.
 
     val thiz: LocalVar
         get() = object : LocalVar {
@@ -532,7 +531,6 @@ class KotlinFunctionSymbol(functionBuilder: KotlinCodeBuilder) :
         super.init()
         (signature as? KotlinFunctionSig)?.let {
             it.receiver = receiver
-            it.contextParams = contextParams
         }
     }
 

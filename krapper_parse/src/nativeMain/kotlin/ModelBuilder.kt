@@ -33,6 +33,7 @@ import clang.TemplateTypeParmDecl
 import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
+import kotlinx.cinterop.MemScope
 import com.monkopedia.krapper.generator.model.ClassMetadata
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
@@ -78,7 +79,7 @@ internal fun Decl.cppUsr(): String = "cpp:${canonical().getID()}"
 // (`getKind() == ClassTemplate`), and Decl is ClassTemplateDecl's address-identical
 // primary base, so the same-pointer re-view is the generated dyn-cast's semantics.
 private fun Decl.asClassTemplateDeclOrNull(): ClassTemplateDecl? =
-    if (getKind() == Kind.ClassTemplate) ClassTemplateDecl(ptr, memScope) else null
+    if (getKind() == Kind.ClassTemplate) ClassTemplateDecl(ptr) else null
 
 // Load-bearing mirroring, not a gap workaround: ModelFactories.map only has a
 // CXCursor_TypedefDecl branch — a C++ `using` alias (CXCursor_TypeAliasDecl, here
@@ -101,10 +102,14 @@ private val NEW_DELETE_OPERATORS = listOf(
  * libclang front-end (ModelFactories.mapAll): a WrappedNamespace per (named) namespace, a
  * WrappedClass per record, and a MethodType.STATIC WrappedMethod per free function.
  */
+context(scope: MemScope)
 fun buildWrappedTU(tuDecl: TranslationUnitDecl): WrappedTU =
-    WrappedTU().also { ModelBuilder().addContextDecls(tuDecl.asDeclContext(), it) }
+    WrappedTU().also { ModelBuilder(scope).addContextDecls(tuDecl.asDeclContext(), it) }
 
-private class ModelBuilder {
+// The former per-wrapper `memScope` field is gone from the generated bindings; the ONE
+// ambient MemScope for this parse (from the enclosing `memScoped { }`) is threaded in here
+// and used wherever an allocating/`context(scope: MemScope)` binding member is called.
+private class ModelBuilder(private val memScope: MemScope) {
     // Mirrors ModelFactories' USR-keyed elementLookup memo for namespaces: every block of
     // `namespace geo { }` shares one libclang USR, so they all collapse into ONE
     // WrappedNamespace that accumulates all the blocks' members. The canonical-Decl
@@ -135,14 +140,14 @@ private class ModelBuilder {
     // (memo only) and their members walked; functions and typedefs — which have no
     // deeper attachment — produce nothing.
     fun addContextDecls(context: DeclContext, parent: WrappedElement, attach: Boolean = true) {
-        for (decl in context.decls()) {
+        for (decl in with(memScope) { context.decls() }) {
             if (decl == null) continue
             // Skip implicit decls (the builtin TU members like __int128_t,
             // __builtin_va_list) — libclang's cursor walk never surfaces them.
             if (decl.isImplicit()) continue
             if (decl.getKind() == Kind.LinkageSpec) {
                 val specContext = with(Decl.Companion) {
-                    decl.memScope.castToDeclContext(decl)
+                    castToDeclContext(decl)
                 } ?: continue
                 addContextDecls(specContext, parent, attach = false)
                 continue
@@ -219,9 +224,9 @@ private class ModelBuilder {
     // reducer-stack target type). The libclang branch drops a typedef whose type can't be
     // built (catch -> null); buildTypedefTargetType never throws (UNRESOLVABLE instead),
     // so only a missing name drops here.
-    private fun buildTypedef(typedef: TypedefNameDecl): WrappedTypedef? {
-        val name = typedef.getNameAsString() ?: return null
-        return WrappedTypedef(name, buildTypedefTargetType(typedef))
+    private fun buildTypedef(typedef: TypedefNameDecl): WrappedTypedef? = with(memScope) {
+        val name = typedef.getNameAsString() ?: return@with null
+        WrappedTypedef(name, buildTypedefTargetType(typedef))
     }
 
     // ModelFactories.map's CXCursor_ClassTemplate branch + the WrappedTemplate factory
@@ -242,7 +247,7 @@ private class ModelBuilder {
         attach: Boolean
     ) {
         val record = templateDecl.getTemplatedDecl()
-            ?.let { CXXRecordDecl(it.ptr, templateDecl.memScope) } ?: return
+            ?.let { CXXRecordDecl(it.ptr) } ?: return
         val name = record.asNamedDecl().getNameAsString() ?: return
         val template = templates.getOrPut(decl.cppUsr()) { WrappedTemplate(name) }
         attachIfNew(template, parent, attach)
@@ -252,21 +257,21 @@ private class ModelBuilder {
         // Each TYPE parameter mirrors ModelFactories' CXCursor_TemplateTypeParameter ->
         // WrappedTemplateParam(spelling, usr); a non-type/template-template parameter has
         // no map branch on the libclang path (`else -> null`) and is skipped the same way.
-        val params = TemplateDecl(templateDecl.ptr, templateDecl.memScope)
+        val params = TemplateDecl(templateDecl.ptr)
             .getTemplateParameters()
-            ?.let { TemplateParameterList(it.ptr, templateDecl.memScope) }
+            ?.let { TemplateParameterList(it.ptr) }
             ?: return
         var typeParamIndex = 0
         for (i in 0u until params.size()) {
             val param = params.getParam(i)
-                ?.let { NamedDecl(it.ptr, templateDecl.memScope) } ?: continue
+                ?.let { NamedDecl(it.ptr) } ?: continue
             if (param.getKind() != Kind.TemplateTypeParm) continue
             template.addChild(
                 WrappedTemplateParam(
                     param.getNameAsString() ?: continue,
                     // The identity the dependent-T WrappedTemplateRef keys back to
                     // (TypeBuilder's TemplateTypeParmType branch reads the same decl).
-                    Decl(param.ptr, templateDecl.memScope).cppUsr()
+                    Decl(param.ptr).cppUsr()
                 )
             )
             // defaultType capture (#46 Phase D): the model derives defaultType from the
@@ -280,10 +285,12 @@ private class ModelBuilder {
             val canonical = template.templateArgs.getOrNull(typeParamIndex)
             typeParamIndex++
             if (canonical == null || canonical.children.isNotEmpty()) continue
-            val parmDecl = TemplateTypeParmDecl(param.ptr, templateDecl.memScope)
+            val parmDecl = TemplateTypeParmDecl(param.ptr)
             if (!parmDecl.hasDefaultArgument()) continue
-            val default = with(templateDecl.memScope) { defaultArgType(parmDecl) }
-            for (residue in defaultTypeResidue(default)) canonical.addChild(residue)
+            val default = with(memScope) { defaultArgType(parmDecl) }
+            with(memScope) {
+                for (residue in defaultTypeResidue(default)) canonical.addChild(residue)
+            }
         }
         if (templateDecl.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, template, template.metadata)
@@ -322,7 +329,7 @@ private class ModelBuilder {
         // "(unnamed struct at <file:line>)", never bindable) is skipped — an empty name
         // would crash WrappedClass.type ("Empty type").
         val name = record.asNamedDecl().getNameAsString()?.takeIf { it.isNotEmpty() }
-            ?: RecordDecl(record.ptr, record.memScope).getTypedefNameForAnonDecl()
+            ?: RecordDecl(record.ptr).getTypedefNameForAnonDecl()
                 ?.getNameAsString()?.takeIf { it.isNotEmpty() }
             ?: return
         // ModelFactories' WrappedClass factory: name via wrapName (= the bare name for a
@@ -347,7 +354,7 @@ private class ModelBuilder {
         record: CXXRecordDecl,
         parent: WrappedElement,
         metadata: ClassMetadata
-    ) {
+    ) = with(memScope) {
         for (base in record.bases()) {
             if (base == null) continue
             // ModelFactories.map's TOP access filter applies to base specifiers too: a
@@ -469,7 +476,7 @@ private class ModelBuilder {
         if (field != null) {
             // A private/protected CONST field (ModelFactories' CXCursor_FieldDecl filter
             // branch) blocks the generated default-assignment paths.
-            if (buildWrappedType(field.getType()).isConst) {
+            if (with(memScope) { buildWrappedType(field.getType()) }.isConst) {
                 metadata.hasPrivateConstField = true
             }
         }
@@ -479,7 +486,7 @@ private class ModelBuilder {
         // Anonymous data members (bitfield padding `int :3;`, anon union/struct members)
         // have a blank spelling and are dropped (ModelFactories' FieldDecl branch).
         val name = field.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() } ?: return
-        val type = buildWrappedType(field.getType())
+        val type = with(memScope) { buildWrappedType(field.getType()) }
         // A public REFERENCE or CONST member implicitly deletes the enclosing class's
         // copy assignment, and a reference member also deletes the implicit default
         // constructor — recorded structurally because the implicit special members are
@@ -516,7 +523,7 @@ private class ModelBuilder {
             it.addArgs(destructor.asFunctionDecl())
         }
 
-    private fun buildMethod(method: CXXMethodDecl): WrappedMethod {
+    private fun buildMethod(method: CXXMethodDecl): WrappedMethod = with(memScope) {
         val name = method.asNamedDecl().getNameAsString() ?: error("method without a name")
         val isConst = method.isConst()
         // T1.3 mirror (#46): an `iterator_range<It>` return is materialized into
@@ -541,19 +548,19 @@ private class ModelBuilder {
         }
     }
 
-    private fun buildFunction(function: FunctionDecl): WrappedMethod {
+    private fun buildFunction(function: FunctionDecl): WrappedMethod = with(memScope) {
         val name = function.asNamedDecl().getNameAsString() ?: error("function without a name")
         val returnType = buildWrappedType(function.getReturnType())
-        return WrappedMethod(name, returnType, MethodType.STATIC).also {
+        WrappedMethod(name, returnType, MethodType.STATIC).also {
             it.addArgs(function)
         }
     }
 
-    private fun WrappedMethod.addArgs(function: FunctionDecl) {
+    private fun WrappedMethod.addArgs(function: FunctionDecl) = with(memScope) {
         for (i in 0u until function.getNumParams()) {
             // getParamDecl returns the Api interface (the generated related-object-getter
             // convention); re-wrap to the concrete ParmVarDecl so the upcast chain resolves.
-            val param = function.getParamDecl(i)?.let { ParmVarDecl(it.ptr, function.memScope) }
+            val param = function.getParamDecl(i)?.let { ParmVarDecl(it.ptr) }
                 ?: continue
             // Unnamed parameter (e.g. `void freeFunction(int)`) falls back to the same
             // positional name the libclang front-end synthesizes.
@@ -572,7 +579,7 @@ private class ModelBuilder {
             // + the whitespace normalizer entry).
             val hasDefault = param.hasDefaultArg()
             val defaultValue = if (hasDefault) {
-                with(param.memScope) { defaultArgText(param) }?.takeIf { it.isNotBlank() }
+                defaultArgText(param)?.takeIf { it.isNotBlank() }
             } else {
                 null
             }

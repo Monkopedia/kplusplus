@@ -1,6 +1,7 @@
 # Design: migrating the carried `MemScope` to context parameters
 
-Status: design proposal (read-only analysis; no generator changes made)
+Status: IMPLEMENTED (KotlinWriter emits `context(scope: MemScope)` per §8; the carried
+`memScope` field is dropped from every wrapper). featuregen 188/0, krapper_gen 288/0.
 Author: analysis pass, 2026-07
 Scope: `krapper_gen` Kotlin codegen (`KotlinWriter.kt`) + the kplusplus Gradle plugin's consumer-compile wiring
 

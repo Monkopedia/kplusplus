@@ -16,33 +16,31 @@ import kotlin.test.assertTrue
 // for the identical `void(*)()`, so the binding compiles AND round-trips the pointer.
 class TfNamespaceFnPtrTest {
     @Test fun namespace_scoped_function_pointer_typedef_round_trips() = memScoped {
-        val ms = this
         with(HandlerProbe) {
             // The default handler pointer is a real, in-scope `hh::handler_t`.
-            val def = ms.defaultHandler()
+            val def = defaultHandler()
             assertNotNull(def)
-            assertTrue(ms.isDefault(def))
+            assertTrue(isDefault(def))
 
             // setHandler stores it and returns the previous (initially null) handler.
-            ms.setHandler(def)
+            setHandler(def)
             // Re-reading hands back the same pointer; isDefault confirms identity.
-            val current = ms.getHandler()
+            val current = getHandler()
             assertNotNull(current)
-            assertTrue(ms.isDefault(current))
+            assertTrue(isDefault(current))
         }
     }
 
     @Test fun stored_handler_is_invocable_through_the_pointer() = memScoped {
-        val ms = this
         with(HandlerProbe) {
-            val def = ms.defaultHandler()
+            val def = defaultHandler()
             assertNotNull(def)
-            ms.setHandler(def)
-            val got = ms.getHandler()
+            setHandler(def)
+            val got = getHandler()
             assertNotNull(got)
             // The returned `hh::handler_t` is a callable `void()` C function pointer.
             got()
-            assertTrue(ms.isDefault(got))
+            assertTrue(isDefault(got))
         }
     }
 }

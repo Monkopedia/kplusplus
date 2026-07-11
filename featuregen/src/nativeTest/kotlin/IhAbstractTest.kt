@@ -20,8 +20,7 @@ import kotlin.test.assertTrue
 class IhAbstractTest {
     // Button constructs (concrete) and its own kind() is Button's override (7).
     @Test fun concrete_button_constructs_and_dispatches() = memScoped {
-        val ms = this
-        val b = with(Button) { ms.Button() }
+        val b = with(Button) { Button() }
         assertEquals(7, b.kind())
         // The concrete field is usable too.
         b.painted = 3
@@ -31,8 +30,7 @@ class IhAbstractTest {
     // Button used through the abstract base interface: kind() dispatches to Button's
     // override even when the static type is the abstract `DrawableApi`.
     @Test fun button_as_drawable_api_dispatches() = memScoped {
-        val ms = this
-        val b = with(Button) { ms.Button() }
+        val b = with(Button) { Button() }
         val asAbstract: DrawableApi = b
         assertEquals(7, asAbstract.kind())
         // draw() is a pure-virtual void; calling it through the base just runs the impl.
@@ -43,10 +41,9 @@ class IhAbstractTest {
     // dispatches kind() to Button's override (7), and the returned Drawable* upcast
     // still dispatches to the Button it really is.
     @Test fun button_upcast_through_drawable_probe() = memScoped {
-        val ms = this
-        val b = with(Button) { ms.Button() }
-        assertEquals(7, with(DrawableProbe) { ms.kindOf(b) })
-        val back: DrawableApi? = with(DrawableProbe) { ms.identity(b) }
+        val b = with(Button) { Button() }
+        assertEquals(7, with(DrawableProbe) { kindOf(b) })
+        val back: DrawableApi? = with(DrawableProbe) { identity(b) }
         assertTrue(back != null)
         assertEquals(7, back.kind())
     }

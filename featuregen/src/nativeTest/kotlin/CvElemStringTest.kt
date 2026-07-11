@@ -10,12 +10,11 @@ import kotlin.test.assertFalse
 // std::string must be generated before std::vector<std::string>.
 class CvElemStringTest {
     @Test fun push_strings_and_size() = memScoped {
-        val ms = this
         val v = cppVector<Basic_string__Char>()
         assertEquals(0uL, v.size())
 
-        val a = with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("hello") }
-        val b = with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("world") }
+        val a = with(Basic_string__Char) { Basic_string__Char__const_char_P("hello") }
+        val b = with(Basic_string__Char) { Basic_string__Char__const_char_P("world") }
         v.push_back(a)
         v.push_back(b)
 
@@ -27,10 +26,9 @@ class CvElemStringTest {
     // operator[]/at/front/back wrap the element's own pointer as a
     // Basic_string__Char, whose c_str() then decodes the stored bytes.
     @Test fun read_strings_back_out() = memScoped {
-        val ms = this
         val v = cppVector<Basic_string__Char>()
-        v.push_back(with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("hello") })
-        v.push_back(with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("world") })
+        v.push_back(with(Basic_string__Char) { Basic_string__Char__const_char_P("hello") })
+        v.push_back(with(Basic_string__Char) { Basic_string__Char__const_char_P("world") })
 
         with(Basic_string__Char) {
             assertEquals("hello", v[0uL]?.c_str())

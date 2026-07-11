@@ -1,4 +1,5 @@
 import root.Box
+import kotlinx.cinterop.MemScope
 import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,7 +8,10 @@ import kotlin.test.assertEquals
 // T-preserving method surface (`fun set(x: T)`, `fun get(): T`), so callers can
 // abstract over `Box<Int>` through the interface — `readBox` takes the interface
 // type and calls `get()` on it. (Previously `Box<T>` was an empty marker and this
-// did not compile.)
+// did not compile.) `get()` returns `T`, a position a wrapper instantiation would
+// allocate, so the interface method carries `context(scope: MemScope)` uniformly —
+// hence `readBox` declares the same context.
+context(scope: MemScope)
 fun readBox(b: Box<Int>): Int = b.get()
 
 class UtBoxAbstractTest {

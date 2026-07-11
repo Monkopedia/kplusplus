@@ -16,11 +16,10 @@ class IhDownCastTest {
     // succeeds and the Derived1-only method works; the down-cast to the WRONG sibling
     // (Derived2) returns null — the whole point of a checked cast.
     @Test fun down_cast_to_real_type_succeeds_wrong_sibling_is_null() = memScoped {
-        val ms = this
         // The factory hands back a base-typed pointer (DcBaseApi?); rewrap it as the
         // concrete DcBase wrapper that carries the generated down-cast methods. The
         // pointer still points at a real Derived1 at runtime.
-        val base = DcBase(with(DcFactory) { ms.makeDerived1() }!!.ptr, ms)
+        val base = DcBase(with(DcFactory) { makeDerived1() }!!.ptr)
 
         // Correct down-cast: non-null, and the derived-only method is reachable + correct.
         val d1: Derived1? = base.asDerived1()
@@ -36,11 +35,10 @@ class IhDownCastTest {
     // The down-cast is a borrowed, non-owning VIEW of the same object — round-tripping
     // up then back down lands on the same instance with the same state.
     @Test fun down_cast_is_a_view_of_the_same_object() = memScoped {
-        val ms = this
         // The factory hands back a base-typed pointer (DcBaseApi?); rewrap it as the
         // concrete DcBase wrapper that carries the generated down-cast methods. The
         // pointer still points at a real Derived1 at runtime.
-        val base = DcBase(with(DcFactory) { ms.makeDerived1() }!!.ptr, ms)
+        val base = DcBase(with(DcFactory) { makeDerived1() }!!.ptr)
         // kind() dispatches virtually to Derived1 whether read through the base or the
         // down-cast view.
         assertEquals(1, base.kind())

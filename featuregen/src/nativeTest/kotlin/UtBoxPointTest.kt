@@ -11,8 +11,7 @@ import kotlin.test.assertEquals
 // whose set/get carry the `Point` element across the boundary by pointer.
 class UtBoxPointTest {
     @Test fun box_point_roundtrips() = memScoped {
-        val ms = this
-        val p = with(Point) { ms.Point__int_int(3, 4) }
+        val p = with(Point) { Point__int_int(3, 4) }
         val b = Box<Point>()
         b.set(p)
         val out = b.get()

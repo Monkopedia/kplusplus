@@ -17,15 +17,14 @@ class ObOwnedTest {
 
     // Immediate dispose(): the destructor runs right away (counter +1).
     @Test fun dispose_runs_destructor_immediately() = memScoped {
-        val ms = this
         with(Tracked) {
-            ms.resetDestroyed()
-            val t = ms.makeTracked(7)
+            resetDestroyed()
+            val t = makeTracked(7)
             assertNotNull(t)
             assertEquals(7, t.getId())
-            assertEquals(0, ms.destroyedCount(), "destructor must not have run yet")
+            assertEquals(0, destroyedCount(), "destructor must not have run yet")
             t.dispose()
-            assertEquals(1, ms.destroyedCount(), "dispose() must run ~Tracked() now")
+            assertEquals(1, destroyedCount(), "dispose() must run ~Tracked() now")
         }
     }
 

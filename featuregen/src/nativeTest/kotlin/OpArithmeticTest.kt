@@ -13,10 +13,9 @@ class OpArithmeticTest {
     // OP-plus: a + b sums both components; operands unchanged; result independent;
     // adding the zero-vector is identity.
     @Test fun plus_sums_components() = memScoped {
-        val ms = this
         with(Vec2) {
-            val a = ms.Vec2__double_double(1.0, 2.0)
-            val b = ms.Vec2__double_double(3.0, 4.0)
+            val a = Vec2__double_double(1.0, 2.0)
+            val b = Vec2__double_double(3.0, 4.0)
             val c = a + b
             assertEquals(4.0, c.x)
             assertEquals(6.0, c.y)
@@ -28,7 +27,7 @@ class OpArithmeticTest {
             assertEquals(1.0, a.x)
             assertEquals(3.0, b.x)
             // adding zero-vector is identity
-            val zero = ms.Vec2()
+            val zero = Vec2()
             val id = a + zero
             assertEquals(1.0, id.x); assertEquals(2.0, id.y)
         }
@@ -36,10 +35,9 @@ class OpArithmeticTest {
 
     // OP-minus: a - b subtracts components; operands unchanged; v - v == zero.
     @Test fun minus_subtracts_components() = memScoped {
-        val ms = this
         with(Vec2) {
-            val a = ms.Vec2__double_double(5.0, 7.0)
-            val b = ms.Vec2__double_double(2.0, 1.0)
+            val a = Vec2__double_double(5.0, 7.0)
+            val b = Vec2__double_double(2.0, 1.0)
             val d = a - b
             assertEquals(3.0, d.x)
             assertEquals(6.0, d.y)
@@ -54,9 +52,8 @@ class OpArithmeticTest {
     // OP-scale: v * scalar scales each component; rhs is Double (heterogeneous);
     // *1.0 identity, *0.0 zero; operand unchanged.
     @Test fun times_scales_by_scalar() = memScoped {
-        val ms = this
         with(Vec2) {
-            val v = ms.Vec2__double_double(2.0, -3.0)
+            val v = Vec2__double_double(2.0, -3.0)
             val s = v * 2.0
             assertEquals(4.0, s.x)
             assertEquals(-6.0, s.y)
@@ -75,9 +72,8 @@ class OpArithmeticTest {
     // OP-unary-minus: -v negates both components; original unchanged; double
     // negation is identity. Maps to Kotlin prefix `-` (operator fun unaryMinus).
     @Test fun unary_minus_negates() = memScoped {
-        val ms = this
         with(Vec2) {
-            val v = ms.Vec2__double_double(3.0, -4.0)
+            val v = Vec2__double_double(3.0, -4.0)
             val neg = -v
             assertEquals(-3.0, neg.x)
             assertEquals(4.0, neg.y)

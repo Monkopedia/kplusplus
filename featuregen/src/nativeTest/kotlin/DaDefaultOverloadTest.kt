@@ -48,13 +48,12 @@ class DaDefaultOverloadTest {
 
     // DA-default-arg: all three args supplied explicitly → straight through.
     @Test fun default_arg_all_supplied() = memScoped {
-        val ms = this
         with(DefaultArgs) {
-            assertEquals(6, ms.add(1, 2, 3))
+            assertEquals(6, add(1, 2, 3))
             // inspector confirms all three values crossed the boundary
-            assertEquals(1, ms.recvA())
-            assertEquals(2, ms.recvB())
-            assertEquals(3, ms.recvC())
+            assertEquals(1, recvA())
+            assertEquals(2, recvB())
+            assertEquals(3, recvC())
         }
     }
 
@@ -62,51 +61,47 @@ class DaDefaultOverloadTest {
     // default parameter values, so the caller can omit the trailing args and the
     // binding fills them in before forwarding to the fixed-arity C wrapper.
     @Test fun omit_default_uses_kotlin_defaults() = memScoped {
-        val ms = this
         with(DefaultArgs) {
             // add(1) -> 1 + 10 + 0
-            assertEquals(11, ms.add(1))
-            assertEquals(1, ms.recvA())
-            assertEquals(10, ms.recvB())
-            assertEquals(0, ms.recvC())
+            assertEquals(11, add(1))
+            assertEquals(1, recvA())
+            assertEquals(10, recvB())
+            assertEquals(0, recvC())
             // add(1, 2) -> 1 + 2 + 0
-            assertEquals(3, ms.add(1, 2))
-            assertEquals(2, ms.recvB())
-            assertEquals(0, ms.recvC())
+            assertEquals(3, add(1, 2))
+            assertEquals(2, recvB())
+            assertEquals(0, recvC())
         }
     }
 
     // DA-default-method: 🟢 — format(s, width=0, fill=' ') emits Kotlin defaults for
     // width (Int = 0) and fill (Byte = ' '.code.toByte()), so format(s) is callable.
     @Test fun default_method_omits_trailing_args() = memScoped {
-        val ms = this
         with(DefaultArgs) {
             // width<=0 path (default width 0): returns s.
-            assertEquals(42, ms.format(42))
+            assertEquals(42, format(42))
             // width supplied, fill defaulted: width>0 path returns width.
-            assertEquals(8, ms.format(42, 8))
+            assertEquals(8, format(42, 8))
             // all supplied still works.
-            assertEquals(5, ms.format(5, 0, '*'.code.toByte()))
+            assertEquals(5, format(5, 0, '*'.code.toByte()))
         }
     }
 
     // DA-overload-free / DA-overload-member: 🟢 (via underscore-prefix names).
     @Test fun overloads_each_callable_independently() = memScoped {
-        val ms = this
         with(DefaultArgs) {
-            assertEquals(5, ms.process(5))          // process(int): x*1
-            assertEquals(7, ms._process(3, 4))      // process(int,int): x+y
-            assertEquals(25, ms.__process(2.5))     // process(double): x*10
+            assertEquals(5, process(5))          // process(int): x*1
+            assertEquals(7, _process(3, 4))      // process(int,int): x+y
+            assertEquals(25, __process(2.5))     // process(double): x*10
         }
     }
 
     @Test fun overloads_do_not_shadow_each_other() = memScoped {
-        val ms = this
         with(DefaultArgs) {
             // distinct names → each resolves to its own logic, no collision
-            assertEquals(9, ms.process(9))
-            assertEquals(9, ms._process(4, 5))
-            assertEquals(90, ms.__process(9.0))
+            assertEquals(9, process(9))
+            assertEquals(9, _process(4, 5))
+            assertEquals(90, __process(9.0))
         }
     }
 
@@ -115,9 +110,8 @@ class DaDefaultOverloadTest {
     // duplicate is dropped, so there is no `_at` sibling. We confirm the kept binding
     // calls through (returns a non-null ref) and the buffer is readable via getAt().
     @Test fun const_overload_collapses_to_single_binding() = memScoped {
-        val ms = this
         with(Buffer) {
-            val b = ms.Buffer()
+            val b = Buffer()
             // the kept (const) overload binds under the bare name and calls through.
             assertEquals(true, b.at(0) != null)
             assertEquals(true, b.at(1) != null)
@@ -131,23 +125,21 @@ class DaDefaultOverloadTest {
     // default ctor + size() are exposed; no element population. A constructed
     // list is therefore empty and sumIlist returns 0.
     @Test fun initializer_list_is_inert_empty() = memScoped {
-        val ms = this
-        val il = with(Initializer_list__Int) { ms.Initializer_list__Int() }
+        val il = with(Initializer_list__Int) { Initializer_list__Int() }
         assertEquals(0uL, il.size())
         with(DefaultArgs) {
-            assertEquals(0, ms.sumIlist(il)) // no way to make it non-empty
+            assertEquals(0, sumIlist(il)) // no way to make it non-empty
         }
     }
 
     // DA-variadic: 🔴 — `...` dropped; sumN(count) sees zero variadic ints, so
     // the body sums nothing regardless of count. Binding is present & build-clean.
     @Test fun variadic_dropped_sees_no_extra_args() = memScoped {
-        val ms = this
         with(DefaultArgs) {
             // count=3 but no varargs forwardable → loop reads 3 garbage/zero ints.
             // We only assert the binding is callable and returns an Int without
             // crashing; the value is unspecified (no varargs were passed).
-            val r = ms.sumN(0) // count=0 → loop body never runs → deterministic 0
+            val r = sumN(0) // count=0 → loop body never runs → deterministic 0
             assertEquals(0, r)
         }
     }

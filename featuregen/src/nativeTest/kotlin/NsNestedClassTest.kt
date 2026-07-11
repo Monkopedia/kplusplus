@@ -12,15 +12,13 @@ import kotlin.test.assertEquals
 // (no clash, because Inner lives in package `outer` and Outer in `root`).
 class NsNestedClassTest {
     @Test fun outer_constructs_in_root() = memScoped {
-        val ms = this
-        val o = with(Outer) { ms.Outer() }
+        val o = with(Outer) { Outer() }
         assertEquals(7, o.who)
         assertEquals(7, o.whoVal())
     }
 
     @Test fun inner_constructs_in_outer_package() = memScoped {
-        val ms = this
-        val i = with(Inner) { ms.Inner__int(42) }
+        val i = with(Inner) { Inner__int(42) }
         assertEquals(42, i.v)
         assertEquals(42, i.get())
         i.v = 3
@@ -28,9 +26,8 @@ class NsNestedClassTest {
     }
 
     @Test fun inner_default_ctor_and_both_usable_together() = memScoped {
-        val ms = this
-        val o = with(Outer) { ms.Outer() }
-        val i = with(Inner) { ms.Inner() }
+        val o = with(Outer) { Outer() }
+        val i = with(Inner) { Inner() }
         assertEquals(7, o.who)
         assertEquals(0, i.v)
     }

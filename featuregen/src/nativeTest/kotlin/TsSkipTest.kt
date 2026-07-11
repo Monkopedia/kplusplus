@@ -23,8 +23,7 @@ class TsSkipTest {
     // int field) still binds with both getter and setter. Referencing `h.nc` here would
     // not compile (the field is absent).
     @Test fun non_copyable_field_dropped_sibling_binds() = memScoped {
-        val ms = this
-        val h = with(NonCopyableHolder) { ms.NonCopyableHolder() }
+        val h = with(NonCopyableHolder) { NonCopyableHolder() }
         assertEquals(42, h.tag)
         h.tag = 7
         assertEquals(7, h.tag)
@@ -34,9 +33,11 @@ class TsSkipTest {
     // is dropped while its GETTER survives. The getter returns a non-owning wrapper over
     // the member; its weight() is readable.
     @Test fun non_assignable_field_getter_survives() = memScoped {
-        val ms = this
-        val h = with(FieldSetterHolder) { ms.FieldSetterHolder() }
-        val locked = h.locked
+        val h = with(FieldSetterHolder) { FieldSetterHolder() }
+        // `locked` is a by-value-wrapper field: its getter allocates via `_Holder`, so it is
+        // now a `context(scope: MemScope) fun locked()` (memScoped supplies the scope) rather
+        // than a property.
+        val locked = h.locked()
         assertNotNull(locked)
         assertEquals(5, locked.weight())
         // `h.locked = ...` would not compile: the setter was dropped (val, not var).
@@ -44,8 +45,7 @@ class TsSkipTest {
 
     // T-skip (b) control: the ordinary `count` field keeps BOTH getter and setter.
     @Test fun ordinary_field_keeps_getter_and_setter() = memScoped {
-        val ms = this
-        val h = with(FieldSetterHolder) { ms.FieldSetterHolder() }
+        val h = with(FieldSetterHolder) { FieldSetterHolder() }
         assertEquals(0, h.count)
         h.count = 17
         assertEquals(17, h.count)

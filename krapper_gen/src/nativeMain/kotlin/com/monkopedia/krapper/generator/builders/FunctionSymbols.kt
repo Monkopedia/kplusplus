@@ -29,6 +29,12 @@ sealed class FunctionBuilder<T : LangFactory>(
     val functionBuilder: CodeBuilder<T>
 ) {
     protected val args = mutableListOf<LocalVar>()
+
+    // Kotlin context parameters (`context(name: Type, …)`) emitted before `fun`. Only
+    // meaningful for the KotlinFactory (KotlinFunctionSig carries them); other factories
+    // ignore it. Set on the builder; propagated to the signature in [FunctionSymbol.init].
+    var contextParams: List<ContextParam> = emptyList()
+
     abstract val body: CodeBuilder<T>?
 
     inline fun body(block: BodyBuilder<T>) {
@@ -82,6 +88,7 @@ open class FunctionSymbol<T : LangFactory>(functionBuilder: CodeBuilder<T>) :
             retType,
             args
         )
+        (signature as? KotlinFunctionSig)?.contextParams = contextParams
     }
 
     override fun build(builder: CodeStringBuilder) {

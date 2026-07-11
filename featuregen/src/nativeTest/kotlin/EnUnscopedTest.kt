@@ -19,21 +19,19 @@ class EnUnscopedTest {
     }
 
     @Test fun turn_right_cycles() = memScoped {
-        val ms = this
         with(DirectionFeature) {
-            assertEquals(Direction.East, ms.turnRight(Direction.North))
-            assertEquals(Direction.South, ms.turnRight(Direction.East))
-            assertEquals(Direction.North, ms.turnRight(Direction.West)) // wraps via %4
+            assertEquals(Direction.East, turnRight(Direction.North))
+            assertEquals(Direction.South, turnRight(Direction.East))
+            assertEquals(Direction.North, turnRight(Direction.West)) // wraps via %4
         }
     }
 
     @Test fun to_and_from_int_round_trip() = memScoped {
-        val ms = this
         with(DirectionFeature) {
-            assertEquals(0, ms.toInt(Direction.North))
-            assertEquals(3, ms.toInt(Direction.West))
-            assertEquals(Direction.South, ms.fromInt(2))
-            assertEquals(Direction.East, ms.fromInt(5)) // fromInt takes %4 -> East(1)
+            assertEquals(0, toInt(Direction.North))
+            assertEquals(3, toInt(Direction.West))
+            assertEquals(Direction.South, fromInt(2))
+            assertEquals(Direction.East, fromInt(5)) // fromInt takes %4 -> East(1)
         }
     }
 }

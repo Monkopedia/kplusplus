@@ -21,12 +21,11 @@ class OpRelationalTest {
     // OP-eq: identical Vec2 compare true via `==`; differing in x or y compare
     // false; self-comparison true. Equal instances must share a hashCode.
     @Test fun eq_compares_components() = memScoped {
-        val ms = this
         with(Vec2) {
-            val a = ms.Vec2__double_double(1.0, 2.0)
-            val b = ms.Vec2__double_double(1.0, 2.0)
-            val diffX = ms.Vec2__double_double(9.0, 2.0)
-            val diffY = ms.Vec2__double_double(1.0, 9.0)
+            val a = Vec2__double_double(1.0, 2.0)
+            val b = Vec2__double_double(1.0, 2.0)
+            val diffX = Vec2__double_double(9.0, 2.0)
+            val diffY = Vec2__double_double(1.0, 9.0)
             assertTrue(a == b)
             assertTrue(a == a) // self-comparison
             assertFalse(a == diffX)
@@ -39,11 +38,10 @@ class OpRelationalTest {
     // OP-neq: differing instances return true; identical return false; logically
     // consistent with `==` (neq == !equals).
     @Test fun neq_is_inverse_of_eq() = memScoped {
-        val ms = this
         with(Vec2) {
-            val a = ms.Vec2__double_double(1.0, 2.0)
-            val same = ms.Vec2__double_double(1.0, 2.0)
-            val diff = ms.Vec2__double_double(1.0, 3.0)
+            val a = Vec2__double_double(1.0, 2.0)
+            val same = Vec2__double_double(1.0, 2.0)
+            val diff = Vec2__double_double(1.0, 3.0)
             assertTrue(a neq diff)
             assertFalse(a neq same)
             // consistency with ==
@@ -56,11 +54,10 @@ class OpRelationalTest {
     // and `sorted()` work). smaller x is less; equal x defers to y; reflexive
     // equal -> 0; antisymmetric. Synthesized from the single C++ `operator<`.
     @Test fun compareTo_orders_lexicographically() = memScoped {
-        val ms = this
         with(Vec2) {
-            val a = ms.Vec2__double_double(1.0, 5.0)
-            val biggerX = ms.Vec2__double_double(2.0, 0.0)
-            val sameXbiggerY = ms.Vec2__double_double(1.0, 9.0)
+            val a = Vec2__double_double(1.0, 5.0)
+            val biggerX = Vec2__double_double(2.0, 0.0)
+            val sameXbiggerY = Vec2__double_double(1.0, 9.0)
             // smaller x is less regardless of y, via idiomatic `<` / `>`
             assertTrue(a < biggerX)
             assertFalse(biggerX < a)
@@ -69,16 +66,16 @@ class OpRelationalTest {
             assertTrue(a < sameXbiggerY)
             assertFalse(sameXbiggerY < a)
             // equal compares to 0 (reflexive)
-            assertEquals(0, a.compareTo(ms.Vec2__double_double(1.0, 5.0)))
-            assertEquals(0, ms.Vec2__double_double(1.0, 1.0).compareTo(ms.Vec2__double_double(1.0, 1.0)))
+            assertEquals(0, a.compareTo(Vec2__double_double(1.0, 5.0)))
+            assertEquals(0, Vec2__double_double(1.0, 1.0).compareTo(Vec2__double_double(1.0, 1.0)))
             // compareTo sign matches the order
             assertTrue(a.compareTo(biggerX) < 0)
             assertTrue(biggerX.compareTo(a) > 0)
             // sorted() orders lexicographically (smaller x first, then smaller y)
             val sorted = listOf(
-                ms.Vec2__double_double(2.0, 0.0),
-                ms.Vec2__double_double(1.0, 9.0),
-                ms.Vec2__double_double(1.0, 1.0)
+                Vec2__double_double(2.0, 0.0),
+                Vec2__double_double(1.0, 9.0),
+                Vec2__double_double(1.0, 1.0)
             ).sorted()
             assertEquals(1.0, sorted[0].x); assertEquals(1.0, sorted[0].y)
             assertEquals(1.0, sorted[1].x); assertEquals(9.0, sorted[1].y)
@@ -89,9 +86,8 @@ class OpRelationalTest {
     // OP-index: v[0] returns x, v[1] returns y, matching construction values.
     // Real Kotlin subscript via operator fun get(Int): Double.
     @Test fun get_returns_component() = memScoped {
-        val ms = this
         with(Vec2) {
-            val v = ms.Vec2__double_double(7.5, -2.5)
+            val v = Vec2__double_double(7.5, -2.5)
             assertEquals(7.5, v[0])
             assertEquals(-2.5, v[1])
             // matches the fields set at construction

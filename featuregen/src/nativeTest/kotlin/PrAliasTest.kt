@@ -10,21 +10,19 @@ import kotlin.test.assertEquals
 // root_AliasFeature.kt.
 class PrAliasTest {
     @Test fun ptrdiff_round_trips() = memScoped {
-        val ms = this
         with(AliasFeature) {
-            assertEquals(0L, ms.echoDiff(0L))
-            assertEquals(-5L, ms.echoDiff(-5L))
-            assertEquals(123456789L, ms.echoDiff(123456789L))
-            assertEquals(Long.MIN_VALUE, ms.echoDiff(Long.MIN_VALUE))
+            assertEquals(0L, echoDiff(0L))
+            assertEquals(-5L, echoDiff(-5L))
+            assertEquals(123456789L, echoDiff(123456789L))
+            assertEquals(Long.MIN_VALUE, echoDiff(Long.MIN_VALUE))
         }
     }
 
     @Test fun wchar_round_trips() = memScoped {
-        val ms = this
         with(AliasFeature) {
-            assertEquals(65, ms.echoWide(65))           // 'A'
-            assertEquals(0x20AC, ms.echoWide(0x20AC))   // BMP €
-            assertEquals(0x1F600, ms.echoWide(0x1F600)) // astral 😀 (4-byte wchar_t)
+            assertEquals(65, echoWide(65))           // 'A'
+            assertEquals(0x20AC, echoWide(0x20AC))   // BMP €
+            assertEquals(0x1F600, echoWide(0x1F600)) // astral 😀 (4-byte wchar_t)
         }
     }
 }

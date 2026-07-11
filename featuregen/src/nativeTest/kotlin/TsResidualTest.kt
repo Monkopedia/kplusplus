@@ -22,17 +22,18 @@ class TsResidualTest {
     // ImplicitAssignHolder.slot is implicitly non-copy-assignable (const member) -> SETTER
     // dropped, GETTER kept. The sibling `tally` int field keeps both accessors.
     @Test fun implicit_no_assign_field_getter_survives_setter_dropped() = memScoped {
-        val ms = this
-        val h = with(ImplicitAssignHolder) { ms.ImplicitAssignHolder() }
-        val slot = h.slot
+        val h = with(ImplicitAssignHolder) { ImplicitAssignHolder() }
+        // `slot` is a by-value-wrapper field: its getter allocates via `_Holder`, so it is
+        // now a `context(scope: MemScope) fun slot()` (the memScoped receiver supplies scope)
+        // rather than a property.
+        val slot = h.slot()
         assertNotNull(slot)
         assertEquals(9, slot.getC())
         // `h.slot = ...` would not compile: the setter was dropped (val, not var).
     }
 
     @Test fun ordinary_field_keeps_getter_and_setter() = memScoped {
-        val ms = this
-        val h = with(ImplicitAssignHolder) { ms.ImplicitAssignHolder() }
+        val h = with(ImplicitAssignHolder) { ImplicitAssignHolder() }
         assertEquals(0, h.tally)
         h.tally = 23
         assertEquals(23, h.tally)

@@ -10,17 +10,15 @@ import kotlin.test.assertTrue
 // out), so content is verified through c_str().
 class StStringRtTest {
     private fun echoStr(input: String): String? = memScoped {
-        val ms = this
         with(StringFeature) {
             with(Basic_string__Char) {
-                ms.echo(ms.Basic_string__Char__const_char_P(input)).c_str()
+                echo(Basic_string__Char__const_char_P(input)).c_str()
             }
         }
     }
 
     private fun constructedIsEmpty(input: String): Boolean = memScoped {
-        val ms = this
-        with(Basic_string__Char) { ms.Basic_string__Char__const_char_P(input).empty() }
+        with(Basic_string__Char) { Basic_string__Char__const_char_P(input).empty() }
     }
 
     @Test fun ascii_round_trips() = assertEquals("hello", echoStr("hello"))

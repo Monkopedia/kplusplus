@@ -36,6 +36,7 @@ import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.const
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.pointerTo
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.referenceTo
 import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
+import kotlinx.cinterop.MemScope
 import kppbridge.numTemplateArgs
 import kppbridge.qualifiedName
 import kppbridge.templateArgAsType
@@ -50,12 +51,12 @@ import kppbridge.templateBaseName
 // QualType::getTypePtrOrNull() is declared to return the TypeApi *interface* (the generated
 // related-object-getter convention); re-wrap to the concrete Type so the shape predicates
 // (which live on the concrete class) resolve. Same pattern as the type-decode probe.
-private fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr, memScope) }
+private fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr) }
 
 // Type::getAsCXXRecordDecl() likewise returns the Api interface; re-wrap so the
 // dyn-cast helpers + NamedDecl upcasts resolve.
 private fun Type.asRecord(): CXXRecordDecl? =
-    getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr, memScope) }
+    getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr) }
 
 // BRIDGE: the generated down-cast helper `Type.asTypedefType()` is missing — TypedefType's
 // base list doesn't survive resolution (TypeBase.h: `class TypedefType final : public
@@ -68,7 +69,7 @@ private fun Type.asRecord(): CXXRecordDecl? =
 // through that whole chain (KeywordHelpers contributes no state, so EBO applies) —
 // precisely what the generated llvm::dyn_cast helper compiles to.
 private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companion) {
-    if (memScope.classof(this@asTypedefTypeOrNull)) TypedefType(ptr, memScope) else null
+    if (classof(this@asTypedefTypeOrNull)) TypedefType(ptr) else null
 }
 
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
@@ -87,6 +88,7 @@ private val C_ALIAS_TYPEDEFS = setOf("size_t", "ssize_t", "ptrdiff_t", "intptr_t
  * pointer/reference recursion, template-specialization detection, the typedef reducers
  * and canonical collapse, then the record/builtin leaf — with const re-applied per level.
  */
+context(scope: MemScope)
 fun buildWrappedType(type: QualType): WrappedType {
     // invoke: CXType_Invalid throws; the model-construction call sites all use
     // throwOnError=false, so an unmodelable type lands as UNRESOLVABLE (skip-not-crash).
@@ -154,9 +156,9 @@ fun buildWrappedType(type: QualType): WrappedType {
     // `Flags<>` binding that the wrapper compile rejects (#46 Phase D finding).
     val canonical = type.getCanonicalType()
     val canonTy = canonical.typePtr()
-    val templateArgCount = with(type.memScope) { numTemplateArgs(type) }
+    val templateArgCount = numTemplateArgs(type)
     if (templateArgCount > 0) {
-        val baseName = with(type.memScope) { templateBaseName(type) }
+        val baseName = templateBaseName(type)
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
         // std::initializer_list (D1a/D1b, #46): a CONCRETE use (`initializer_list<int>`
         // — featuregen's DefaultArgs::sumIlist) is an ordinary template specialization
@@ -182,14 +184,14 @@ fun buildWrappedType(type: QualType): WrappedType {
         //    libclang drops them at resolution / the shared
         //    dropMistypedInitializerListMembers pass — same final output either way.
         if (baseName == "std::initializer_list") {
-            val element = with(type.memScope) { templateArgAsType(type, 0u) }
+            val element = templateArgAsType(type, 0u)
             val elementTy = element.typePtr() ?: return UNRESOLVABLE
             if (elementTy.isDependentType() && !isEnclosingParamIlistElement(elementTy)) {
                 return UNRESOLVABLE
             }
         }
         val args = (0u until templateArgCount.toUInt()).map { i ->
-            val arg = with(type.memScope) { templateArgAsType(type, i) }
+            val arg = templateArgAsType(type, i)
             if (arg.typePtr() == null) UNRESOLVABLE else buildWrappedType(arg)
         }
         return WrappedTemplateType(WrappedTypeReference(baseName), args).maybeConst(isConst)
@@ -261,7 +263,7 @@ fun buildWrappedType(type: QualType): WrappedType {
         // chain INCLUDING inline namespaces (kppbridge::qualifiedName; plain
         // getQualifiedNameAsString suppresses `__cxx11`, breaking the std::string
         // template-element match — see clang_slice.h).
-        val qualified = with(canonTy.memScope) { qualifiedName(record.asNamedDecl()) }
+        val qualified = qualifiedName(record.asNamedDecl())
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
@@ -279,7 +281,7 @@ fun buildWrappedType(type: QualType): WrappedType {
         // dyn-cast (clang::EnumType itself is unbindable — see build.gradle.kts); same
         // decl clang_getTypeDeclaration reports.
         val enumDecl = canonTy.getAsTagDecl()
-            ?.let { Decl(it.ptr, canonTy.memScope) }
+            ?.let { Decl(it.ptr) }
             ?.asEnumDecl() ?: return UNRESOLVABLE
         return buildEnumType(enumDecl).maybeConst(isConst)
     }
@@ -305,6 +307,7 @@ fun buildWrappedType(type: QualType): WrappedType {
 //    D1b/D1c fault line: an assoc-reduced alias reduces to a name-tref HERE but to a
 //    USR-keyed tref on the libclang side (assocTypedefElement), so its survivor
 //    uniqueCNames can never converge without USR synthesis — it keeps dropping.
+context(scope: MemScope)
 private fun isEnclosingParamIlistElement(elementTy: Type): Boolean {
     if (elementTy.asTemplateTypeParmType() != null) return true
     val typedef = elementTy.asTypedefTypeOrNull()?.getDecl() ?: return false
@@ -343,6 +346,7 @@ private fun isEnclosingParamIlistElement(elementTy: Type): Boolean {
  *    record type collapses it anyway. This front-end always collapses both alias kinds —
  *    deterministic, never the order-dependent name leaf.
  */
+context(scope: MemScope)
 fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
     // functionPointerTypedefElement runs FIRST in createForType's originalDecl reducer
     // stack, and is keyed on CXCursor_TypedefDecl ONLY — a `using` fn-ptr alias
@@ -399,6 +403,7 @@ fun buildTypedefTargetType(typedef: TypedefNameDecl): WrappedType {
  *  - only when the sibling element type is NOT a template specialization (associative
  *    containers' `value_type = pair<const Key, T>` stays opaque — const members).
  */
+context(scope: MemScope)
 private fun referenceTypedef(typedef: TypedefNameDecl): WrappedType? {
     val name = typedef.getNameAsString()
     val isConstRef = name == "const_reference"
@@ -431,6 +436,7 @@ private fun referenceTypedef(typedef: TypedefNameDecl): WrappedType? {
  * Unlike the other reducers, the libclang path runs this one for both alias KINDS of the
  * reduced typedef too (createForType lines 147-149), so no Kind gate at the call site.
  */
+context(scope: MemScope)
 private fun pointerTypedef(typedef: TypedefNameDecl): WrappedType? {
     val name = typedef.getNameAsString()
     val isConstPtr = name == "const_pointer"
@@ -465,6 +471,7 @@ private fun pointerTypedef(typedef: TypedefNameDecl): WrappedType? {
  * mirrors referenceTypedef/pointerTypedef's Unexposed equivalence; a concretely-resolved
  * alias falls through to normal handling.
  */
+context(scope: MemScope)
 private fun assocTypedef(typedef: TypedefNameDecl): WrappedType? {
     val name = typedef.getNameAsString()
     if (name != "key_type" && name != "mapped_type" && name != "value_type") return null
@@ -487,14 +494,14 @@ private fun assocTypedef(typedef: TypedefNameDecl): WrappedType? {
     // children mix params and members); on the decl walk the typedef's context is the
     // PATTERN record, whose described class template carries the parameter list.
     val context = typedef.asDecl().getDeclContext() ?: return null
-    val record = with(Decl.Companion) { typedef.memScope.castFromDeclContext(context) }
-        ?.let { Decl(it.ptr, typedef.memScope) }?.asCXXRecordDecl() ?: return null
+    val record = with(Decl.Companion) { castFromDeclContext(context) }
+        ?.let { Decl(it.ptr) }?.asCXXRecordDecl() ?: return null
     val params = record.getDescribedClassTemplate()
-        ?.let { TemplateDecl(it.ptr, typedef.memScope) }
+        ?.let { TemplateDecl(it.ptr) }
         ?.getTemplateParameters()
-        ?.let { TemplateParameterList(it.ptr, typedef.memScope) } ?: return null
+        ?.let { TemplateParameterList(it.ptr) } ?: return null
     val typeParams = (0u until params.size()).mapNotNull { i ->
-        params.getParam(i)?.let { NamedDecl(it.ptr, typedef.memScope) }
+        params.getParam(i)?.let { NamedDecl(it.ptr) }
             ?.takeIf { it.getKind() == Kind.TemplateTypeParm }
     }
     val param = typeParams.getOrNull(paramIndex) ?: return null
@@ -505,6 +512,7 @@ private fun assocTypedef(typedef: TypedefNameDecl): WrappedType? {
 // `semanticParent.children` walk of the libclang reducers). `typedef`-kind only by
 // default, mirroring the CXCursor_TypedefDecl filter; [allowAlias] widens to `using`
 // aliases for the lookups whose libclang filter accepts both kinds (element_type).
+context(scope: MemScope)
 private fun siblingTypedef(
     typedef: TypedefNameDecl,
     name: String,
@@ -540,6 +548,7 @@ private val WrappedType.isCFunctionPointerCompatible: Boolean
  * as the libclang path. The pointer/proto shape checks mirror the CXType_Pointer +
  * CXType_FunctionProto kind tests on typedefDeclUnderlyingType.
  */
+context(scope: MemScope)
 private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
     val underlying = typedef.getUnderlyingType()
     val ty = underlying.typePtr() ?: return null
@@ -563,8 +572,9 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
 
 // The WrappedEnumType payload for [enumDecl] (TypeFactories' CXCursor_EnumDecl branch).
 // Qualified the same inline-namespace-preserving way as the record leaf.
+context(scope: MemScope)
 private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
-    val qualified = with(enumDecl.memScope) { qualifiedName(enumDecl.asNamedDecl()) }
+    val qualified = qualifiedName(enumDecl.asNamedDecl())
         ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
     // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
     // missing name dropping just that constant (TypeFactories' mapNotNull).
@@ -608,12 +618,13 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
  * (normal construction applies; an unextractable element drops the method the same way
  * the libclang path does).
  */
+context(scope: MemScope)
 fun rangeVectorReturn(returnType: QualType): Pair<WrappedType, String>? {
     val canonical = returnType.getCanonicalType()
     val spelling = canonical.getAsString() ?: return null
     if (!spelling.contains("iterator_range<")) return null
-    if (with(returnType.memScope) { numTemplateArgs(canonical) } < 1) return null
-    val iterator = with(returnType.memScope) { templateArgAsType(canonical, 0u) }
+    if (numTemplateArgs(canonical) < 1) return null
+    val iterator = templateArgAsType(canonical, 0u)
     val element = elementOfIterator(iterator) ?: return null
     return WrappedTemplateType(
         WrappedTypeReference("std::vector"),
@@ -624,6 +635,7 @@ fun rangeVectorReturn(returnType: QualType): Pair<WrappedType, String>? {
 // ModelFactories.elementOfIterator, structurally: pointer iterator -> the (doubly-)peeled
 // pointee; class iterator -> the `value_type` alias's canonical underlying; else the
 // iterator's own first template argument.
+context(scope: MemScope)
 private fun elementOfIterator(iterator: QualType): String? {
     val canon = iterator.getCanonicalType()
     val ty = canon.typePtr() ?: return null
@@ -647,8 +659,8 @@ private fun elementOfIterator(iterator: QualType): String? {
             return stripDecoration(alias.getUnderlyingType().getCanonicalType().getAsString())
         }
     }
-    if (with(iterator.memScope) { numTemplateArgs(canon) } >= 1) {
-        val arg = with(iterator.memScope) { templateArgAsType(canon, 0u) }
+    if (numTemplateArgs(canon) >= 1) {
+        val arg = templateArgAsType(canon, 0u)
         return stripDecoration(arg.getAsString())
     }
     return null
@@ -694,6 +706,7 @@ private fun stripDecoration(spelling: String?): String? {
  * way, so emulating the residue is what byte-parity requires (a faithful rich decode is
  * a Phase D tail item once parity is locked).
  */
+context(scope: MemScope)
 fun defaultTypeResidue(default: QualType): List<WrappedType> {
     val residue = mutableListOf<WrappedType>()
     val seenRefs = mutableSetOf<String>()
@@ -703,14 +716,14 @@ fun defaultTypeResidue(default: QualType): List<WrappedType> {
     }
     fun walk(type: QualType) {
         val ty = type.typePtr() ?: return
-        val argCount = with(type.memScope) { numTemplateArgs(type) }
+        val argCount = numTemplateArgs(type)
         if (argCount >= 0) {
             if (!unresolvable) {
                 unresolvable = true
                 residue.add(UNRESOLVABLE)
             }
             for (i in 0u until argCount.toUInt()) {
-                val arg = with(type.memScope) { templateArgAsType(type, i) }
+                val arg = templateArgAsType(type, i)
                 if (arg.typePtr() != null) walk(arg)
             }
             return
@@ -725,8 +738,8 @@ fun defaultTypeResidue(default: QualType): List<WrappedType> {
         }
         val canonTy = type.getCanonicalType().typePtr() ?: return
         canonTy.getAsTagDecl()?.let { tag ->
-            val kindName = TagDecl(tag.ptr, canonTy.memScope).getKindName() ?: return
-            val qualified = NamedDecl(tag.ptr, canonTy.memScope).getQualifiedNameAsString()
+            val kindName = TagDecl(tag.ptr).getKindName() ?: return
+            val qualified = NamedDecl(tag.ptr).getQualifiedNameAsString()
                 ?: return
             addRef("$kindName $qualified")
         }
@@ -742,6 +755,7 @@ fun defaultTypeResidue(default: QualType): List<WrappedType> {
 // uses — whose one divergent builtin spelling on this slice is `_Bool` for `bool`. Binding
 // ASTContext::getPrintingPolicy() + the policy-taking getAsString overload is a whole extra
 // class surface for one token, so the spelling is normalized instead — documented bridge.
+context(scope: MemScope)
 private fun spellingOf(type: QualType): String? {
     val spelling = type.getUnqualifiedType().getAsString()?.trim() ?: return null
     return if (spelling == "_Bool") "bool" else spelling

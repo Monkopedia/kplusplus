@@ -9,8 +9,7 @@ import kotlin.test.assertEquals
 // fields, exercise a const method and a static factory.
 class NsSingleTest {
     @Test fun construct_and_fields_round_trip() = memScoped {
-        val ms = this
-        val v = with(Vec) { ms.Vec__double_double(3.0, 4.0) }
+        val v = with(Vec) { Vec__double_double(3.0, 4.0) }
         assertEquals(3.0, v.x)
         assertEquals(4.0, v.y)
         v.x = 6.0
@@ -19,17 +18,15 @@ class NsSingleTest {
     }
 
     @Test fun default_ctor_zeroes() = memScoped {
-        val ms = this
-        val v = with(Vec) { ms.Vec() }
+        val v = with(Vec) { Vec() }
         assertEquals(0.0, v.x)
         assertEquals(0.0, v.y)
     }
 
     @Test fun const_method_and_static_factory() = memScoped {
-        val ms = this
-        val v = with(Vec) { ms.Vec__double_double(3.0, 4.0) }
+        val v = with(Vec) { Vec__double_double(3.0, 4.0) }
         assertEquals(25.0, v.lengthSq()) // 3^2 + 4^2
-        val m = with(Vec) { ms.make(1.0, 2.0) }
+        val m = with(Vec) { make(1.0, 2.0) }
         assertEquals(1.0, m.x)
         assertEquals(2.0, m.y)
     }

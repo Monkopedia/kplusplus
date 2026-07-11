@@ -15,12 +15,11 @@ import kotlin.test.assertNotNull
 // already-real C pointer round-tripping, the "separate, easy" half of the callbacks design.
 class CbReturnTest {
     @Test fun returned_function_pointer_is_callable_and_repassable() = memScoped {
-        val ms = this
         with(CbProbe) {
-            val fn = ms.makeDouble()
+            val fn = makeDouble()
             assertNotNull(fn)
             assertEquals(42, fn(21))
-            assertEquals(10, ms.applyTransform(5, fn))
+            assertEquals(10, applyTransform(5, fn))
         }
     }
 }

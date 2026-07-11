@@ -11,13 +11,11 @@ import kotlin.test.assertFalse
 // placement-news the result into that Holder memory (see krapper_gen ARG_CAST).
 class StStringRetTest {
     private fun produced(): String? = memScoped {
-        val ms = this
-        with(StringFeature) { with(Basic_string__Char) { ms.produce().c_str() } }
+        with(StringFeature) { with(Basic_string__Char) { produce().c_str() } }
     }
 
     private fun producedIsEmpty(): Boolean = memScoped {
-        val ms = this
-        with(StringFeature) { with(Basic_string__Char) { ms.produce().empty() } }
+        with(StringFeature) { with(Basic_string__Char) { produce().empty() } }
     }
 
     @Test fun produce_returns_expected_content() = assertEquals("produced!", produced())

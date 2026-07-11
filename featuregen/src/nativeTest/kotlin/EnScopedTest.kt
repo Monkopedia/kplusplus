@@ -25,22 +25,20 @@ class EnScopedTest {
     }
 
     @Test fun next_cycles_through_values() = memScoped {
-        val ms = this
         with(EnumFeature) {
-            assertEquals(Color.Green, ms.next(Color.Red))
-            assertEquals(Color.Blue, ms.next(Color.Green))
-            assertEquals(Color.Red, ms.next(Color.Blue)) // wraps via %3
+            assertEquals(Color.Green, next(Color.Red))
+            assertEquals(Color.Blue, next(Color.Green))
+            assertEquals(Color.Red, next(Color.Blue)) // wraps via %3
         }
     }
 
     @Test fun to_and_from_int_round_trip() = memScoped {
-        val ms = this
         with(EnumFeature) {
-            assertEquals(0, ms.toInt(Color.Red))
-            assertEquals(2, ms.toInt(Color.Blue))
+            assertEquals(0, toInt(Color.Red))
+            assertEquals(2, toInt(Color.Blue))
             // fromInt -> toInt is identity over the enum's value range
-            assertEquals(Color.Green, ms.fromInt(1))
-            assertEquals(2, ms.toInt(ms.fromInt(2)))
+            assertEquals(Color.Green, fromInt(1))
+            assertEquals(2, toInt(fromInt(2)))
         }
     }
 }

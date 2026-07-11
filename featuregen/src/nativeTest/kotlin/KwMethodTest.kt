@@ -8,8 +8,7 @@ import kotlin.test.assertEquals
 // won't parse (the whole featuregen build fails to compile without the fix).
 class KwMethodTest {
     @Test fun keyword_named_methods_bind_and_call() = memScoped {
-        val ms = this
-        val k = with(KeywordMethods) { ms.KeywordMethods() }
+        val k = with(KeywordMethods) { KeywordMethods() }
         k.value = 5
         assertEquals(5, k.`in`())
         assertEquals(true, k.`is`())

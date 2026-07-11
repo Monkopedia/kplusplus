@@ -9,18 +9,16 @@ import kotlin.test.assertEquals
 // chain `::` -> `.` + decapitalize produces a nested Kotlin package.
 class NsNestedTest {
     @Test fun construct_and_field_round_trip() = memScoped {
-        val ms = this
-        val i = with(Impl) { ms.Impl__int(21) }
+        val i = with(Impl) { Impl__int(21) }
         assertEquals(21, i.tag)
         i.tag = 5
         assertEquals(5, i.tag)
     }
 
     @Test fun default_ctor_and_const_method() = memScoped {
-        val ms = this
-        val d = with(Impl) { ms.Impl() }
+        val d = with(Impl) { Impl() }
         assertEquals(0, d.tag)
-        val i = with(Impl) { ms.Impl__int(9) }
+        val i = with(Impl) { Impl__int(9) }
         assertEquals(18, i.doubled())
     }
 }

@@ -26,21 +26,20 @@ import kotlin.test.assertTrue
 // AND the vector<string> element read-back both work on the single, correctly-`<char>`-
 // templated binding. (Verified to bite: with the union-evict re-introduced, sync aborts at
 // exit 134.) The generated static methods are MemScope-extension members on the companion,
-// so feature calls are `ms.method(...)` inside `with(StringFeature)`.
+// so feature calls are `method(...)` inside `with(StringFeature)`.
 class RfForcingEvictionTest {
 
     // The SIBLING std::string surface (StringFeature) must round-trip: take() stores a
     // std::string built from a const char*, echo() returns it, produce() makes one. If the
     // sibling binding were degraded by the over-wide eviction, these would not compile.
     @Test fun sibling_stringFeature_roundTrips() = memScoped {
-        val ms = this
         with(StringFeature) {
             with(Basic_string__Char) {
-                ms.reset()
-                ms.take(ms.Basic_string__Char__const_char_P("héllo"))
-                assertEquals(6uL, ms.lastSize()) // "héllo" is 6 UTF-8 bytes
-                assertEquals("produced!", ms.produce().c_str())
-                assertEquals("round", ms.echo(ms.Basic_string__Char__const_char_P("round")).c_str())
+                reset()
+                take(Basic_string__Char__const_char_P("héllo"))
+                assertEquals(6uL, lastSize()) // "héllo" is 6 UTF-8 bytes
+                assertEquals("produced!", produce().c_str())
+                assertEquals("round", echo(Basic_string__Char__const_char_P("round")).c_str())
             }
         }
     }
@@ -50,10 +49,9 @@ class RfForcingEvictionTest {
     // proves the element binding kept its `<char>` template arg (a degraded duplicate would
     // mis-decode or fail to compile the element cast).
     @Test fun forced_vectorOfString_sharesIntactStringBinding() = memScoped {
-        val ms = this
         val v = cppVector<Basic_string__Char>()
-        v.push_back(with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("alpha") })
-        v.push_back(with(Basic_string__Char) { ms.Basic_string__Char__const_char_P("beta") })
+        v.push_back(with(Basic_string__Char) { Basic_string__Char__const_char_P("alpha") })
+        v.push_back(with(Basic_string__Char) { Basic_string__Char__const_char_P("beta") })
         assertEquals(2uL, v.size())
         with(Basic_string__Char) {
             assertEquals("alpha", v[0uL]?.c_str())
@@ -65,11 +63,10 @@ class RfForcingEvictionTest {
     // (one `Basic_string__Char`), not a degraded second copy: a string produced by
     // StringFeature flows into the forced vector and reads back byte-exact.
     @Test fun siblingString_flowsThroughForcedVector() = memScoped {
-        val ms = this
         val v = cppVector<Basic_string__Char>()
         with(StringFeature) {
             with(Basic_string__Char) {
-                v.push_back(ms.echo(ms.Basic_string__Char__const_char_P("shared")))
+                v.push_back(echo(Basic_string__Char__const_char_P("shared")))
             }
         }
         assertEquals(1uL, v.size())
