@@ -9,12 +9,11 @@ import kotlin.test.assertEquals
 // Vec2::operator()(s) returns x*s + y*s.
 class OpCallTest {
     @Test fun call_operator_maps_to_invoke() = memScoped {
-        val ms = this
         with(Vec2) {
-            val v = ms.Vec2__double_double(3.0, 4.0)
+            val v = Vec2__double_double(3.0, 4.0)
             assertEquals(14.0, v(2.0)) // 3*2 + 4*2
             assertEquals(0.0, v(0.0))
-            assertEquals(-7.0, ms.Vec2__double_double(3.0, 4.0)(-1.0))
+            assertEquals(-7.0, Vec2__double_double(3.0, 4.0)(-1.0))
         }
     }
 }

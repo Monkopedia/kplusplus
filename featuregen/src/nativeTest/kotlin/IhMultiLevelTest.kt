@@ -21,10 +21,9 @@ class IhMultiLevelTest {
     // speak() resolves to each class's own most-derived override; legs() is the
     // single inherited Animal impl everywhere.
     @Test fun three_level_override_resolves_per_class() = memScoped {
-        val ms = this
-        val animal = with(Animal) { ms.Animal() }
-        val dog = with(Dog) { ms.Dog() }
-        val puppy = with(Puppy) { ms.Puppy() }
+        val animal = with(Animal) { Animal() }
+        val dog = with(Dog) { Dog() }
+        val puppy = with(Puppy) { Puppy() }
         assertEquals(0, animal.speak()) // Animal's base
         assertEquals(1, dog.speak()) // Dog's intermediate override
         assertEquals(2, puppy.speak()) // Puppy's leaf override (over Dog's)
@@ -37,19 +36,17 @@ class IhMultiLevelTest {
     // IH-virtual-dispatch through the base: a Puppy passed as an Animal* dispatches
     // speak() to Puppy's override (2), and a Dog to Dog's (1).
     @Test fun dispatch_through_animal_base_pointer() = memScoped {
-        val ms = this
-        val dog = with(Dog) { ms.Dog() }
-        val puppy = with(Puppy) { ms.Puppy() }
-        assertEquals(1, with(AnimalProbe) { ms.speakOf(dog) })
-        assertEquals(2, with(AnimalProbe) { ms.speakOf(puppy) })
+        val dog = with(Dog) { Dog() }
+        val puppy = with(Puppy) { Puppy() }
+        assertEquals(1, with(AnimalProbe) { speakOf(dog) })
+        assertEquals(2, with(AnimalProbe) { speakOf(puppy) })
         // legs() dispatches to the single inherited Animal impl regardless of subtype.
-        assertEquals(4, with(AnimalProbe) { ms.legsOf(puppy) })
+        assertEquals(4, with(AnimalProbe) { legsOf(puppy) })
     }
 
     // A Puppy held in a polymorphic `AnimalApi?` still dispatches to Puppy's override.
     @Test fun puppy_as_animal_api_dispatches() = memScoped {
-        val ms = this
-        val puppy = with(Puppy) { ms.Puppy() }
+        val puppy = with(Puppy) { Puppy() }
         val asBase: AnimalApi = puppy
         assertEquals(2, asBase.speak())
         assertEquals(4, asBase.legs())

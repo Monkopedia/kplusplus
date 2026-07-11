@@ -13,8 +13,7 @@ import kotlin.test.assertEquals
 class IhNvDtorTest {
     // The flagged base binding still generates and is fully usable.
     @Test fun polymorphic_base_with_nonvirtual_dtor_still_works() = memScoped {
-        val ms = this
-        val g = with(Gadget) { ms.Gadget() }
+        val g = with(Gadget) { Gadget() }
         assertEquals(0, g.read())
         g.tick()
         g.tick()
@@ -24,8 +23,7 @@ class IhNvDtorTest {
     // The derived (which inherits the non-virtual dtor) still generates; its virtual
     // override keeps the bare name and dispatches to Sprocket's own impl.
     @Test fun derived_inheriting_nonvirtual_dtor_still_works() = memScoped {
-        val ms = this
-        val s = with(Sprocket) { ms.Sprocket() }
+        val s = with(Sprocket) { Sprocket() }
         assertEquals(0, s.spun())
         s.tick()       // override -> increments spins, not ticks
         s.tick()

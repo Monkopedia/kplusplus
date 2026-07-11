@@ -20,11 +20,10 @@ import kotlin.test.assertEquals
 // dropped), `holder.items()` would not exist and this whole class would fail to compile.
 class RgRangeTest {
     @Test fun items_is_for_iterable() = memScoped {
-        val ms = this
-        val holder = with(RangeHolder) { ms.RangeHolder() }
-        val t1 = with(Thing) { ms.Thing__int(10) }
-        val t2 = with(Thing) { ms.Thing__int(20) }
-        val t3 = with(Thing) { ms.Thing__int(30) }
+        val holder = with(RangeHolder) { RangeHolder() }
+        val t1 = with(Thing) { Thing__int(10) }
+        val t2 = with(Thing) { Thing__int(20) }
+        val t3 = with(Thing) { Thing__int(30) }
         holder.add(t1)
         holder.add(t2)
         holder.add(t3)
@@ -39,10 +38,9 @@ class RgRangeTest {
     }
 
     @Test fun items_indexable_and_sized() = memScoped {
-        val ms = this
-        val holder = with(RangeHolder) { ms.RangeHolder() }
-        holder.add(with(Thing) { ms.Thing__int(7) })
-        holder.add(with(Thing) { ms.Thing__int(8) })
+        val holder = with(RangeHolder) { RangeHolder() }
+        holder.add(with(Thing) { Thing__int(7) })
+        holder.add(with(Thing) { Thing__int(8) })
 
         val v = holder.items()
         assertEquals(2uL, v.size())
@@ -51,8 +49,7 @@ class RgRangeTest {
     }
 
     @Test fun empty_range_materializes_empty() = memScoped {
-        val ms = this
-        val holder = with(RangeHolder) { ms.RangeHolder() }
+        val holder = with(RangeHolder) { RangeHolder() }
         assertEquals(0, holder.count())
         assertEquals(0uL, holder.items().size())
         var iterations = 0

@@ -15,8 +15,7 @@ import kotlin.test.assertEquals
 // inside a NON-template struct (`Outer2::Inner2`), which IS nameable and must still bind.
 class TtNestedTemplateTest {
     @Test fun nested_in_nontemplate_class_still_binds() = memScoped {
-        val ms = this
-        val o = with(Outer2) { ms.Outer2() }
+        val o = with(Outer2) { Outer2() }
         assertEquals(11, o.who2)
     }
 
@@ -24,8 +23,7 @@ class TtNestedTemplateTest {
     // as Outer::Inner). Constructing it proves the non-template nested class is unaffected
     // by the in-template drop.
     @Test fun nontemplate_nested_inner_binds() = memScoped {
-        val ms = this
-        val inner = with(Inner2) { ms.Inner2__int(5) }
+        val inner = with(Inner2) { Inner2__int(5) }
         assertEquals(5, inner.y)
         assertEquals(5, inner.getY())
     }

@@ -20,8 +20,7 @@ class TdDefArgTest {
     // The sibling sum() (no un-modelable param) still binds and returns the sum of
     // the default-initialized values {1,2,3,4}.
     @Test fun sibling_sum_still_binds() = memScoped {
-        val ms = this
-        val f = with(Filterable) { ms.Filterable() }
+        val f = with(Filterable) { Filterable() }
         assertEquals(10, f.sum())
     }
 
@@ -30,8 +29,7 @@ class TdDefArgTest {
     // would fail to compile. We assert the class is constructible and its public
     // surface is exactly the surviving sibling by exercising sum() again.
     @Test fun unmodelable_param_method_is_absent() = memScoped {
-        val ms = this
-        val f = with(Filterable) { ms.Filterable() }
+        val f = with(Filterable) { Filterable() }
         // sum() is the only bound instance method; countIf is gone.
         assertEquals(10, f.sum())
     }

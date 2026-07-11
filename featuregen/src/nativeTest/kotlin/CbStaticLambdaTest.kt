@@ -13,10 +13,9 @@ import kotlin.test.assertEquals
 // channel — is the separate, not-yet-built feature.)
 class CbStaticLambdaTest {
     @Test fun static_function_passes_as_mode2_callback() = memScoped {
-        val ms = this
         with(CbProbe) {
             val inc = staticCFunction { n: Int -> n + 1 }
-            assertEquals(8, ms.applyTransform(7, inc))
+            assertEquals(8, applyTransform(7, inc))
         }
     }
 }

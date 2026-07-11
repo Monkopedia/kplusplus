@@ -86,7 +86,6 @@ class KotlinCodeTests {
             |@krapper.CppBinding("TestLib::EmptyClass")
             |class EmptyClass(
             |    val ptr: COpaquePointer,
-            |    val memScope: MemScope,
             |) {
             |    companion object {
             |        val size: Int
@@ -99,9 +98,9 @@ class KotlinCodeTests {
             |                return TestLib_EmptyClass_align_of()
             |            }
             |
-            |        fun MemScope.EmptyClass_Holder(): EmptyClass {
-            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, align).rawPtr) ?: error("Allocation failed"))
-            |            return EmptyClass(memory, this)
+            |        context(scope: MemScope) fun EmptyClass_Holder(): EmptyClass {
+            |            val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, align).rawPtr) ?: error("Allocation failed"))
+            |            return EmptyClass(memory)
             |        }
             |    }
             |}
@@ -163,10 +162,10 @@ class KotlinCodeTests {
         }
         assertCode(
             """
-            |fun MemScope.Constructable(): Constructable {
-            |    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
+            |context(scope: MemScope) fun Constructable(): Constructable {
+            |    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
-            |    return Constructable(obj, this)
+            |    return Constructable(obj)
             |}
             |
             """.trimMargin(),
@@ -227,13 +226,13 @@ class KotlinCodeTests {
         }
         assertCode(
             """
-            |fun MemScope.Constructable(): Constructable {
-            |    val memory: COpaquePointer = (interpretCPointer(alloc(size, size).rawPtr) ?: error("Allocation failed"))
+            |context(scope: MemScope) fun Constructable(): Constructable {
+            |    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) ?: error("Allocation failed"))
             |    val obj: COpaquePointer = (TestLib_Constructable_new(memory) ?: error("Creation failed"))
-            |    defer {
+            |    scope.defer {
             |        TestLib_Constructable_dispose(obj)
             |    }
-            |    return Constructable(obj, this)
+            |    return Constructable(obj)
             |}
             |
             """.trimMargin(),
@@ -603,7 +602,6 @@ class KotlinCodeTests {
             |@krapper.CppBinding("std::vector<std::string>::iterator")
             |class Iterator__String(
             |    val ptr: COpaquePointer,
-            |    val memScope: MemScope,
             |) {
             |    companion object {
             |        val size: Int
@@ -616,9 +614,9 @@ class KotlinCodeTests {
             |                return std_vector_std_string_iterator_align_of()
             |            }
             |
-            |        fun MemScope.Iterator__String_Holder(): Iterator__String {
-            |            val memory: COpaquePointer = (interpretCPointer(alloc(size, align).rawPtr) ?: error("Allocation failed"))
-            |            return Iterator__String(memory, this)
+            |        context(scope: MemScope) fun Iterator__String_Holder(): Iterator__String {
+            |            val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, align).rawPtr) ?: error("Allocation failed"))
+            |            return Iterator__String(memory)
             |        }
             |    }
             |}

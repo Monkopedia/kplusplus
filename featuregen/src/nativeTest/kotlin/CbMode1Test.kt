@@ -12,11 +12,10 @@ import kotlin.test.assertEquals
 // this (synchronous) call.
 class CbMode1Test {
     @Test fun capturing_lambda_via_void_context() = memScoped {
-        val ms = this
         with(CbCtx) {
             val base = 10
             // void* userData + fn are consumed; caller passes only the lambda + x.
-            assertEquals(15, ms.callWith({ n -> n + base }, 5))
+            assertEquals(15, callWith({ n -> n + base }, 5))
         }
     }
 }

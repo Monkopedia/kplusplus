@@ -19,8 +19,7 @@ class IhCastTest {
     // upcasts must dispatch to Widget2's distinct overrides (draw=11, tag=22). If the
     // 2nd-base offset were wrong, asTagged().tag() would return garbage / crash.
     @Test fun multiple_inheritance_both_bases_dispatch_correctly() = memScoped {
-        val ms = this
-        val w = with(Widget2) { ms.Widget2() }
+        val w = with(Widget2) { Widget2() }
         // Primary base (offset 0).
         assertEquals(11, w.asDrawable2().draw())
         // Second base (NON-zero offset) — the whole point: static_cast applies the offset.
@@ -31,11 +30,10 @@ class IhCastTest {
     // `const Tagged*` is wanted and read the virtual back through the base pointer. A
     // mis-offset pointer here would dispatch wrong / read garbage.
     @Test fun upcast_passed_to_base_pointer_probe() = memScoped {
-        val ms = this
-        val w = with(Widget2) { ms.Widget2() }
+        val w = with(Widget2) { Widget2() }
         val tagged: Tagged = w.asTagged()
-        assertEquals(22, with(MiProbe) { ms.tagOf(tagged) })
-        assertEquals(11, with(MiProbe) { ms.drawOf(w.asDrawable2()) })
+        assertEquals(22, with(MiProbe) { tagOf(tagged) })
+        assertEquals(11, with(MiProbe) { drawOf(w.asDrawable2()) })
     }
 
     // SINGLE INHERITANCE, NON-ZERO OFFSET (Case 2). VDerived : PlainBase, but VDerived
@@ -45,8 +43,7 @@ class IhCastTest {
     // offset on both sides). With a plain reinterpret_cast the PlainBase subobject would
     // be misplaced at offset 0, over the vptr.
     @Test fun single_inheritance_nonzero_offset_round_trips_field() = memScoped {
-        val ms = this
-        val v = with(VDerived) { ms.VDerived() }
+        val v = with(VDerived) { VDerived() }
         val base: PlainBase = v.asPlainBase()
         base.setPx(7)
         assertEquals(7, base.getPx())
@@ -61,8 +58,7 @@ class IhCastTest {
     // `v.getPx()` — which reads at offset 0 — does NOT see 7. (This is exactly the bug the
     // cast methods exist to avoid; the flatten path is intentionally left offset-0.)
     @Test fun nonzero_offset_is_genuinely_nonzero() = memScoped {
-        val ms = this
-        val v = with(VDerived) { ms.VDerived() }
+        val v = with(VDerived) { VDerived() }
         v.asPlainBase().setPx(7)
         // Read through the correctly-offset cast view: sees 7.
         assertEquals(7, v.asPlainBase().getPx())

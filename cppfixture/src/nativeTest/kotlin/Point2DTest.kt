@@ -11,8 +11,7 @@ import kotlin.test.assertEquals
 // the same tests pass either way.
 class Point2DTest {
     @Test fun construct_fields_and_const_method() = memScoped {
-        val ms = this
-        val p = with(Point2D) { ms.Point2D__double_double(3.0, 4.0) }
+        val p = with(Point2D) { Point2D__double_double(3.0, 4.0) }
         assertEquals(3.0, p.x)
         assertEquals(4.0, p.y)
         assertEquals(25.0, p.lengthSq()) // 3^2 + 4^2
@@ -22,12 +21,11 @@ class Point2DTest {
     }
 
     @Test fun default_ctor_and_static_factory() = memScoped {
-        val ms = this
-        val z = with(Point2D) { ms.Point2D() }
+        val z = with(Point2D) { Point2D() }
         assertEquals(0.0, z.x)
         assertEquals(0.0, z.y)
 
-        val m = with(Point2D) { ms.make(1.0, 2.0) }
+        val m = with(Point2D) { make(1.0, 2.0) }
         assertEquals(1.0, m.x)
         assertEquals(2.0, m.y)
     }

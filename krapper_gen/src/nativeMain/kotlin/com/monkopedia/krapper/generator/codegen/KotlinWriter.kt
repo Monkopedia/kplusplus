@@ -26,6 +26,7 @@ import com.monkopedia.krapper.generator.builders.CodeBuilder
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CodeGeneratorBase
 import com.monkopedia.krapper.generator.builders.Concat
+import com.monkopedia.krapper.generator.builders.ContextParam
 import com.monkopedia.krapper.generator.builders.Defer
 import com.monkopedia.krapper.generator.builders.Dot
 import com.monkopedia.krapper.generator.builders.EndClass
@@ -359,7 +360,6 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         appendLine()
         val ptr = define(ptr.content, fullyQualifiedType(C_OPAQUE_POINTER))
-        val memScope = define(memScope.content, fullyQualifiedType(MEM_SCOPE))
         // Emit @krapper.CppBinding("<cppSpec>") on every generated class so the
         // kplusplus compiler plugin can recover the C++ instantiation spec from
         // a Kotlin element type. The spec is the qualified C++ type of the class.
@@ -391,11 +391,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             addAll(implementedInterfaces)
         }
         // When the class implements a base interface, its `ptr` must `override` the
-        // interface's `val ptr`. (`memScope` is not on the interface, so it stays plain.)
+        // interface's `val ptr`. The wrapper carries ONLY `ptr`: the former `memScope`
+        // field is gone — allocation/cleanup scope now flows through a `context(MemScope)`
+        // parameter at the allocating/registering member sites (see the design doc).
         val ptrProp =
             if (implementedInterfaces.isNotEmpty()) override(property(ptr)) else property(ptr)
         val superType = superTypes.ifEmpty { null }?.let { Raw(it.joinToString(", ")) }
-        cls(named(type), listOf(ptrProp, property(memScope)), superType) {
+        cls(named(type), listOf(ptrProp), superType) {
             handleSuperClassesRecursive(cls)
             handleChildren()
             generateDisposeMethods(cls)
@@ -468,13 +470,16 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         inline {
             function {
+                // Registers a deferred delete, so it takes the ambient scope as a context
+                // parameter and defers on it: `context(scope: MemScope) fun owned()`.
+                contextParams = scopeContext()
                 name = "owned"
                 retType = type(cls.type)
                 body {
-                    // `memScope.defer { Type_dispose(ptr) }` — same mechanism as the _Holder
-                    // factory, but deferred onto the wrapper's own `memScope` at the caller's
-                    // request rather than at construction.
-                    block(Dot(memScope, Defer), EndClass) {
+                    // `scope.defer { Type_dispose(ptr) }` — same mechanism as the _Holder
+                    // factory, but deferred onto the ambient scope at the caller's request
+                    // rather than at construction.
+                    block(Dot(scopeArg, Defer), EndClass) {
                         +disposeCall()
                     }
                     +Return(Raw("this"))
@@ -506,8 +511,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         +Return(
                             generateConstructorCall(
                                 target.base.type.kotlinType,
-                                asserting(Call(extensionMethod(pkg, target.cHelperName), ptr)),
-                                memScope
+                                asserting(Call(extensionMethod(pkg, target.cHelperName), ptr))
                             )
                         )
                     }
@@ -551,8 +555,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         +Return(
                             generateConstructorCall(
                                 target.derived.type.kotlinType,
-                                raw.reference,
-                                memScope
+                                raw.reference
                             )
                         )
                     }
@@ -750,7 +753,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             val destructor =
                 cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
             extensionFunction {
-                receiver = fqType(MEM_SCOPE)
+                // Allocates (and, if there's a destructor, registers cleanup), so it takes
+                // the ambient scope as a context parameter and runs `alloc`/`defer` on it —
+                // no receiver, no carried field.
+                contextParams = scopeContext()
                 // The `<Type>_Holder` factory is a generated SIBLING function, not an
                 // imported type reference: it is DECLARED here under the canonical name
                 // (`plainDeclaredName`, ignoring `remap`) and every CALL to it (see
@@ -771,17 +777,19 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         initializer = (
                             Call(
                                 extensionMethod("kotlinx.cinterop", "interpretCPointer"),
-                                Call(
-                                    "alloc",
-                                    size.reference,
-                                    align.reference
-                                ) dot Raw("rawPtr")
+                                (
+                                    scopeArg dot Call(
+                                        "alloc",
+                                        size.reference,
+                                        align.reference
+                                    )
+                                    ) dot Raw("rawPtr")
                             ) elvis Call("error", "Allocation failed".symbol)
                             )
                     )
                     obj.isVal = true
                     if (destructor != null) {
-                        defer {
+                        block(Dot(scopeArg, Defer), EndClass) {
                             +Call(
                                 extensionMethod(
                                     pkg,
@@ -795,8 +803,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     +Return(
                         generateConstructorCall(
                             cls.type.kotlinType,
-                            obj.reference,
-                            thiz.reference
+                            obj.reference
                         )
                     )
                 }
@@ -897,7 +904,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private data class TemplateInterfaceMethod(
         val name: String,
         val renderedParams: List<Pair<String, String>>,
-        val renderedReturn: String
+        val renderedReturn: String,
+        // When the concrete method allocates a by-value wrapper return, its emission carries a
+        // `context(scope: MemScope)`, so the interface declaration must too (else the concrete
+        // override doesn't match). See allocatesByValueReturn.
+        val allocatesScope: Boolean = false
     )
 
     /**
@@ -975,10 +986,22 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 val returnRendered = renderPosition(instantiations, perInst, typeParamToken) {
                     it.returnType.kotlinType
                 } ?: continue@method
+                // The interface method carries `context(scope: MemScope)` when a concrete
+                // override does. Two cases:
+                //  - its return is a type-PARAMETER position (`T`/`T1`/…): the param may be a
+                //    wrapper in SOME instantiation (`Box<Point>.get(): Point` allocates), so
+                //    the interface must declare context and EVERY override matches it (a
+                //    scalar instantiation like `Box<Int>.get(): Int` then carries an unused
+                //    context param — harmless, keeps the override signatures uniform);
+                //  - a fixed concrete return that itself allocates a by-value wrapper.
+                val returnIsTypeParam = (0 until arity).any { returnRendered == typeParamToken(it) }
+                val allocatesScope = returnIsTypeParam ||
+                    perInst.any { allocatesByValueReturn(it.second.returnStyle, it.second.returnType) }
                 methods += TemplateInterfaceMethod(
                     name = key.first,
                     renderedParams = params,
-                    renderedReturn = returnRendered
+                    renderedReturn = returnRendered,
+                    allocatesScope = allocatesScope
                 )
             }
             result[base] = methods
@@ -1104,7 +1127,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                             val params = m.renderedParams.joinToString(", ") { (n, t) ->
                                 "$n: $t"
                             }
-                            appendLine("    fun ${m.name}($params): ${m.renderedReturn}")
+                            // An allocating (by-value wrapper return) method carries the same
+                            // `context(scope: MemScope)` as its concrete override.
+                            val ctx = if (m.allocatesScope) "context(scope: MemScope) " else ""
+                            appendLine("    ${ctx}fun ${m.name}($params): ${m.renderedReturn}")
                         }
                         appendLine("}")
                     }
@@ -1113,8 +1139,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         "@krapper.CppTemplate(base = \"${facade.base}\", " +
                             "prefix = \"${facade.base}\", pkg = \"${facade.pkg}\")"
                     )
+                    // The scoped factory now takes the ambient scope as a CONTEXT parameter
+                    // (matching the generated `context(scope: MemScope) fun <Type>()`
+                    // constructor factories) rather than a MemScope receiver. `Base<Int>()`
+                    // still resolves under `memScoped { }`; the plugin lowers the call to the
+                    // concrete binding.
                     appendLine(
-                        "fun <$typeParams> MemScope.${facade.base}(): " +
+                        "context(scope: MemScope) fun <$typeParams> ${facade.base}(): " +
                             "${facade.base}<$typeParams> ="
                     )
                     appendLine(
@@ -1156,7 +1187,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private data class BaseInterfaceMethod(
         val name: String,
         val params: List<Pair<String, String>>,
-        val renderedReturn: String
+        val renderedReturn: String,
+        // See TemplateInterfaceMethod.allocatesScope: an allocating (by-value wrapper return)
+        // method's concrete override carries `context(scope: MemScope)`, so must the interface.
+        val allocatesScope: Boolean = false
     )
 
     /**
@@ -1229,7 +1263,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             methods += BaseInterfaceMethod(
                 name = overloadMethodName(baseCls, named),
                 params = params,
-                renderedReturn = ret
+                renderedReturn = ret,
+                allocatesScope = allocatesByValueReturn(method.returnStyle, method.returnType)
             )
         }
         return methods
@@ -1295,6 +1330,24 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
+    // True when the template/base interface method [method] on [cls] overrides declares a
+    // `context(scope: MemScope)` (its [allocatesScope]) — so this concrete override must carry
+    // the context parameter to match the interface signature, even if THIS instantiation's own
+    // return wouldn't allocate (a scalar `T` instantiation).
+    private fun interfaceMethodRequiresScope(cls: ResolvedClass, method: ResolvedMethod): Boolean {
+        if (method.operator != null) return false
+        val name = overloadMethodName(cls, fixNaming(method))
+        val arity = method.args.size - 1
+        val base = templateInstantiationFacade(cls)?.base
+        val templateHit = base != null && templateInterfaces[base]?.any {
+            it.name == name && it.renderedParams.size == arity && it.allocatesScope
+        } == true
+        val baseHit = baseInterfacesImplementedBy(cls).any { bi ->
+            bi.methods.any { it.name == name && it.params.size == arity && it.allocatesScope }
+        }
+        return templateHit || baseHit
+    }
+
     // Remap a method's return type for emission: a base-typed return becomes the base's
     // interface type (so a derived can be returned where the base is wanted). Non-base
     // types are returned unchanged.
@@ -1341,6 +1394,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         appendLine()
                     }
                     appendLine("import kotlinx.cinterop.COpaquePointer")
+                    if (bi.methods.any { it.allocatesScope }) {
+                        appendLine("import kotlinx.cinterop.MemScope")
+                    }
                     appendLine()
                     appendLine("// BEGIN KRAPPER GEN for base interface ${bi.interfaceName}")
                     appendLine("interface ${bi.interfaceName} {")
@@ -1349,7 +1405,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     appendLine("    val ptr: COpaquePointer")
                     for (m in bi.methods) {
                         val params = m.params.joinToString(", ") { (n, t) -> "$n: $t" }
-                        appendLine("    fun ${m.name}($params): ${m.renderedReturn}")
+                        // Allocating method -> `context(scope: MemScope)`, matching the override.
+                        val ctx = if (m.allocatesScope) "context(scope: MemScope) " else ""
+                        appendLine("    ${ctx}fun ${m.name}($params): ${m.renderedReturn}")
                     }
                     appendLine("}")
                     appendLine("// END KRAPPER GEN for base interface ${bi.interfaceName}")
@@ -1359,7 +1417,18 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     }
 
     private val ptr = Raw("ptr")
-    private val memScope = Raw("memScope")
+
+    // The context-parameter scope name used by every allocating / cleanup-registering
+    // member (`context(scope: MemScope) fun …`). Replaces the former carried `memScope`
+    // field: allocation and `defer` now run on this ambient scope from the call site.
+    // (Named `scopeArg` to avoid shadowing the imported CodeBuilder.scope property.)
+    private val scopeArg = Raw("scope")
+
+    // The `context(scope: MemScope)` list to attach to a function/factory that allocates a
+    // new C++ object or registers a deferred delete. A fresh list per call so the type
+    // Symbol isn't shared across the emitted tree (the FQ-import walker rejects reuse).
+    private fun KotlinCodeBuilder.scopeContext(): List<ContextParam> =
+        listOf(ContextParam("scope", fqType(MEM_SCOPE)))
 
     override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, method: ResolvedMethod) {
         onGenerate(cls, method, null, null)
@@ -1373,7 +1442,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         inline {
             extensionFunction {
-                receiver = fqType(MEM_SCOPE)
+                // A static free function. No MemScope receiver: if it allocates a by-value
+                // wrapper return, defineArgsAndBody adds a `context(scope: MemScope)` (so it
+                // still resolves under `memScoped { }`); otherwise it is scope-free.
                 name = method.name.kotlinMethodName()
                 // Declared return type is upcast to a base interface when the method
                 // returns a base class (so a derived can be returned where the base is
@@ -1429,12 +1500,19 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     // rule the `[]` operator already gets. Recognize it on the ORIGINAL
                     // method (detectIndexIterable selects by the un-renamed identity).
                     val keepConcreteElement = isIndexGetMethod(cls, method)
+                    // An interface method that declares `context(scope: MemScope)` (because a
+                    // sibling instantiation / the base allocates) forces this concrete
+                    // override to declare it too, even when THIS instance wouldn't allocate on
+                    // its own (e.g. `Box<Int>.get(): Int` overriding a `T`-returning method).
+                    val forceScopeContext =
+                        interfaceMethodRequiresScope(cls, method)
                     val emit: KotlinCodeBuilder.() -> Unit = {
                         generateBasicMethod(
                             named,
                             uniqueCName,
                             methodName = overloadMethodName(cls, named),
-                            keepConcreteElement = keepConcreteElement
+                            keepConcreteElement = keepConcreteElement,
+                            forceScopeContext = forceScopeContext
                         )
                     }
                     // A method declared on the generic template interface OR on a base
@@ -1532,7 +1610,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     ) {
         needsCCaller = true
         extensionFunction {
-            receiver = fqType(MEM_SCOPE)
+            // A construction factory: takes the ambient scope as a context parameter so
+            // `memScoped { Foo(...) { … } }` resolves exactly as the former MemScope-receiver
+            // form did. (The stack object lives only for the callback; the wrapper it hands
+            // the callback carries `ptr` only.)
+            contextParams = scopeContext()
             // Canonical DECLARATION name (`plainDeclaredName`, ignoring the per-file
             // import-alias `remap`), matching constructorFactoryName / the `_Holder`
             // declaration and the canonical CALL site (constructorMethod, #81). A
@@ -1563,8 +1645,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                                 callbackArg.reference,
                                 generateConstructorCall(
                                     cls.type.kotlinType,
-                                    ptr.reference,
-                                    thiz.reference
+                                    ptr.reference
                                 )
                             )
                         }
@@ -1600,7 +1681,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val destructor =
             cls.children.filterIsInstance<ResolvedDestructor>().firstOrNull()
         extensionFunction {
-            receiver = fqType(MEM_SCOPE)
+            // Allocates and (with a destructor) registers cleanup: takes the ambient scope
+            // as a context parameter and runs `alloc`/`defer` on it.
+            contextParams = scopeContext()
             name = constructorFactoryName(cls, method.args.drop(1))
             retType = type(cls.type)
             val args = method.args.subList(1, method.args.size).map {
@@ -1613,11 +1696,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     initializer = (
                         Call(
                             extensionMethod("kotlinx.cinterop", "interpretCPointer"),
-                            Call(
-                                "alloc",
-                                size!!.reference,
-                                align!!.reference
-                            ) dot Raw("rawPtr")
+                            (
+                                scopeArg dot Call(
+                                    "alloc",
+                                    size!!.reference,
+                                    align!!.reference
+                                )
+                                ) dot Raw("rawPtr")
                         ) elvis Call("error", "Allocation failed".symbol)
                         )
                 )
@@ -1635,7 +1720,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 )
                 obj.isVal = true
                 if (destructor != null) {
-                    defer {
+                    block(Dot(scopeArg, Defer), EndClass) {
                         +Call(
                             extensionMethod(
                                 pkg,
@@ -1647,7 +1732,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     }
                 }
                 +Return(
-                    generateConstructorCall(cls.type.kotlinType, obj.reference, thiz.reference)
+                    generateConstructorCall(cls.type.kotlinType, obj.reference)
                 )
             }
         }
@@ -1728,7 +1813,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         methodName: String = method.name,
         startArgs: List<Symbol> = listOf(ptr),
         skipFirstArg: Boolean = true,
-        keepConcreteElement: Boolean = false
+        keepConcreteElement: Boolean = false,
+        // Force `context(scope: MemScope)` even when this method doesn't itself allocate —
+        // used when it overrides an interface method that declares the context (see
+        // interfaceMethodRequiresScope).
+        forceScopeContext: Boolean = false
     ) {
         function {
             name = methodName.kotlinMethodName()
@@ -1773,7 +1862,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 startArgs = startArgs,
                 returnStyle = method.returnStyle,
                 returnType = method.returnType,
-                uniqueCName = uniqueCName
+                uniqueCName = uniqueCName,
+                forceScopeContext = forceScopeContext
             )
         }
     }
@@ -1786,13 +1876,30 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
      * [generateMethodBody]; the Mode-1 callback path ([detectMode1Callback]) rewrites
      * a `(funcPointer, void* userData)` arg pair into a single Kotlin lambda param.
      */
+    // True when a method with this return shape ALLOCATES its by-value return slot via the
+    // `_Holder` factory (the ARG_CAST wrapper path in generateMethodBody). Such a method
+    // must gain a `context(scope: MemScope)` so the allocation runs on the ambient scope.
+    private fun allocatesByValueReturn(
+        returnStyle: ReturnStyle,
+        returnType: ResolvedCppType
+    ): Boolean = returnStyle == ARG_CAST && returnType.kotlinType.isWrapper
+
     private fun FunctionBuilder<KotlinFactory>.defineArgsAndBody(
         userArgs: List<ResolvedArgument>,
         startArgs: List<Symbol>,
         returnStyle: ReturnStyle,
         returnType: ResolvedCppType,
-        uniqueCName: Symbol
+        uniqueCName: Symbol,
+        forceScopeContext: Boolean = false
     ) {
+        // A by-value wrapper return allocates its slot on the ambient scope; surface that
+        // as a context parameter on this member. (Set before the body is emitted so the
+        // signature carries it; the body's `…_Holder()` resolves to it.) [forceScopeContext]
+        // adds it for an override that must match a context-declaring interface method even
+        // though this instance wouldn't allocate on its own.
+        if (forceScopeContext || allocatesByValueReturn(returnStyle, returnType)) {
+            contextParams = functionBuilder.scopeContext()
+        }
         // Only take the Mode-1 path for a plain-value return: the body captures the C
         // result in a local and returns it directly, so it doesn't apply the
         // wrapper/enum/string boundary conversions generateReturn would. Those returns
@@ -2124,7 +2231,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             val ret = define(
                 "retValue",
                 returnType,
-                initializer = memScope dot Call(
+                // The `_Holder` factory now takes `context(scope: MemScope)` rather than a
+                // MemScope receiver; call it BARE (no `scope.` qualifier — that would be a
+                // member lookup on MemScope). The enclosing member carries the same
+                // `context(scope: MemScope)` (set in defineArgsAndBody), so `scope` fills the
+                // factory's context parameter implicitly.
+                initializer = Call(
                     extensionMethod(
                         kotlinType.fullyQualified + ".Companion",
                         // CALL the `<Type>_Holder` factory by its canonical DECLARED name
@@ -2507,6 +2619,16 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
 
     override fun KotlinCodeBuilder.onGenerate(cls: ResolvedClass, field: ResolvedField) {
+        // A field whose getter ALLOCATES a by-value wrapper (ARG_CAST via `_Holder`) can't
+        // be a Kotlin PROPERTY: a property accessor cannot carry a `context(scope: MemScope)`,
+        // so there is no ambient scope to allocate the return slot on. Emit such an accessor
+        // as a context-parameterized function instead (getter -> `context(scope) fun name()`,
+        // and the setter, if any, as a plain `fun name(value)`), keeping the allocation on the
+        // ambient scope per the MemScope→context-param rule.
+        if (allocatesByValueReturn(field.getter.returnStyle, field.getter.returnType)) {
+            generateByValueFieldAccessors(field)
+            return
+        }
         +property(define(field.name, field.kotlinType)) {
             getter = inline(
                 getter {
@@ -2528,6 +2650,43 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         )
                     }
                 )
+            }
+        }
+    }
+
+    // Function-form accessors for a by-value-wrapper field (see onGenerate(cls, field)): the
+    // getter allocates via `_Holder`, so it is a `context(scope: MemScope) fun <name>()`; the
+    // setter (mutable field) forwards the value pointer with no allocation, a plain `fun`.
+    private fun KotlinCodeBuilder.generateByValueFieldAccessors(field: ResolvedField) {
+        inline {
+            function {
+                contextParams = scopeContext()
+                name = field.name.escapeKotlinKeyword()
+                retType = type(field.getter.returnType)
+                body {
+                    generateMethodBody(
+                        listOf(ptr),
+                        field.getter.returnStyle,
+                        field.getter.returnType,
+                        extensionMethod(pkg, field.getter.uniqueCName!!)
+                    )
+                }
+            }
+        }
+        if (!field.isConst) {
+            inline {
+                function {
+                    name = field.name.escapeKotlinKeyword()
+                    retType = type(ResolvedType.UNIT.copy())
+                    val value = define("value", field.kotlinType)
+                    body {
+                        +Call(
+                            extensionMethod(pkg, field.setter.uniqueCName!!),
+                            ptr,
+                            reference(field.kotlinType, value)
+                        )
+                    }
+                }
             }
         }
     }
@@ -2566,8 +2725,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                             call elvis Return(Raw("null"))
                         } else {
                             asserting(call)
-                        },
-                        memScope
+                        }
                     )
                 )
             }
@@ -2587,9 +2745,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
 
     private fun generateConstructorCall(
         type: ResolvedKotlinType,
-        ptr: Symbol,
-        memScope: Symbol
-    ): Symbol = Call(constructorMethod(type), ptr, memScope)
+        ptr: Symbol
+    ): Symbol = Call(constructorMethod(type), ptr)
 
     // CALL the generated `MemScope.<Type>(...)` CONSTRUCTOR factory by its canonical
     // DECLARED name (`plainDeclaredName`, ignoring the per-file import-alias `remap`),

@@ -17,8 +17,7 @@ class IhFlattenTest {
     // IH-base-method: inherited non-virtual move(d) accumulates into base field bx,
     // and baseOnly()/bx read the same inherited state.
     @Test fun inherited_move_and_base_field() = memScoped {
-        val ms = this
-        val d = with(Derived) { ms.Derived() }
+        val d = with(Derived) { Derived() }
         assertEquals(0, d.bx)
         assertEquals(0, d.baseOnly())
         d.move(3)
@@ -34,8 +33,7 @@ class IhFlattenTest {
     // IH-virtual-override: area() keeps the bare name and dispatches to Derived's
     // concrete override (42), not Base's default (0).
     @Test fun virtual_override_keeps_bare_name() = memScoped {
-        val ms = this
-        val d = with(Derived) { ms.Derived() }
+        val d = with(Derived) { Derived() }
         assertEquals(42, d.area())
     }
 
@@ -43,16 +41,14 @@ class IhFlattenTest {
     // shadowing non-virtual Derived::label yields the name and is class-prefixed
     // to derivedLabel() (= "derived"). Both reachable.
     @Test fun shadowed_label_splits_into_label_and_derivedLabel() = memScoped {
-        val ms = this
-        val d = with(Derived) { ms.Derived() }
+        val d = with(Derived) { Derived() }
         assertEquals("base", d.label())          // inherited Base::label
         assertEquals("derived", d.derivedLabel()) // Derived's own shadow
     }
 
     // IH-derived-method: derived-only members generate normally on Derived.
     @Test fun derived_only_members() = memScoped {
-        val ms = this
-        val d = with(Derived) { ms.Derived() }
+        val d = with(Derived) { Derived() }
         assertEquals(0, d.derivedOnly())
         d.dy = 9
         assertEquals(9, d.dy)

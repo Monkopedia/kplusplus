@@ -15,9 +15,8 @@ import kotlin.test.assertEquals
 // conversion to confirm it is wired and returns the converted value.
 class TtConvertNsTest {
     @Test fun conversion_to_namespaced_type_binds_and_runs() = memScoped {
-        val ms = this
         with(Convertible) {
-            val c = ms.Convertible__int(42)
+            val c = Convertible__int(42)
             // The conversion `operator nn::Tok()` yields an nn::Tok whose `v` is `n`.
             val tok = c.toTok()
             assertEquals(42, tok.value())

@@ -64,6 +64,10 @@ kotlin {
                 compilerOptions {
                     optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
                     freeCompilerArgs.add("-g")
+                    // Generated bindings now carry `context(scope: MemScope)` on their
+                    // allocating/cleanup-registering members (MemScope-field → context-param
+                    // migration), so compiling them needs Kotlin 2.4 context parameters.
+                    freeCompilerArgs.add("-Xcontext-parameters")
                 }
             }
         }

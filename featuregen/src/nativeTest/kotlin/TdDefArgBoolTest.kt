@@ -18,16 +18,14 @@ import kotlin.test.assertEquals
 class TdDefArgBoolTest {
     // The sibling base() (no un-modelable param) still binds and returns n (7).
     @Test fun sibling_base_still_binds() = memScoped {
-        val ms = this
-        val f = with(BoolFilterable) { ms.BoolFilterable() }
+        val f = with(BoolFilterable) { BoolFilterable() }
         assertEquals(7, f.base())
     }
 
     // The un-modelable-param method tally was dropped: referencing `f.tally(...)` here
     // would fail to compile. Asserted structurally by exercising the surviving sibling.
     @Test fun bool_nontype_template_param_method_is_absent() = memScoped {
-        val ms = this
-        val f = with(BoolFilterable) { ms.BoolFilterable() }
+        val f = with(BoolFilterable) { BoolFilterable() }
         assertEquals(7, f.base())
     }
 }

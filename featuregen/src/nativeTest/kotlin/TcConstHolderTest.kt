@@ -20,8 +20,7 @@ import kotlin.test.assertEquals
 class TcConstHolderTest {
     // The const-qualified by-value return binds and the copied value is correct.
     @Test fun const_by_value_return_binds_and_copies() = memScoped {
-        val ms = this
-        val h = with(ConstRetHolder) { ms.ConstRetHolder() }
+        val h = with(ConstRetHolder) { ConstRetHolder() }
         val c = h.makeConst()
         assertEquals(3, c.x)
         assertEquals(4, c.y)
@@ -31,8 +30,7 @@ class TcConstHolderTest {
     // The non-const sibling returning the same copyable struct by value still binds
     // (the fix only touched the Holder target's constness, not the value path).
     @Test fun non_const_sibling_still_binds() = memScoped {
-        val ms = this
-        val h = with(ConstRetHolder) { ms.ConstRetHolder() }
+        val h = with(ConstRetHolder) { ConstRetHolder() }
         val c = h.plain()
         assertEquals(3, c.x)
         assertEquals(4, c.y)
@@ -40,8 +38,7 @@ class TcConstHolderTest {
 
     // The returned value is an independent copy in its own Holder.
     @Test fun const_return_is_independent_copy() = memScoped {
-        val ms = this
-        val h = with(ConstRetHolder) { ms.ConstRetHolder() }
+        val h = with(ConstRetHolder) { ConstRetHolder() }
         val a = h.makeConst()
         val b = h.makeConst()
         a.x = 99

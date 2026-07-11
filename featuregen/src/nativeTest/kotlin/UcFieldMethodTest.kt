@@ -11,8 +11,7 @@ import kotlin.test.assertEquals
 class UcFieldMethodTest {
     // UC-field-rw: write then read back, both fields independent across types.
     @Test fun fields_read_write_independently() = memScoped {
-        val ms = this
-        val w = with(Widget) { ms.Widget() }
+        val w = with(Widget) { Widget() }
         w.count = 11
         assertEquals(11, w.count)
         assertEquals(0.0, w.scale) // unchanged by count write
@@ -23,8 +22,7 @@ class UcFieldMethodTest {
 
     // UC-method-void: reset() mutates state, observable via field read after.
     @Test fun reset_zeroes_fields() = memScoped {
-        val ms = this
-        val w = with(Widget) { ms.Widget__int_double(9, 3.0) }
+        val w = with(Widget) { Widget__int_double(9, 3.0) }
         assertEquals(9, w.count)
         w.reset()
         assertEquals(0, w.count)
@@ -33,8 +31,7 @@ class UcFieldMethodTest {
 
     // UC-method-ret: compute(x) returns count + x; arg + state round-trip.
     @Test fun compute_returns_count_plus_arg() = memScoped {
-        val ms = this
-        val w = with(Widget) { ms.Widget__int_double(10, 0.0) }
+        val w = with(Widget) { Widget__int_double(10, 0.0) }
         assertEquals(15, w.compute(5))
         assertEquals(10, w.compute(0))   // boundary: zero arg
         assertEquals(9, w.compute(-1))   // boundary: negative arg
@@ -42,8 +39,7 @@ class UcFieldMethodTest {
 
     // UC-const-method: scaled() = count * scale, and calling it does not mutate.
     @Test fun scaled_is_pure_const_method() = memScoped {
-        val ms = this
-        val w = with(Widget) { ms.Widget__int_double(4, 2.5) }
+        val w = with(Widget) { Widget__int_double(4, 2.5) }
         assertEquals(10.0, w.scaled())
         // const method must not mutate the receiver
         assertEquals(4, w.count)

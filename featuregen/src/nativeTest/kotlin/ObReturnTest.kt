@@ -16,15 +16,15 @@ import kotlin.test.assertNull
 // heap pointer must be freed explicitly via freePoint (no automatic help).
 class ObReturnTest {
 
-    private fun pt(ms: kotlinx.cinterop.MemScope, x: Int, y: Int): Point2 =
-        with(Point2) { ms.Point2__int_int(x, y) }
+    context(scope: kotlinx.cinterop.MemScope)
+    private fun pt(x: Int, y: Int): Point2 =
+        with(Point2) { Point2__int_int(x, y) }
 
     // OB-return-byval: Point2 clonePoint(const Point2&) → placement-new into a
     // Point2_Holder; fields match input.
     @Test fun return_by_value_matches_input() = memScoped {
-        val ms = this
         with(PassObj) {
-            val q = ms.clonePoint(pt(ms, 3, 4))
+            val q = clonePoint(pt(3, 4))
             assertEquals(3, q.x)
             assertEquals(4, q.y)
         }
@@ -32,10 +32,9 @@ class ObReturnTest {
 
     // Returned object is independent: mutate original, clone unchanged.
     @Test fun return_by_value_is_independent() = memScoped {
-        val ms = this
         with(PassObj) {
-            val p = pt(ms, 1, 2)
-            val q = ms.clonePoint(p)
+            val p = pt(1, 2)
+            val q = clonePoint(p)
             p.x = 99
             p.y = 99
             assertEquals(1, q.x)
@@ -45,11 +44,10 @@ class ObReturnTest {
 
     // Called in a loop — no crash / Holder leak.
     @Test fun return_by_value_in_loop() = memScoped {
-        val ms = this
         with(PassObj) {
             var acc = 0
             for (i in 0 until 50) {
-                val q = ms.clonePoint(pt(ms, i, i + 1))
+                val q = clonePoint(pt(i, i + 1))
                 acc += q.x + q.y
             }
             assertEquals((0 until 50).sumOf { it + (it + 1) }, acc)
@@ -58,9 +56,8 @@ class ObReturnTest {
 
     // OB-return-byval (the makePoint variant — returns by value from primitives).
     @Test fun make_point_returns_by_value() = memScoped {
-        val ms = this
         with(PassObj) {
-            val q = ms.makePoint(12, 34)
+            val q = makePoint(12, 34)
             assertEquals(12, q.x)
             assertEquals(34, q.y)
         }
@@ -69,16 +66,15 @@ class ObReturnTest {
     // OB-return-ptr-borrowed: Point2* borrowGlobal() → non-null wrapper over a
     // static; fields readable; same address each call; no free on scope exit.
     @Test fun borrowed_pointer_readable_and_stable() = memScoped {
-        val ms = this
         with(PassObj) {
-            val a = ms.borrowGlobal()
+            val a = borrowGlobal()
             assertNotNull(a)
             assertEquals(11, a.x)
             assertEquals(22, a.y)
             // calling twice returns the same underlying storage: mutate via one,
             // observe via the other (stable global, single non-owning wrapper).
             a.x = 100
-            val b = ms.borrowGlobal()
+            val b = borrowGlobal()
             assertNotNull(b)
             assertEquals(100, b.x)
             // restore so test order doesn't matter
@@ -90,15 +86,14 @@ class ObReturnTest {
     // Writing a field through the binding mutates the underlying global; read it
     // back via a second call.
     @Test fun reference_return_write_back() = memScoped {
-        val ms = this
         with(PassObj) {
-            val r = ms.globalRef()
+            val r = globalRef()
             assertNotNull(r)
             assertEquals(33, r.x)
             assertEquals(44, r.y)
             r.x = 99
             r.y = 88
-            val r2 = ms.globalRef()
+            val r2 = globalRef()
             assertNotNull(r2)
             assertEquals(99, r2.x)
             assertEquals(88, r2.y)
@@ -112,40 +107,36 @@ class ObReturnTest {
     // non-owning; freed explicitly via freePoint (no auto Holder). Caller is
     // fully responsible for the lifecycle.
     @Test fun owned_pointer_alloc_then_free() = memScoped {
-        val ms = this
         with(PassObj) {
-            val p = ms.allocPoint(7, 8)
+            val p = allocPoint(7, 8)
             assertNotNull(p)
             assertEquals(7, p.x)
             assertEquals(8, p.y)
-            ms.freePoint(p)   // explicit free does not crash
+            freePoint(p)   // explicit free does not crash
         }
     }
 
     @Test fun owned_pointer_many_alloc_free_no_leak_crash() = memScoped {
-        val ms = this
         with(PassObj) {
             for (i in 0 until 100) {
-                val p = ms.allocPoint(i, i)
+                val p = allocPoint(i, i)
                 assertNotNull(p)
                 assertEquals(i, p.x)
-                ms.freePoint(p)
+                freePoint(p)
             }
         }
     }
 
     // OB-null-return: Point2* maybePoint(bool) → nullability preserved.
     @Test fun null_return_when_false() = memScoped {
-        val ms = this
         with(PassObj) {
-            assertNull(ms.maybePoint(false))
+            assertNull(maybePoint(false))
         }
     }
 
     @Test fun non_null_return_when_true() = memScoped {
-        val ms = this
         with(PassObj) {
-            val p = ms.maybePoint(true)
+            val p = maybePoint(true)
             assertNotNull(p)
             assertEquals(55, p.x)
             assertEquals(66, p.y)
@@ -153,10 +144,9 @@ class ObReturnTest {
     }
 
     @Test fun null_path_repeatable() = memScoped {
-        val ms = this
         with(PassObj) {
-            repeat(20) { assertNull(ms.maybePoint(false)) }
-            assertNotNull(ms.maybePoint(true))
+            repeat(20) { assertNull(maybePoint(false)) }
+            assertNotNull(maybePoint(true))
             Unit
         }
     }

@@ -12,9 +12,8 @@ class OpConvertTest {
     // toDouble() returns the C++ conversion result (the squared length), leaving the
     // receiver unchanged.
     @Test fun to_double_returns_conversion() = memScoped {
-        val ms = this
         with(Vec2) {
-            val v = ms.Vec2__double_double(3.0, 4.0)
+            val v = Vec2__double_double(3.0, 4.0)
             // 3*3 + 4*4 == 25
             assertEquals(25.0, v.toDouble())
             // receiver unchanged
@@ -22,11 +21,11 @@ class OpConvertTest {
             assertEquals(4.0, v.y)
 
             // zero-vector converts to 0.0
-            val zero = ms.Vec2()
+            val zero = Vec2()
             assertEquals(0.0, zero.toDouble())
 
             // negative components square to positive
-            val n = ms.Vec2__double_double(-1.0, -2.0)
+            val n = Vec2__double_double(-1.0, -2.0)
             assertEquals(5.0, n.toDouble())
         }
     }

@@ -13,23 +13,21 @@ import kotlin.test.assertEquals
 // usable. The fields/methods of each are distinct.
 class NsCollisionTest {
     @Test fun color_tag_distinct_from_flavor_tag() = memScoped {
-        val ms = this
-        val c = with(Tag) { ms.Tag__int_int_int(10, 20, 30) }
+        val c = with(Tag) { Tag__int_int_int(10, 20, 30) }
         assertEquals(10, c.r)
         assertEquals(20, c.g)
         assertEquals(30, c.b)
         assertEquals(60, c.sum())
 
-        val f = with(FlavorTag) { ms.Tag__int_int(4, 5) }
+        val f = with(FlavorTag) { Tag__int_int(4, 5) }
         assertEquals(4, f.sweet)
         assertEquals(5, f.sour)
         assertEquals(9, f.total())
     }
 
     @Test fun both_default_construct_independently() = memScoped {
-        val ms = this
-        val c = with(Tag) { ms.Tag() }
-        val f = with(FlavorTag) { ms.Tag() }
+        val c = with(Tag) { Tag() }
+        val f = with(FlavorTag) { Tag() }
         assertEquals(0, c.r)
         assertEquals(0, f.sweet)
     }
