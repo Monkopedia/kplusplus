@@ -543,6 +543,7 @@ private class ModelBuilder(private val memScope: MemScope) {
         return WrappedMethod(name, returnType, methodType).also {
             it.isConst = isConst
             it.isVirtual = method.isVirtual()
+            it.isDefaulted = method.isDefaulted()
             it.rangeElementType = range?.second
             it.addArgs(method.asFunctionDecl())
         }

@@ -58,6 +58,7 @@ class ModelIoTest {
         )
         method.isVirtual = true
         method.isConst = true
+        method.isDefaulted = true
         method.returnsPairSecond = true
         method.returnViaMemberCall = ".str()"
         method.rangeElementType = "clang::Decl"
@@ -162,6 +163,7 @@ class ModelIoTest {
         assertEquals("const std::string&", method.returnType.toString())
         assertTrue(method.isVirtual)
         assertTrue(method.isConst)
+        assertTrue(method.isDefaulted)
         assertTrue(method.returnsPairSecond)
         assertEquals(".str()", method.returnViaMemberCall)
         assertEquals("clang::Decl", method.rangeElementType)

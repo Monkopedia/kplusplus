@@ -7,10 +7,13 @@ import kotlin.test.assertTrue
 
 // UC-static-method / UC-operator-eq / UC-operator-plus: the static factory
 // `make(count_)` returning a Widget by value (placement-new into a Holder), and
-// the two operators. NOTE the operator mapping: `operator==` maps to a real
-// Kotlin `equals` override (so `a == b` works) plus an always-generated
-// `hashCode`. `operator+` maps to a real Kotlin `operator fun plus`, so `a + b`
-// works.
+// the two operators. NOTE the operator mapping: Widget's `operator==` is
+// HAND-WRITTEN, so it can't be proven memberwise and maps to an IDENTITY Kotlin
+// `equals` (backing-pointer equality; hashCode is ptr.hashCode()) with the C++
+// value comparison exposed as `valueEquals` — NOT a delegating `==`. (A C++20
+// `= default`-ed `operator==` would instead keep the delegating `equals`; see
+// OpRelationalTest's VecEq.) `operator+` maps to a real Kotlin `operator fun
+// plus`, so `a + b` works.
 class UcStaticOpTest {
     // UC-static-method: static make() returns a constructed Widget by value.
     @Test fun static_make_returns_widget() = memScoped {
@@ -21,20 +24,24 @@ class UcStaticOpTest {
         assertEquals(1.0, w.scale) // make() fixes scale to 1.0
     }
 
-    // UC-operator-eq: equal widgets compare true, differing compare false.
-    // Surfaces as idiomatic Kotlin `a == b` (equals override), with a paired
-    // hashCode that agrees for equal instances.
+    // UC-operator-eq: Widget's `operator==` is hand-written, so Kotlin `==` is IDENTITY
+    // (distinct instances are never `==`), and the C++ field comparison is reachable via
+    // `valueEquals`. hashCode is identity (ptr.hashCode()), so the contract still holds.
     @Test fun equality_operator_compares_fields() = memScoped {
         with(Widget) {
             val a = Widget__int_double(3, 1.5)
             val b = Widget__int_double(3, 1.5)
             val c = Widget__int_double(3, 2.0) // differing scale
             val d = Widget__int_double(4, 1.5) // differing count
-            assertTrue(a == b)
-            assertFalse(a == c)
-            assertFalse(a == d)
-            // equal objects must hash equal
-            assertEquals(a.hashCode(), b.hashCode())
+            // Kotlin `==` is identity: same value, different instance ⇒ NOT equal.
+            assertTrue(a == a)
+            assertFalse(a == b)
+            // The C++ value comparison stays reachable via valueEquals.
+            assertTrue(a.valueEquals(b))
+            assertFalse(a.valueEquals(c))
+            assertFalse(a.valueEquals(d))
+            // equals/hashCode contract: an object hashes equal to itself.
+            assertEquals(a.hashCode(), a.hashCode())
         }
     }
 

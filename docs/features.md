@@ -195,21 +195,29 @@ All rows 🟢 (scaffolded by an orchestrated subagent; `UcConstructTest`,
 | UC-method-ret | value-returning method | `int compute(int) const` | `w.compute(5)` | • return reflects state+arg; arg round-trips | 🟢 | |
 | UC-const-method | const method | `double scaled() const` | `w.scaled()` | • callable; does not mutate | 🟢 | const `this` wrapped |
 | UC-static-method | static factory | `static Widget make(int)` | `with(Widget){ ms.make(7) }` | • returns a constructed Widget by value; fields correct | 🟢 | return-by-value (Holder placement-new) |
-| UC-operator-eq | equality operator | `bool operator==(const Widget&) const` | `a eq b` | • equal→true, differing→false | 🟢 | **maps to `infix fun eq`, NOT Kotlin `==`** — asymmetric with `operator+` |
+| UC-operator-eq | equality operator (hand-written) | `bool operator==(const Widget&) const` | `a.valueEquals(b)` | • value equality via `valueEquals`; Kotlin `==` is identity | 🟢 | hand-written `==` → IDENTITY `equals`/`hashCode` + `valueEquals` (see the equals/hashCode note) |
 | UC-operator-plus | arithmetic operator (by value) | `Widget operator+(const Widget&) const` | `a + b` | • sum combines fields; operands unchanged; independent result | 🟢 | maps to a real `operator fun plus` |
 
 **Note:** operator mapping is asymmetric — `operator+` becomes Kotlin `operator fun plus`
-(`a + b` works), but `operator==` currently becomes `infix fun eq` (not `==`/`equals`).
+(`a + b` works). `operator==`'s mapping is gated on whether it is C++20 **defaulted**.
 
-**`operator==` → `equals` + `hashCode` (BUILT 🟢).** `operator==` now maps to a real
-Kotlin `equals(other: Any?)` override (`other is T && T_op_eq(ptr, other.ptr)`), so
-`==` works idiomatically — unconditionally (a conditional `equals`-vs-`eq` mapping was
-rejected as confusing). An `equals`-bearing class always also gets a `hashCode()` that
-folds its public fields (`return 0` when none) to honour the contract — a
-poor-distribution hashCode is still contract-*correct* as it's derived from the same
-state `==` compares (equal ⇒ equal hash). (`operator<` → `compareTo` is now built: a
-single `operator<` synthesizes the whole ordering — `this<o → -1`, `o<this → 1`, else
-`0` — and Kotlin derives `>`/`>=`/`<=`. See OP-compare.)
+**`operator==` → `equals` + `hashCode`, gated on defaulted-ness (BUILT 🟢).** The mapping
+depends on whether the C++ `operator==` is `= default`:
+
+- **Defaulted `==`** (`bool operator==(const T&) const = default;`) — the compiler
+  guarantees a MEMBERWISE comparison over all members, so it maps to a real Kotlin
+  `equals(other: Any?)` override (`other is T && T_op_eq(ptr, other.ptr)`) PAIRED with a
+  `hashCode()` that folds the public fields (`return 0` when none). Equal objects have all
+  members equal, so the fold agrees — the equals/hashCode contract is provably sound.
+- **Hand-written `==`** — can't be statically classified as memberwise (it may compare only
+  a subset of state), so binding it to Kotlin `equals` against a field-fold hashCode would
+  break the contract. Instead: `equals` is IDENTITY on the backing pointer, `hashCode()` is
+  `ptr.hashCode()`, and the C++ comparison stays reachable as `valueEquals(other: T): Boolean`
+  (delegating to the same `_op_eq` C wrapper the delegating `equals` would have used).
+
+(`operator<` → `compareTo` is now built: a single `operator<` synthesizes the whole
+ordering — `this<o → -1`, `o<this → 1`, else `0` — and Kotlin derives `>`/`>=`/`<=`. See
+OP-compare.)
 
 ## Operators on user value types
 
@@ -220,7 +228,8 @@ operators (see `Operators.kt`); the gaps are `Vec2&`-returning compound ops and
 
 | ID | C++ | Generated Kotlin | Status | Notes |
 |---|---|---|---|---|
-| OP-eq | `operator==` | `override fun equals(other: Any?)` + `override fun hashCode()` | 🟢 | idiomatic `a == b`; `equals` does `other is T && T_op_eq(...)`; an always-generated `hashCode` folds the public fields (`return 0` if none) to honour the contract |
+| OP-eq | `operator==` (hand-written) | `override fun equals` (IDENTITY on ptr) + `override fun hashCode` (`ptr.hashCode()`) + `valueEquals(o)` | 🟢 | Vec2's `==` is hand-written → Kotlin `==` is identity; the C++ value comparison is `valueEquals`; contract-sound. `OpRelationalTest` |
+| OP-eq-defaulted | `operator== = default` | `override fun equals(other: Any?)` (delegating) + `override fun hashCode()` (field-fold) | 🟢 | a C++20 defaulted `==` is memberwise, so `a == b` runs the C++ `==` and the field-fold hashCode is sound (equal ⇒ equal hash). VecEq, `OpRelationalTest` |
 | OP-neq | `operator!=` | `infix fun neq(o): Boolean` | 🟢 | |
 | OP-plus | `operator+` | `operator fun plus(o): Vec2` | 🟢 | real `a + b`; return-by-value via Holder |
 | OP-minus | `operator-` (binary) | `operator fun minus(o): Vec2` | 🟢 | |

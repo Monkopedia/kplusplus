@@ -1,5 +1,6 @@
 import kotlinx.cinterop.memScoped
 import root.Vec2
+import root.VecEq
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -7,25 +8,53 @@ import kotlin.test.assertTrue
 
 // OP-eq / OP-neq / OP-compare / OP-index: comparison + subscript operators.
 //
-// NAMING NOTE: krapper maps C++ operator== to a real Kotlin `equals` override
-// (so idiomatic `a == b` works), and ALWAYS pairs it with a `hashCode` override
-// derived from the same public fields (equal ⇒ equal hash). C++ operator< maps
-// to a real Kotlin `operator fun compareTo(other): Int`, synthesized from the
-// single `<` by calling the `_op_lt` C wrapper twice with swapped operands, so
-// idiomatic `a < b`, `a > b`, `compareTo`, and `sorted()` all work. operator!=
-// -> `neq` remains an INFIX METHOD (no Kotlin `!=`). operator[] DOES map to
-// `operator fun get(i: Int): Double`, so real Kotlin `v[i]` subscript works
-// (returns a primitive Double directly).
+// NAMING NOTE: krapper's mapping of C++ operator== depends on whether it is a
+// C++20 DEFAULTED (`= default`) comparison or HAND-WRITTEN:
+//  * DEFAULTED == (VecEq) is guaranteed memberwise over all members, so it maps
+//    to a real Kotlin `equals` override (idiomatic `a == b`) PAIRED with a
+//    field-fold `hashCode` (equal ⇒ equal hash) — the contract is sound.
+//  * HAND-WRITTEN == (Vec2) can't be proven memberwise, so binding it to Kotlin
+//    `equals` would risk the equals/hashCode contract. It instead gets an
+//    IDENTITY `equals` (backing-pointer equality; hashCode is ptr.hashCode()),
+//    and the C++ value comparison stays reachable as `valueEquals(other)`.
+// C++ operator< maps to a real Kotlin `operator fun compareTo(other): Int`,
+// synthesized from the single `<` by calling the `_op_lt` C wrapper twice with
+// swapped operands, so idiomatic `a < b`, `a > b`, `compareTo`, and `sorted()`
+// all work. operator!= -> `neq` remains an INFIX METHOD (no Kotlin `!=`).
+// operator[] DOES map to `operator fun get(i: Int): Double`, so real Kotlin
+// `v[i]` subscript works (returns a primitive Double directly).
 class OpRelationalTest {
 
-    // OP-eq: identical Vec2 compare true via `==`; differing in x or y compare
-    // false; self-comparison true. Equal instances must share a hashCode.
-    @Test fun eq_compares_components() = memScoped {
+    // OP-eq (hand-written ==): Vec2's `operator==` is hand-written, so Kotlin `==`
+    // is IDENTITY on the backing pointer — two distinct-but-equal-valued instances
+    // are NOT `==`, but ARE `valueEquals`. hashCode is identity (ptr.hashCode()), so
+    // the equals/hashCode contract still holds: `a == a` ⇒ same hash.
+    @Test fun eq_is_identity_for_handwritten() = memScoped {
         with(Vec2) {
             val a = Vec2__double_double(1.0, 2.0)
-            val b = Vec2__double_double(1.0, 2.0)
-            val diffX = Vec2__double_double(9.0, 2.0)
-            val diffY = Vec2__double_double(1.0, 9.0)
+            val sameValue = Vec2__double_double(1.0, 2.0)
+            val diff = Vec2__double_double(9.0, 2.0)
+            // Kotlin `==` is identity: same value, different instance ⇒ NOT equal.
+            assertTrue(a == a) // self-comparison (same backing pointer)
+            assertFalse(a == sameValue)
+            assertFalse(a == diff)
+            // The C++ value comparison is still reachable via valueEquals.
+            assertTrue(a.valueEquals(sameValue))
+            assertFalse(a.valueEquals(diff))
+            // equals/hashCode contract: an object hashes equal to itself.
+            assertEquals(a.hashCode(), a.hashCode())
+        }
+    }
+
+    // OP-eq-defaulted: VecEq's `operator== = default` IS memberwise over all members,
+    // so Kotlin `==` runs the C++ comparison and a field-fold hashCode agrees — two
+    // distinct-but-equal-valued instances ARE `==` and hash equal.
+    @Test fun eq_defaulted_compares_components() = memScoped {
+        with(VecEq) {
+            val a = VecEq__double_double(1.0, 2.0)
+            val b = VecEq__double_double(1.0, 2.0)
+            val diffX = VecEq__double_double(9.0, 2.0)
+            val diffY = VecEq__double_double(1.0, 9.0)
             assertTrue(a == b)
             assertTrue(a == a) // self-comparison
             assertFalse(a == diffX)
@@ -35,18 +64,19 @@ class OpRelationalTest {
         }
     }
 
-    // OP-neq: differing instances return true; identical return false; logically
-    // consistent with `==` (neq == !equals).
-    @Test fun neq_is_inverse_of_eq() = memScoped {
+    // OP-neq: differing instances return true; identical return false. `neq` is Vec2's
+    // C++ `operator!=` (a VALUE comparison, infix method), so it is the inverse of the
+    // VALUE comparison `valueEquals` — NOT of Kotlin's identity `==` (see eq test).
+    @Test fun neq_is_inverse_of_valueEquals() = memScoped {
         with(Vec2) {
             val a = Vec2__double_double(1.0, 2.0)
             val same = Vec2__double_double(1.0, 2.0)
             val diff = Vec2__double_double(1.0, 3.0)
             assertTrue(a neq diff)
             assertFalse(a neq same)
-            // consistency with ==
-            assertEquals(a == same, !(a neq same))
-            assertEquals(a == diff, !(a neq diff))
+            // consistency with the value comparison
+            assertEquals(a.valueEquals(same), !(a neq same))
+            assertEquals(a.valueEquals(diff), !(a neq diff))
         }
     }
 

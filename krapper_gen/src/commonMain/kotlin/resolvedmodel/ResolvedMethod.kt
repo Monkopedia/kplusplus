@@ -179,6 +179,14 @@ open class ResolvedMethod(
     // primary-constructor param); also serialized for the model round-trip.
     var isVirtual: Boolean = false
 
+    // Mirror of WrappedMethod.isDefaulted: true for a C++20 `= default`-ed method. Only
+    // consulted for a defaulted `operator==`, which the compiler guarantees is a memberwise
+    // comparison over ALL members — KotlinWriter gates the equals/hashCode contract on it
+    // (defaulted `==` → delegating equals + field-fold hashCode; hand-written `==` →
+    // identity contract on the backing pointer + a `valueEquals` for the C++ comparison).
+    // A `var` so resolve()/copy() propagate it; serialized for the model round-trip.
+    var isDefaulted: Boolean = false
+
     // Mirror of WrappedMethod.returnsPairSecond: the underlying C++ method returns
     // `std::pair<iterator, bool>` whose iterator half can't be wrapped, so the
     // returnType has been rewritten to `bool` and CppWriter must emit the call's
@@ -222,6 +230,7 @@ open class ResolvedMethod(
     ).also {
         it.parent = parent
         it.isVirtual = isVirtual
+        it.isDefaulted = isDefaulted
         it.returnsPairSecond = returnsPairSecond
         it.returnViaMemberCall = returnViaMemberCall
         it.rangeElementType = rangeElementType
