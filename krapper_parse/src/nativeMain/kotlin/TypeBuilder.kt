@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import clang.AccessSpecifier
 import clang.CXXRecordDecl
 import clang.Decl
 import clang.EnumDecl
@@ -81,6 +82,19 @@ private fun WrappedType.maybeConst(isConst: Boolean): WrappedType =
 // Kotlin form is the platform-correct `platform.posix.<name>`, preserved by NAME instead
 // of being collapsed to their underlying integer.
 private val C_ALIAS_TYPEDEFS = setOf("size_t", "ssize_t", "ptrdiff_t", "intptr_t", "wchar_t")
+
+// #123: a nested tag type (enum/record) declared `protected`/`private` cannot be NAMED
+// from the wrapper's free-function context, so any signature that references it — e.g.
+// `clang::ASTContext::getPredefinedSugarType(clang::Type::PredefinedSugarKind)`, whose
+// param is the protected enum `clang::Type::PredefinedSugarKind` — would emit a cast to
+// that inaccessible type and fail to compile. Treat such a leaf as UNRESOLVABLE so the
+// resolver drops the whole method through its existing "couldn't resolve type" path
+// (ModelResolution's notifyFailed, DropPhase.RESOLVE), the same as any other unbindable
+// type — rather than requiring a manual per-symbol removeMethod fixup on every LLVM bump.
+// AS_none (top-level, non-member tags) and AS_public members stay bindable; the check
+// mirrors ModelBuilder's private/protected member filter (Decl::getAccess()).
+private fun Decl.isAccessibleTagType(): Boolean =
+    getAccess() != AccessSpecifier.AS_private && getAccess() != AccessSpecifier.AS_protected
 
 /**
  * Decode [type]'s structure into a WrappedType, mirroring the libclang front-end's
@@ -265,6 +279,8 @@ fun buildWrappedType(type: QualType): WrappedType {
         // template-element match — see clang_slice.h).
         val qualified = qualifiedName(record.asNamedDecl())
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+        // #123: an inaccessible nested record can't be named from the wrapper — drop it.
+        if (!record.asDecl().isAccessibleTagType()) return UNRESOLVABLE
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
@@ -283,6 +299,9 @@ fun buildWrappedType(type: QualType): WrappedType {
         val enumDecl = canonTy.getAsTagDecl()
             ?.let { Decl(it.ptr) }
             ?.asEnumDecl() ?: return UNRESOLVABLE
+        // #123: a protected/private nested enum (e.g. clang::Type::PredefinedSugarKind)
+        // can't be named from the wrapper — drop any method whose signature references it.
+        if (!enumDecl.asDecl().isAccessibleTagType()) return UNRESOLVABLE
         return buildEnumType(enumDecl).maybeConst(isConst)
     }
     // Builtin (and any remaining) leaf: createForType's `else -> WrappedType(spelling)`,

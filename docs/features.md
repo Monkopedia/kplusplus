@@ -290,6 +290,7 @@ A multi-namespace probe (`NsSingleTest`/`NsNestedTest`/`NsNestedClassTest`/
 | NS-nested-class | `Outer::Inner` | `package outer`, class `Inner`, `import outer.Inner`; `Outer` stays `root.Outer` | 🟢 | the outer class name becomes a package segment — so two `Outer::Inner` separate naturally (the review's "collide in root" prediction was wrong) |
 | NS-collision | `acolor::Tag` / `bflavor::Tag` | distinct packages + distinct C prefixes | 🟢 | no link/runtime clash; same-file Kotlin use needs an import alias (`import bflavor.Tag as FlavorTag`) |
 | NS-anon | anonymous `namespace { Hidden }` | (skipped — not bound) | 🟢 | members are now skipped (TU-internal linkage, not referenceable across a C ABI) instead of emitting an invalid empty `package ` line — `WrappedElement.map` returns null for an empty-spelling namespace |
+| TI-inaccessible | public method over a `protected`/`private` nested type — `int use(HiddenMode)` / `HiddenTag make()` | (method skipped — not bound) | 🟢 | a nested tag type declared `protected`/`private` can't be named from the free-function wrapper (the LLVM-22 repro: `ASTContext::getPredefinedSugarType(clang::Type::PredefinedSugarKind)`, param is a protected enum). `TypeBuilder` resolves such a leaf to `UNRESOLVABLE`, so the method drops through the same `notifyFailed` path as any unbindable type; sibling methods over accessible types still bind. Replaces a manual per-symbol `removeMethod` fixup. `TiInaccessibleTypeTest` (#123) |
 
 ## Inheritance & virtual dispatch
 
