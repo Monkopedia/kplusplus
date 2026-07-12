@@ -543,7 +543,11 @@ private class ModelBuilder(private val memScope: MemScope) {
         return WrappedMethod(name, returnType, methodType).also {
             it.isConst = isConst
             it.isVirtual = method.isVirtual()
-            it.isDefaulted = method.isDefaulted()
+            // Use isExplicitlyDefaulted (user wrote `= default`), NOT isDefaulted: the latter
+            // also covers compiler-implicit defaulting, which never applies to a user-declared
+            // operator==. Only an explicit `= default`-ed operator== should take the delegating
+            // equals + field-fold hashCode path; hand-written == stays on the identity path.
+            it.isDefaulted = method.isExplicitlyDefaulted()
             it.rangeElementType = range?.second
             it.addArgs(method.asFunctionDecl())
         }
