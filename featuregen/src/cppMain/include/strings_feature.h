@@ -871,4 +871,29 @@ struct RefHolder {
     int note;
 };
 
+// T-inaccessible (#123): a public method whose SIGNATURE references a protected/private
+// nested type can't be bound — the generated wrapper is a free function, so it can't name
+// the type to cast to it (the LLVM-22 repro: `clang::ASTContext::getPredefinedSugarType`
+// takes the protected enum `clang::Type::PredefinedSugarKind`). Skip-not-crash: the
+// generator DROPS such a method (its signature type resolves to UNRESOLVABLE), while
+// sibling methods with accessible signatures still bind. Two inaccessible kinds are
+// covered — a protected nested ENUM and a private nested STRUCT — plus a method over the
+// accessible top-level `Color` enum as a control that must still bind.
+struct AccessProbe {
+protected:
+    enum HiddenMode { HM_A = 1, HM_B = 2 };   // protected nested enum
+private:
+    struct HiddenTag { int t; };              // private nested struct
+public:
+    AccessProbe() {}
+    // DROPPED: param is the protected enum (can't be named from the wrapper).
+    int useHiddenEnum(HiddenMode m) const { return (int)m; }
+    // DROPPED: return type is the private nested struct.
+    HiddenTag makeHiddenTag() const { return HiddenTag{7}; }
+    // BOUND: param is the accessible top-level `Color` enum (control for the drop).
+    int useColor(Color c) const { return (int)c; }
+    // BOUND: a plain int accessor sibling, always bindable.
+    int plain() const { return 99; }
+};
+
 #endif

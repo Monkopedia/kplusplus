@@ -225,12 +225,17 @@ kplusplus {
         removeMethod("llvm_APSInt_op_decrement")
         // #122 (self-hosting spike): LLVM-22 added clang::ASTContext::getPredefinedSugarType,
         // whose parameter is the PROTECTED enum clang::Type::PredefinedSugarKind. ASTContext
-        // is in the allowlist, so krapper_gen binds the method and emits a cast to the
-        // protected enum — `clang::Type::PredefinedSugarKind KD_cast = ...` — which the
-        // wrapper compile rejects ("protected member of 'clang::Type'"). The bridge doesn't
-        // need it (nothing here calls getPredefinedSugarType); remove it by uniqueCName until
-        // krapper_gen learns to skip methods over inaccessible types. The committed seed
-        // predates this LLVM surface, so it never carried the method.
+        // is in the allowlist, so a wrapper cast to the protected enum —
+        // `clang::Type::PredefinedSugarKind KD_cast = ...` — is rejected ("protected member
+        // of 'clang::Type'").
+        //
+        // #123 makes this durable: TypeBuilder now resolves a protected/private nested tag
+        // type to UNRESOLVABLE, so a NEWLY built krapper_parse auto-drops this method (and
+        // any future inaccessible-signature method) with no per-symbol fixup. This fixup is
+        // retained ONLY as a bootstrap crutch: :krapper_parse:kplusplusSync self-generates
+        // krapper_parse's own bindings with the PINNED stage-0 tool binary, which predates
+        // the #123 fix — without the removeMethod that stale tool re-emits the broken cast
+        // and the sync aborts. Drop this line once the stage-0 tool is bumped past #123.
         removeMethod("clang_ASTContext_get_predefined_sugar_type")
     }
     // Materialize the range returns the walk iterates. Brick 3 walks members through
