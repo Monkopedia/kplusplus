@@ -439,7 +439,9 @@ private fun WrappedClass.referencesAnyContainer(containerKeys: Set<String>): Boo
             is WrappedMethod ->
                 child.returnType.mentionsContainer() ||
                     child.args.any { it.type.mentionsContainer() }
+
             is WrappedField -> child.type.mentionsContainer()
+
             else -> false
         }
     }
