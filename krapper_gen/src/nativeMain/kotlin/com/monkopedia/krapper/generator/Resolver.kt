@@ -212,6 +212,22 @@ suspend fun List<WrappedElement>.resolveForcing(
     val forcingStructs = classes.filter { it.type.toString().contains("KrapperForce_") }
     val boundClasses = classes.filter { it.type.toString().contains("KrapperForce_").not() }
 
+    // The container specialization(s) whose materialization pass 3 exists to propagate into
+    // the bound set. Three robust sources, all in the SAME rendered type-string form a member
+    // return/arg type carries (so a plain substring scan matches):
+    //   * the forcing struct's `value` member type — the EXACT container this request forces
+    //     (e.g. `std::vector<clang::Decl*>`), taken from the model rather than the raw spec so
+    //     it matches the render form of a range accessor's rewritten `std::vector<Elem*>`
+    //     return byte-for-byte;
+    //   * `forcingTargets` — the raw requested spec(s) (belt-and-suspenders);
+    //   * `forcedContainerKeys` — the resolved container renders forced by PRIOR requests,
+    //     whose range accessors pass 3 also recovers cumulatively (see the doc on this param).
+    val containerMatchKeys: Set<String> =
+        forcingStructs
+            .flatMap { it.children.filterIsInstance<WrappedField>() }
+            .map { it.type.toString() }
+            .toSet() + forcingTargets + forcedContainerKeys
+
     // ONE context, ONE tracker, shared across all passes. `withClasses` seeds the
     // tracker's class map with every scoped class (incl. the forcing struct) and is
     // called EXACTLY ONCE so the namer (reset by both withClasses and withPolicy) is
@@ -351,7 +367,26 @@ suspend fun List<WrappedElement>.resolveForcing(
     val pass3 = baseContext
         .withPolicyKeepingNamer(policy)
         .copy(mappingCache = mutableMapOf())
-    boundClasses.forEach {
+    // Pass 3's ONLY output effect is recovering a member (range accessor / direct return / arg)
+    // whose type IS a just-forced container and so was dropped in pass 1 when the container was
+    // still unbound. A bound class with NO member referencing any forced container re-resolves
+    // to the SAME bytes pass 1 already produced (same policy, same tracker; the newly-bound
+    // container it never mentions can't change it), which the writer's last-wins dedup discards
+    // — so re-walking it is pure cost with zero output effect. Restrict the evict+fresh-cache
+    // rebuild to the container-CONSUMER set (structural type-string scan, no resolution). At
+    // featuregen scale this is the same handful of classes the loop already recovered
+    // (`RangeHolder`, `DeclContext`, …), so output is unchanged by construction; at broad Clang
+    // scale it is a few dozen classes instead of thousands. A non-consumer that a consumer's
+    // re-resolution references is still rebuilt on-demand via the tracker under this SAME pass-3
+    // policy (`canResolve`), so consumers see identical inputs; a non-consumer referenced by
+    // nobody is simply absent from this request's returned set, but its main-resolve copy (the
+    // bytes this pass would have reproduced) survives the caller's last-wins dedup unchanged.
+    // This restriction is applied ONLY to pass 3, never pass 1: pass 1's eager resolution under
+    // the BASE policy is what attributes each bound class its correct (IGNORE- vs INCLUDE-)policy
+    // shape and seeds the shared tracker so pass 2's container force stays bounded — skipping a
+    // class there could shift its first resolution into pass 2's INCLUDE_MISSING and change output.
+    val containerConsumers = boundClasses.filter { it.referencesAnyContainer(containerMatchKeys) }
+    containerConsumers.forEach {
         pass3.resolve(it.type)
     }
 
@@ -380,6 +415,34 @@ suspend fun List<WrappedElement>.resolveForcing(
             "(re-resolved ${resolved.size} total)"
     )
     return resolved
+}
+
+/**
+ * True when any member of this bound class references one of the just-forced [containerKeys] in
+ * its return type, an argument type, or a field type — i.e. it is a "container consumer" whose
+ * pass-3 re-resolution can actually recover a member that pass 1 dropped while the container was
+ * unbound (a rewritten range accessor's `std::vector<Elem*>` return, a direct container return,
+ * or a container argument). The match is a purely structural substring scan of the rendered
+ * member type-strings (no resolution, order-independent): a container spec like
+ * `std::vector<clang::Decl*>` appears verbatim inside the rendered member type, so a class whose
+ * members never mention any forced container cannot gain anything from pass 3 and is skipped. An
+ * empty [containerKeys] set (no container to propagate) yields no consumers.
+ */
+private fun WrappedClass.referencesAnyContainer(containerKeys: Set<String>): Boolean {
+    if (containerKeys.isEmpty()) return false
+    fun WrappedType.mentionsContainer(): Boolean {
+        val rendered = toString()
+        return containerKeys.any { rendered.contains(it) }
+    }
+    return children.any { child ->
+        when (child) {
+            is WrappedMethod ->
+                child.returnType.mentionsContainer() ||
+                    child.args.any { it.type.mentionsContainer() }
+            is WrappedField -> child.type.mentionsContainer()
+            else -> false
+        }
+    }
 }
 
 /**
