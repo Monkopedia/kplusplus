@@ -237,6 +237,241 @@ instantiation requests the same ~3221 classes are re-resolved from scratch N tim
 - **Verdict:** viable as a *complement*, but it still pays O(bound) per request for the
   classes that genuinely change nothing.
 
+> The bullets above were the original terse sketch. The section below is the **PR-#156
+> follow-up investigation** that expands (b) into a concrete, safety-verified design — because
+> after #156 restricted pass 3, **pass 1 re-resolving every bound class on every request is
+> the remaining dominant cost**, and cross-request memoization of pass 1 is the named lever.
+
+#### (b.1) What pass 1 actually is, and why it re-runs N times
+
+Each `requestInstantiation` (IndexedServiceImpl.kt:134) calls `loadForcingModel(path)`
+(Parsing.kt:131), which **`ModelIo.decodeFromString`s a FRESH `WrappedTU`** (a brand-new
+object graph — the forcing TU is re-decoded from JSON per request; there is no cursor→element
+memo across loads, Parsing.kt:105 comment). `resolveForcing` then builds a **fresh
+`ResolveTracker` via `withClasses`** (Resolver.kt:252, `ResolveContext.withClasses` at
+Resolver.kt:566 constructs `ResolveTracker(...)` anew and resets the `NameHandler`). So across
+N instantiation requests, pass 1 (Resolver.kt:267-277) re-resolves the *same base-bound class
+set* — re-decoded, fresh-tracker, from scratch — **N times**. That is the O(bound × N) cost
+`#156` left on the table (it only removed the *second* O(bound) walk, pass 3, and only for
+non-consumers).
+
+#### (b.2) Is a bound class's pass-1 resolution a pure function of the class? — **NO.** (hazard #3)
+
+`WrappedClass.resolve` (ModelResolution.kt:163) is **not** a pure projection of the class. Two
+concrete impurities:
+
+1. **It mutates the model element in place.** `modifyMethodsIfNeeded` (ModelResolution.kt:262)
+   calls `removeChild` (const-overload dedup, hidden-delete dtor removal), `addChild` (synthetic
+   default ctor), and flips `metadata.hasConstructor/hasDefaultConstructor/hasCopyConstructor`.
+   On the *fresh* per-request TU copy this is harmless (each request mutates its own copy), but a
+   memo that cached and **reused a `ResolvedClass` built against one request's WrappedClass**
+   would be aliasing state whose provenance is a now-discarded TU. The memo must therefore key on
+   and return the **`ResolvedClass` value** (already fully materialized, no back-reference to the
+   mutated `WrappedClass`), never re-run `resolve` against a cached `WrappedClass`.
+
+2. **Its output depends on the shared tracker, not just the class.** Every member type flows
+   through `resolverContext.resolve → map → typeMapping → tracker.canResolve` (Resolver.kt:519,
+   677). Under **IGNORE_MISSING** a member `C::m() -> D` keeps `m` iff `canResolve(D)` — i.e. `D`
+   is in `tracker.classes`/`resolvedClasses` at that instant. Under **INCLUDE_MISSING**,
+   `canResolve` being false triggers **on-demand materialization** (Resolver.kt:707-763) that
+   **mutates the shared tracker** (`resolvedClasses[...] =`, `classes[...] =`) and pulls sibling
+   classes in. So the bytes `C` resolves to are a function of *tracker contents at resolve time*,
+   which is a function of *request order and which siblings/containers are present*.
+
+**Verdict on hazard #3:** resolve-once-reuse is **not** a clean function of the class alone. A
+safe memo must (a) store the finished `ResolvedClass` value, and (b) only be consulted when the
+tracker state that would drive `canResolve` for that class's members is **provably identical** to
+the state under which the cached value was produced. That provability is the whole game — see
+(b.3)/(b.4).
+
+#### (b.3) Which classes are request-INVARIANT vs request-DEPENDENT? (hazard #1)
+
+Partition `boundClasses` by the `referencesAnyContainer` predicate already shipped in #156
+(Resolver.kt:431) — but computed over the **cumulative** container set for the *whole run*
+(every `forcingTargets` ∪ the final `forcedContainerKeys`), not one request's:
+
+- **Container consumers** (member return/arg/field type-string mentions any forced container).
+  These are **request-DEPENDENT by construction**: consumer `C` gains its range accessor
+  `decls() -> vector<Decl*>` only in the request(s) whose tracker holds `vector<Decl*>`, and
+  loses it (dropped in pass 1, not recovered in pass 3) in requests that force a *different*
+  container. This is exactly the multi-consumer hazard the task names: `CXXRecordDecl` has
+  `methods()`, `bases()`, `decls()` over three different containers and resolves to a **different
+  method set per request**. The cumulative-recovery machinery (`forcedContainerKeys` seeding
+  `otherResolved`, Resolver.kt:353-366, IGNORE-only) exists *specifically* so the last-processed
+  request's copy carries all three — last-wins dedup then keeps that richest copy. **Memoizing a
+  consumer's pass-1 result across requests would freeze it at whichever container was live first
+  and defeat cumulative recovery → wrong method set for exactly the classes #10 cares about
+  (Clang's `DeclContext`/`CXXRecordDecl`).** Consumers are **NOT** safely memoizable per-class.
+
+- **Non-consumers** (no member mentions any forced container, over the whole-run cumulative set).
+  These never gain or lose a member from *any* forcing — pass 3 already skips them (#156), and
+  their pass-1 result is candidate-invariant. This is the memoizable subset. **But invariance
+  still has to survive hazard #2 (policy) and hazard #3(2) (tracker-driven `canResolve`), below.**
+
+#### (b.4) The IGNORE/INCLUDE first-resolution trap — does it reappear? (hazard #2) — **YES, on the non-consumers too.**
+
+This is the trap that forced #156 to leave pass 1 eager, and it **re-applies to cross-request
+memoization**, one level subtler:
+
+Under the **IGNORE_MISSING broad path** (clangwalk — the actual #10 target), a non-consumer `C`'s
+member `C::m() -> D` where `D` is another bound class resolves in pass 1 **iff `D` is in the
+tracker at that moment**. The tracker is seeded by `withClasses(scopedFound)` where `scopedFound`
+= base-bound keys ∪ the forcing struct. Across requests the base-bound set is stable — **but
+`alreadyBoundKeys` grows** (IndexedServiceImpl.kt:185, recomputed from the accumulating `classes`
+each request), because each request appends its forced container(s) as new `ResolvedClass`es. So
+a **later** request's `scopedFound` can include a prior-forced container as a bound key, which can
+flip `canResolve(D)` for a member of `C` that references it. Concretely: a non-consumer w.r.t.
+*this* request's container can still reference a container forced by a *prior* request; whether
+that reference resolves in pass 1 depends on whether that prior container re-entered the scoped
+set — an order- and history-dependent fact. A per-class memo keyed only on the class name would
+serve request-2's answer to request-5 and silently drop or keep the wrong member.
+
+Worse, under **INCLUDE_MISSING** (featuregen — the *only* machine-check we have) a non-consumer's
+member that references an unbound sibling **materializes it on demand and mutates the tracker**
+(Resolver.kt:738-747). If request 1 resolved `C` and, as a side effect, pulled sibling `S` into
+the tracker, then request 2's `C` — served from a cross-request memo — would **skip that
+side-effecting pull**, and `S` would be absent from request 2's tracker when some *other* class
+in request 2 needs it. The memo would change not `C`'s bytes but a **sibling's** availability →
+divergence located far from the memo, invisible at the call site. This is the same shape as the
+#156 pass-1 trap ("skipping a class shifts its first resolution's side effects"), now triggered
+by *reusing* a class's resolution rather than *deferring* it.
+
+**Verdict on hazard #2:** a bare per-class memo is unsafe under *both* policies. It is only sound
+if the memo key pins **the entire tracker-visible resolution context** the cached value was
+produced under — i.e. the memo must be invalidated whenever the set of keys the class's members
+can `canResolve`-reach changes. For the base-bound non-consumer set under IGNORE_MISSING that set
+is *almost* stable, but "almost" is exactly the fragility #156 refused to trade a provable
+equivalence for.
+
+#### (b.5) The only provably-safe memo key
+
+The memo can be consulted for a class `C` in request `R` **only if** all of:
+
+1. `C ∈ non-consumers` over the **whole-run cumulative** container set (never a container
+   consumer in any request — so pass 3 never touches it and forcing can't change its members);
+   **and**
+2. every type `C`'s members reference resolves the **same way** in `R` as in the request that
+   populated the memo — operationalized as: **the set of tracker keys reachable from `C`'s member
+   type-strings is unchanged between the two requests.** The cheap conservative proxy for "the
+   reachable set is unchanged" is: **`C` references no forced container (already ⊆ condition 1)
+   AND references no class that is itself a container consumer** (a consumer's own shape changes
+   per request, so a class referencing one inherits that request-dependence transitively); **and**
+3. the run is **IGNORE_MISSING**. Under INCLUDE_MISSING the on-demand materialization side effect
+   (b.4) makes even a "value-identical" memo hit skip tracker mutations a sibling depends on;
+   INCLUDE_MISSING is featuregen's policy and its output must stay byte-identical, so the memo
+   must be **disabled entirely under INCLUDE_MISSING** (it buys nothing there anyway — featuregen
+   is ~120 classes × 7 requests, already cheap, and is the machine-check we cannot perturb).
+
+So the safe memo key is **`(class-type-string)` scoped to the IGNORE_MISSING, whole-run-non-
+consumer, non-consumer-referencing subset**, and its stored value is the finished `ResolvedClass`
+(hazard #3(1)). Equivalently: memoize pass 1 for the classes that are **opaque leaves of the
+forcing dance** — bound once, never recovered, never a side-effecting INCLUDE pull, never
+referencing anything that changes shape. Everything else re-resolves per request as today.
+
+#### (b.6) How big is the safe subset, and what is the realistic speedup?
+
+At broad Clang scale (~3221 bound), the container-consumer set is "a few dozen" (the doc's own
+estimate; the classes with `decls()/methods()/bases()`-style range accessors — `DeclContext`,
+`CXXRecordDecl`, `TranslationUnitDecl`, a handful of `*List`/range holders). The
+consumer-*referencing* exclusion (condition 2) is larger but still a minority — most of the 3221
+(`llvm::vfs`, `llvm::opt`, `clang::ento`, `llvm::cl`, Sema internals, the serializer) neither
+consume nor reference containers; they are exactly the opaque leaves the memo targets. So the
+**memoizable subset is the overwhelming majority — plausibly ~3000 of ~3221.**
+
+Cost model. Today (post-#156): per request, pass 1 = O(bound) ≈ 3221 resolves, pass 3 =
+O(consumers) ≈ dozens. Over N requests: **N × 3221** pass-1 resolves. With the memo: request 1
+pays 3221; requests 2..N pay only (consumers + consumer-referencing) ≈ hundreds, served-from-memo
+for the ~3000 leaves. Over N requests: **3221 + (N−1) × ~few-hundred** — i.e. pass 1 collapses
+from O(bound × N) to ≈ O(bound + refset × N). For the realistic broad config (a handful of
+forced containers, N small), that is the difference between "3221 × N re-resolves of a densely
+cyclic graph" and "one full pass plus a few cheap deltas."
+
+#### (b.7) Does (b) actually get broad forcing to codegen?
+
+Honest answer: **(c)-pass-3 + (b)-pass-1-memo together remove *both* O(bound) whole-set walks**,
+which is the whole per-request cost `resolveForcing` adds. What remains per request after both is
+the container force (pass 2, O(1) container) + the consumer/ref re-resolve (pass 3 + memo misses,
+O(hundreds)). That is no longer O(bound); it is proportional to the *forced* surface. So the
+compounding stall the re-baseline hit (never reaching "Forcing introduced") is removed **in
+principle** by (b) on top of #156.
+
+**But** — and this is the load-bearing caveat — the base bind itself (`filterAndResolve`, §1a)
+still resolves ~3700 classes **once**, and the broad `INCLUDE_MISSING`/`DefaultFilter` blow-up in
+Scenarios A/B (§2) is that *base* cost plus the densely-cyclic graph, not the forcing loop alone.
+(b) makes *forcing* cheap; it does **not** make the base bind cheap, and it does not change what
+gets bound (§3(i) — that's consumer config). So (b) plausibly gets *forcing* to codegen, and the
+*next* wall becomes the base-bind / broad-C++-compile tail — the separate "harden broad binding"
+track the campaign already anticipated (§"Out of scope"). Order-of-magnitude: forcing drops ~2
+orders (as (c)-both projected), base bind is unchanged.
+
+#### (b.8) Byte-identical verification plan (the post-flip machine-check)
+
+The parity/17-unit gates are retired (see the #156 correction below). The equivalent check:
+
+1. **Regenerate featuregen's `build/krapped-cpp/` tree** twice — memo OFF vs memo ON — and
+   **diff byte-for-byte.** Because the memo is **disabled under INCLUDE_MISSING** (condition 3),
+   featuregen (INCLUDE_MISSING) must be *byte-identical by construction* — the memo code path is
+   never entered. This gate proves the guard, not the memo, but that is the safety-critical claim:
+   the change cannot perturb the only machine-check we have.
+2. **`DeterminismTest.twoInProcessRunsAreByteIdentical`** stays green — the memo is a process-
+   scoped cache and MUST be reset per run (like `DropLedger`/`GenerationContext`,
+   IndexedServiceImpl.kt:98-107) or it leaks across in-process runs (the exact class of bug #11a
+   fixed for `elementLookup`). This test is the standing guard for that.
+3. **A targeted unit** (new): two instantiation requests over a fixture with (i) a container
+   consumer, (ii) a non-consumer opaque leaf, (iii) a non-consumer that *references* a consumer,
+   all under IGNORE_MISSING. Assert: the leaf is resolved once and served from memo on request 2
+   (instrument a hit counter); the consumer and the consumer-referencer are re-resolved each
+   request; and the final emitted set is byte-identical to the memo-OFF run. This is the only test
+   that actually exercises the memo path (featuregen can't — it's INCLUDE_MISSING).
+4. **Broad IGNORE_MISSING smoke** (the payoff measurement): run the clangwalk-style `only(...) +
+   IGNORE_MISSING` broad config with several `--instantiate` specs; confirm forcing now reaches
+   "Forcing introduced …" and codegen in seconds, and capture the base-bind time separately so the
+   remaining (base-bind) wall is attributed correctly, not to forcing.
+
+#### (b.9) Blast radius
+
+- **Code:** a process-scoped `Map<String, ResolvedClass>` memo, populated/consulted in
+  `resolveForcing`'s pass-1 loop **only** on the IGNORE_MISSING branch and **only** for classes
+  passing the whole-run-non-consumer + non-consumer-referencing predicate; reset in the
+  `IndexedServiceImpl` init block alongside `DropLedger`/`GenerationContext`. No change to pass 2,
+  pass 3, dedup, or the base resolve.
+- **Behavioral surface it can touch:** the IGNORE_MISSING forcing path (clangwalk / broad #10).
+  It **cannot** touch the INCLUDE_MISSING path (guarded off) — so featuregen and the plugin
+  default are untouched by construction.
+- **The failure mode if the predicate is wrong:** a class wrongly classified as a memoizable leaf
+  would serve a stale resolution → a dropped/kept-wrong member on the IGNORE broad path,
+  **invisible to the featuregen machine-check** (same blind spot as #156). This is why condition 2
+  (exclude consumer-referencers) is deliberately conservative, and why unit test #3 above asserts
+  the predicate directly rather than trusting the featuregen diff.
+
+#### (b.10) Recommendation on Option (b)
+
+**Proceed-with-caveats, and only after (c)/#156, and only guarded to IGNORE_MISSING.** The
+mechanism is sound *if* the memo is (i) value-based (`ResolvedClass`, not a re-run against a
+mutated `WrappedClass`), (ii) restricted to the whole-run non-consumer, non-consumer-referencing
+subset, (iii) disabled under INCLUDE_MISSING, and (iv) process-reset per run. Under those four
+conditions it is byte-identical on the machine-check *by construction* (the check never enters the
+path) and removes the last O(bound)-per-request walk.
+
+**The honest caveat that tempers the enthusiasm:** the byte-identical *proof surface we have*
+(featuregen, INCLUDE_MISSING) **cannot exercise the memo at all**, because the memo is disabled
+there. So (b)'s correctness on the path that matters (IGNORE_MISSING broad) rests on the
+*predicate argument* + the targeted unit (test #3), **not** on the regenerate-and-diff machine
+check — exactly the gate-blindness that already bit #156's pass-1 attempt. That is a real,
+named risk: we are asserting safety on the un-gated path by construction-and-unit-test, which is a
+weaker guarantee than the featuregen diff gives on the gated path. It is *defensible* here only
+because the memo is a strict subset-skip of work whose output last-wins already reproduces — but
+reviewers should weigh that the machine-check is structurally unable to catch a predicate bug.
+
+**If that residual risk is judged too high for the win:** the fully-safe alternative is to **stop
+treating broad forcing as an in-CI gate at all** and run it as an **offline long-running
+measurement** — accept that `resolveForcing` is O(bound × N) and simply let the broad force run
+for its tens of minutes as a periodic (not per-build) probe of the real #10 question (does the
+broadly-bound C++ compile?). #156 already made it ~2× faster; if the base-bind wall (b.7) is the
+real gating cost anyway, the pass-1 memo buys a faster *forcing* stage in front of an unchanged
+*base-bind* stage, and the offline-measurement framing may be the better cost/risk trade than
+adding an un-machine-checkable cache to the load-bearing resolve loop.
+
 ### Option (c, RECOMMENDED) — restrict the re-resolve to container-consumers
 Re-resolve in passes 1 & 3 only the bound classes that **can recover something** — i.e. that
 have a method (or field) whose return/element type is (or transitively contains) a
@@ -264,10 +499,18 @@ re-walked.
   time.
 
 ### Hybrid (c)+(b)
-Do (c) first (kills the dominant cost, zero output risk). If per-request base-bind cost
-(pass 1 still resolves the container-consumer set fresh each request) is still material at
-scale, add (b)'s cross-request memo for the container-consumer set only. (c) alone almost
-certainly suffices; keep (b) in reserve.
+Do (c) first (kills the pass-3 dominant cost, zero output risk — shipped as #156). If the
+remaining per-request **pass-1** cost (still O(bound) every request — #156 could not filter
+pass 1 safely, see the correction below) is material at scale, add (b)'s cross-request memo
+for the **non-consumer** subset only, guarded to IGNORE_MISSING. See the fully-specified
+(b.1)–(b.10) design above for the exact key, the four safety conditions, and the honest
+caveat that the featuregen machine-check structurally cannot exercise the memo path.
+
+**Correction to the original sketch:** the terse Hybrid note above said "(b)'s cross-request
+memo for the container-consumer set only." That is **backwards** — the (b.3) analysis shows
+container consumers are precisely the request-DEPENDENT classes that must NOT be memoized
+(their method set changes per forced container). The memoizable subset is the **non-consumers
+that also reference no consumer**. Read the (b.1)–(b.10) section as authoritative.
 
 ---
 
@@ -319,9 +562,16 @@ consequences:
   forcing is roughly **twice as fast**, not the ~2-orders-of-magnitude the (c)-both target
   projected, and **this change does not yet claim broad forcing reaches codegen.** The
   remaining pass-1 O(bound) per-request cost is the **follow-up: Option (b) cross-request
-  memoization over the consumer set** (§4b) — memoize pass 1's bound-class resolutions across
-  the N instantiation requests rather than filtering them, which is safe because it changes
-  *when* work is cached, not *which policy* first resolves a class.
+  memoization** — now fully specified in the expanded (b.1)–(b.10) section above. NB the
+  memoizable subset is the **non-consumer** set, NOT the consumer set (consumers are exactly
+  the request-DEPENDENT classes — see (b.3)); and the "safe because it changes *when* not
+  *which policy*" intuition holds **only** under the four conditions (b.5) pins down (value-
+  based, non-consumer + non-consumer-referencing, IGNORE_MISSING-only, process-reset). The
+  honest caveat (b.10): the featuregen machine-check runs INCLUDE_MISSING and therefore
+  **cannot exercise the memo path at all**, so (b)'s safety on the IGNORE_MISSING broad path
+  rests on the predicate argument + a targeted unit, not the regenerate-and-diff gate — the
+  same gate-blindness that bit #156's pass-1 attempt. A valid alternative to accepting that
+  residual risk is to run broad forcing as an **offline measurement**, not a per-build gate.
 
 - **Stale gate names (flip landed).** The safety constraint above and §5's verification plan
   cite `:cppfrontend:featuregenParity` and "the 17-instantiation ALL unit" — **both no longer
