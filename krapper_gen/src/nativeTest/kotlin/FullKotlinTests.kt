@@ -529,10 +529,22 @@ class FullKotlinTests {
             "    return retValue\n" +
             "}"
 
-    // C++ operator== now maps to an idiomatic Kotlin `equals` override (so `a == b`
-    // works) rather than an `infix fun eq`. The body narrows `other` and delegates
-    // to the generated `_op_eq` C function over the two backing pointers.
+    // A HAND-WRITTEN C++ `operator==` (isDefaulted=false, TestClass's default) can't be
+    // proven memberwise, so binding it to Kotlin `equals` would risk the equals/hashCode
+    // contract. It instead gets an IDENTITY `equals` (backing-pointer equality) plus a
+    // `valueEquals` exposing the C++ comparison (delegating to the `_op_eq` C wrapper).
     private val testlibTestclassEqCmp =
+        "override fun equals(other: Any?): Boolean {\n" +
+            "    return other is TestClass && ptr == (other as TestClass).ptr\n" +
+            "}\n" +
+            "fun valueEquals(other: TestClass): Boolean {\n" +
+            "    return TestLib_TestClass_op_eq(ptr, other.ptr)\n" +
+            "}"
+
+    // A DEFAULTED C++ `operator==` (`= default`) IS memberwise over all members, so it
+    // keeps the idiomatic delegating `equals` override (so `a == b` runs the C++ `==`),
+    // whose paired field-fold hashCode is then contract-sound.
+    private val testlibTestclassEqDefaulted =
         "override fun equals(other: Any?): Boolean {\n" +
             "    return other is TestClass && " +
             "TestLib_TestClass_op_eq(ptr, (other as TestClass).ptr)\n" +
@@ -1101,6 +1113,24 @@ class FullKotlinTests {
         target = TestData.testClass.operatorEq,
         expected = testlibTestclassEqCmp
     )
+
+    @Test
+    fun testTestClass_op_eq_defaulted() {
+        // Flip the shared operatorEq to DEFAULTED for this one assertion, then restore it, so
+        // the flag can't leak into the hand-written-`==` case above regardless of test order.
+        // (Reusing the singleton keeps it resolvable — it's the one registered in TestData.tu.)
+        val op = TestData.testClass.operatorEq
+        try {
+            op.isDefaulted = true
+            runTest(
+                cls = TestData.testClass.cls,
+                target = op,
+                expected = testlibTestclassEqDefaulted
+            )
+        } finally {
+            op.isDefaulted = false
+        }
+    }
 
     @Test
     fun testTestClass_op_neq() = runTest(

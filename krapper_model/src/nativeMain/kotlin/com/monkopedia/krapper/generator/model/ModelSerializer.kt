@@ -33,6 +33,7 @@ data class SerializedElement(
     val methodType: String? = null,
     val isConst: Boolean? = null,
     val isVirtual: Boolean? = null,
+    val isDefaulted: Boolean? = null,
     val isAbstract: Boolean? = null,
     // Base-specifier payload (WrappedBase).
     val isPublic: Boolean? = null,
@@ -137,6 +138,7 @@ fun WrappedElement.serialized(): SerializedElement {
             methodType = methodType.name,
             isConst = isConst,
             isVirtual = isVirtual,
+            isDefaulted = isDefaulted.takeIf { it },
             children = kids
         )
 

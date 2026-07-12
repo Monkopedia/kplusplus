@@ -584,6 +584,7 @@ private suspend fun WrappedMethod.resolvePlainMethod(
         qualified
     ).also {
         it.isVirtual = isVirtual
+        it.isDefaulted = isDefaulted
         it.returnsPairSecond = returnsPairSecond
         it.returnViaMemberCall = returnViaMemberCall
         it.rangeElementType = rangeElementType

@@ -135,6 +135,7 @@ data class MethodDto(
     val methodType: MethodType = MethodType.METHOD,
     val isVirtual: Boolean = false,
     val isConst: Boolean = false,
+    val isDefaulted: Boolean = false,
     val returnsPairSecond: Boolean = false,
     val returnViaMemberCall: String? = null,
     val rangeElementType: String? = null,
@@ -405,6 +406,7 @@ private class ModelEncoder(private val shared: Set<ElementIdentity>) {
                 element.methodType,
                 element.isVirtual,
                 element.isConst,
+                element.isDefaulted,
                 element.returnsPairSecond,
                 element.returnViaMemberCall,
                 element.rangeElementType,
@@ -515,6 +517,7 @@ private class ModelDecoder {
             is MethodDto -> WrappedMethod(dto.name, type(dto.returnType), dto.methodType).also {
                 it.isVirtual = dto.isVirtual
                 it.isConst = dto.isConst
+                it.isDefaulted = dto.isDefaulted
                 it.returnsPairSecond = dto.returnsPairSecond
                 it.returnViaMemberCall = dto.returnViaMemberCall
                 it.rangeElementType = dto.rangeElementType

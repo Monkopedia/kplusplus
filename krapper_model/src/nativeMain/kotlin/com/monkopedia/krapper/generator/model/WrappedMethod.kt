@@ -101,6 +101,15 @@ open class WrappedMethod(
     // A settable var so copy()/clone() preserve it, like isVirtual.
     var isConst: Boolean = false
 
+    // True for a C++20 `= default`-ed method (`CXXMethodDecl::isDefaulted()`). Only
+    // meaningful here for a defaulted `operator==`, which the compiler guarantees is a
+    // memberwise comparison over ALL members. KotlinWriter gates the equals/hashCode
+    // contract on it: a defaulted `==` keeps the delegating `equals` + field-fold
+    // `hashCode` (provably sound); a hand-written `==` — not statically classifiable as
+    // memberwise — falls back to an identity contract keyed on the backing pointer.
+    // A settable var so copy()/clone() preserve it, like isVirtual/isConst.
+    var isDefaulted: Boolean = false
+
     // Set by rewritePairSecondReturns (Parsing.kt): the C++ method returns
     // `std::pair<iterator, bool>`; its return is rewritten to `bool` and CppWriter emits
     // `.second` on the call. Threaded through copy()/clone()/resolve, like isVirtual.
@@ -132,6 +141,7 @@ open class WrappedMethod(
         it.parent = parent
         it.isVirtual = isVirtual
         it.isConst = isConst
+        it.isDefaulted = isDefaulted
         it.returnsPairSecond = returnsPairSecond
         it.returnViaMemberCall = returnViaMemberCall
         it.rangeElementType = rangeElementType
@@ -142,6 +152,7 @@ open class WrappedMethod(
         it.addAllChildren(children)
         it.isVirtual = isVirtual
         it.isConst = isConst
+        it.isDefaulted = isDefaulted
         it.returnsPairSecond = returnsPairSecond
         it.returnViaMemberCall = returnViaMemberCall
         it.rangeElementType = rangeElementType

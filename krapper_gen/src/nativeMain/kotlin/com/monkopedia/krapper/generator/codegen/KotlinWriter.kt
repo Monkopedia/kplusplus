@@ -703,10 +703,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 codeGenerationPolicy.onGenerateMethodFailed(cls, method, t)
             }
         }
-        // A class with `operator==` got an `equals` override above; emit the paired
-        // `hashCode` override here so the equals/hashCode contract is always honoured.
-        if (methods.any { it.operator == ResolvedOperator.EQ }) {
-            generateHashCode(cls)
+        // A class with `operator==` got an `equals`/`valueEquals` override above; emit the
+        // paired `hashCode` override here so the equals/hashCode contract is always honoured.
+        // The field-fold hashCode is only sound when the `==` is a DEFAULTED (memberwise-over-
+        // all-members) comparison; a hand-written `==` gets an identity hashCode keyed on the
+        // backing pointer (matching the identity `equals` generateEquals emitted for it).
+        methods.find { it.operator == ResolvedOperator.EQ }?.let {
+            generateHashCode(cls, it.isDefaulted)
         }
         // Index-accessible containers (detected by size() + index get) get a synthesized
         // `operator fun iterator()` so `for (x in v)` and the full Iterable surface work.
@@ -2284,12 +2287,16 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         cls: ResolvedClass,
         method: ResolvedMethod
     ) {
-        // C++ operator== maps to an idiomatic Kotlin `equals` override (so `a == b`
-        // works) rather than an `infix fun eq`. The matching `hashCode` override is
-        // emitted alongside in onGenerateMethods to keep the equals/hashCode
-        // contract.
+        // C++ operator== maps to Kotlin equality. A DEFAULTED `==` (C++20 `= default`) is
+        // guaranteed memberwise over ALL members, so it becomes an idiomatic `equals`
+        // override (so `a == b` works) whose paired field-fold `hashCode` (emitted in
+        // onGenerateMethods) is contract-sound. A HAND-WRITTEN `==` may compare only a
+        // subset of state, which would break the equals/hashCode contract against the
+        // field-fold hashCode; it instead gets an IDENTITY `equals` (backing-pointer
+        // equality) + a `valueEquals` method exposing the C++ comparison. The matching
+        // `hashCode` override is emitted alongside in onGenerateMethods either way.
         if (operator == ResolvedOperator.EQ) {
-            generateEquals(cls, method)
+            if (method.isDefaulted) generateEquals(cls, method) else generateValueEquals(cls, method)
             return
         }
         // C++ `operator<` maps to an idiomatic Kotlin `operator fun compareTo`
@@ -2378,10 +2385,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    // C++ `operator==` → an idiomatic Kotlin `equals` override. The body narrows
-    // `other` to the wrapper type, then delegates the actual comparison to the
-    // generated `_op_eq` C function over the two backing pointers. Using the
-    // extensionMethod Call (rather than a Raw) keeps the C symbol's import wired up.
+    // A DEFAULTED C++ `operator==` → an idiomatic Kotlin `equals` override. The body
+    // narrows `other` to the wrapper type, then delegates the actual comparison to the
+    // generated `_op_eq` C function over the two backing pointers. Sound only because a
+    // defaulted `==` is memberwise over ALL members (so the paired field-fold hashCode
+    // agrees). Using the extensionMethod Call (rather than a Raw) keeps the C symbol's
+    // import wired up.
     private fun KotlinCodeBuilder.generateEquals(cls: ResolvedClass, method: ResolvedMethod) {
         val typeName = cls.type.kotlinType.plainName
         override {
@@ -2401,6 +2410,41 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         )
                     )
                 }
+            }
+        }
+    }
+
+    // A HAND-WRITTEN C++ `operator==` (not `= default`) can't be statically proven
+    // memberwise, so binding it to Kotlin `equals` would risk the equals/hashCode
+    // contract (a custom `==` may ignore fields the field-fold hashCode folds). Instead:
+    //  * `equals` is an IDENTITY comparison on the backing pointer (paired in
+    //    onGenerateMethods with a `ptr.hashCode()` hashCode — always contract-sound), and
+    //  * the C++ comparison stays reachable as `valueEquals(other): Boolean`, delegating
+    //    to the same `_op_eq` C wrapper the delegating `equals` would have used.
+    private fun KotlinCodeBuilder.generateValueEquals(cls: ResolvedClass, method: ResolvedMethod) {
+        val typeName = cls.type.kotlinType.plainName
+        override {
+            function {
+                name = "equals"
+                retType = type(ResolvedKotlinType("kotlin.Boolean", false))
+                define("other", nullable(fullyQualifiedType("kotlin.Any")))
+                body {
+                    +Return(Raw("other is $typeName && ptr == (other as $typeName).ptr"))
+                }
+            }
+        }
+        function {
+            name = "valueEquals"
+            retType = type(ResolvedKotlinType("kotlin.Boolean", false))
+            define("other", cls.type.kotlinType.copy(isNullable = false))
+            body {
+                +Return(
+                    Call(
+                        extensionMethod(pkg, method.uniqueCName!!),
+                        ptr,
+                        Raw("other.ptr")
+                    )
+                )
             }
         }
     }
@@ -2441,18 +2485,26 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    // Always paired with `equals` so the equals/hashCode contract holds: equal
-    // objects (same `operator==`) must hash equal. Best-effort and allowed to be
-    // poorly-distributed — it folds the public fields' hashCodes (the same state
-    // `operator==` compares), or returns a fixed constant when the class exposes
-    // no usable fields.
-    private fun KotlinCodeBuilder.generateHashCode(cls: ResolvedClass) {
+    // Always paired with `equals` so the equals/hashCode contract holds: equal objects
+    // must hash equal. The shape depends on how the class's `operator==` bound to Kotlin
+    // equality:
+    //  * DEFAULTED `==` → `equals` is the memberwise C++ comparison, so a field-fold
+    //    hashCode is sound (equal objects have all members equal → same fold; private-only
+    //    differences only cause allowed collisions). Best-effort/poorly-distributed: it
+    //    folds the public fields' hashCodes, or a fixed constant when there are no fields.
+    //  * HAND-WRITTEN `==` → `equals` is identity on the backing pointer, so the hashCode
+    //    must match that: `ptr.hashCode()`.
+    private fun KotlinCodeBuilder.generateHashCode(cls: ResolvedClass, isDefaulted: Boolean) {
         val fields = cls.children.filterIsInstance<ResolvedField>()
         override {
             function {
                 name = "hashCode"
                 retType = type(ResolvedKotlinType("kotlin.Int", false))
                 body {
+                    if (!isDefaulted) {
+                        +Return(Raw("ptr.hashCode()"))
+                        return@body
+                    }
                     if (fields.isEmpty()) {
                         +Return(Raw("0"))
                         return@body

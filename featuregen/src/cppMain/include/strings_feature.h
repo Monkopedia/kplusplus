@@ -133,6 +133,20 @@ struct Vec2 {
     double operator()(double s) const { return x * s + y * s; }            // OP-call → operator_call
 };
 
+// OP-eq-defaulted (T-op): a C++20 `= default`-ed operator==, which the compiler
+// GUARANTEES is a memberwise comparison over ALL members. krapper trusts that
+// guarantee: it binds this to a real Kotlin `equals` (so `a == b` runs the C++
+// `==`) PAIRED with a field-fold `hashCode` — the contract is provably sound
+// because equal objects have all members equal. Contrast Vec2's hand-written
+// `operator==`, which krapper can't prove memberwise so it falls back to an
+// identity `equals` (pointer) + a `valueEquals` for the value comparison.
+struct VecEq {
+    double x, y;
+    VecEq() : x(0.0), y(0.0) {}
+    VecEq(double x_, double y_) : x(x_), y(y_) {}
+    bool operator==(const VecEq& o) const = default;   // OP-eq-defaulted
+};
+
 // OB-* : passing/returning user objects across the boundary. A small aggregate
 // (Point2) + a struct of static methods, one per convention (krapper wraps only
 // struct/class members, not namespace-scope free functions).
