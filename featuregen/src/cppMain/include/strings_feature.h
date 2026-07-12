@@ -39,6 +39,33 @@ struct EnumFeature {
 // shape as MEMBER operators so a Kotlin binding is generated + behaviourally tested.
 enum Flag { FlagNone = 0, FlagA = 1, FlagB = 2, FlagC = 4 };
 
+// EN-nested (#10 broad-binding correctness): an enum nested inside a NAMESPACE
+// (`ensig::Signal`) or a CLASS (`Machine::State`), passed to / returned from a wrapped
+// static method. The generated C++ RAW_CAST (`(ensig::Signal)x`) and ENUM_RETURN
+// (`(unsigned int)(...)`) must spell the enum with its full enclosing scope; a bare
+// `(Signal)x` at the wrapper's file scope is an undeclared identifier and won't compile.
+// This is the exact shape the "use of undeclared identifier" cluster (#10) was thought
+// to hit; it pins the qualification so a regression can't silently reintroduce it. The
+// featuregen surface had only TOP-LEVEL enums (Color/Flag/Direction), which never
+// exercise the enclosing-scope qualifier.
+namespace ensig {
+    enum Signal { SigLow = 0, SigHigh = 1, SigFloat = 2 };
+    struct Bus {
+        static Signal invert(Signal s) {
+            return s == SigLow ? SigHigh : (s == SigHigh ? SigLow : SigFloat);
+        }
+        static int level(Signal s) { return static_cast<int>(s); }
+    };
+}
+
+struct Machine {
+    enum State { Idle = 0, Running = 1, Halted = 2 };
+    static State advance(State s) {
+        return static_cast<State>((static_cast<int>(s) + 1) % 3);
+    }
+    static int stateInt(State s) { return static_cast<int>(s); }
+};
+
 struct ByteFlags {
     Flag bits;
     ByteFlags() : bits(FlagNone) {}
