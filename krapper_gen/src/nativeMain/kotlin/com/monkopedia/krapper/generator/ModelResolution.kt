@@ -498,12 +498,36 @@ private suspend fun WrappedMethod.thizArg(
 private suspend fun WrappedMethod.resolvePlainMethod(
     resolverContext: ResolveContext
 ): ResolvedMethod? = with(resolverContext.currentNamer) {
-    val (rawMapping, rawResolved) = resolverContext.mapAndResolve(returnType)
+    val mapped = resolverContext.mapAndResolve(returnType)
         ?: return resolverContext.notifyFailed(
             this@resolvePlainMethod,
             returnType,
             "Couldn't resolve return"
         )
+    // #105 Family 2: a REFERENCE-return of a value-reduced ENUM (`Flag&`, and the
+    // `std::byte&`/`_Ios_Fmtflags&` compound-assignment operators from <ios>). An enum
+    // has no `.ptr`-backed storage, so its reference can't be marshaled as a wrapper
+    // pointer — reading through the reference just yields the enum VALUE, exactly like a
+    // by-value enum return. WrappedModifiedType.isEnum is true for a `&`-reference to an
+    // enum, so determineReturnStyle already selects ENUM_RETURN; but the reference
+    // mapping's cType is `void*` (a `&` to a non-native pointee), so the ENUM_RETURN C
+    // cast became the ill-formed `return (void*)(enumLvalue)` and the extern returned a
+    // pointer the Kotlin `fromValue(Int)` couldn't consume. Strip the reference so the
+    // return resolves as a by-value enum (cType = the underlying integer): the wrapper
+    // emits `return (int)(call)` and Kotlin reads it via `fromValue`, identical to any
+    // other enum return. (Non-enum reference returns keep their pointer marshaling.)
+    val (rawMapping, rawResolved) =
+        if (mapped.first.isReference && mapped.first.isEnum) {
+            val unref = mapped.first.unreferenced
+            resolverContext.mapAndResolve(unref)
+                ?: return resolverContext.notifyFailed(
+                    this@resolvePlainMethod,
+                    unref,
+                    "Couldn't resolve enum-reference return"
+                )
+        } else {
+            mapped
+        }
     val returnStyle = determineReturnStyle(rawMapping, resolverContext)
     // A by-value class return is copy-constructed into a scope-bound Holder via
     // placement-new (ARG_CAST). Two element-type problems make that emission

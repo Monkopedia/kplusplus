@@ -30,6 +30,39 @@ struct EnumFeature {
     static Color fromInt(int i) { return static_cast<Color>(i); }
 };
 
+// OP-compound-assign-enum (#105 Family 2): compound-assignment operators returning
+// `T&` where T reduces to a value-type at the boundary. `Flag` is an unscoped enum
+// (reduces to its underlying int); the free `operator|=/&=/^=` mutate the lvalue and
+// return `Flag&`. On the unfixed generator the reference-return of a value-reduced
+// type is mishandled: it is bound as a by-value ENUM_RETURN (the extern hands back a
+// pointer) and the C wrapper is UB (`return &(local)`). ByteFlags exercises the same
+// shape as MEMBER operators so a Kotlin binding is generated + behaviourally tested.
+enum Flag { FlagNone = 0, FlagA = 1, FlagB = 2, FlagC = 4 };
+
+struct ByteFlags {
+    Flag bits;
+    ByteFlags() : bits(FlagNone) {}
+    // member compound-assignment operators returning `ByteFlags&` where the operand /
+    // stored state is a value-reduced enum. Returns the receiver so calls chain.
+    ByteFlags& operator|=(Flag f) { bits = static_cast<Flag>(bits | f); return *this; }
+    ByteFlags& operator&=(Flag f) { bits = static_cast<Flag>(bits & f); return *this; }
+    ByteFlags& operator^=(Flag f) { bits = static_cast<Flag>(bits ^ f); return *this; }
+    int value() const { return (int) bits; }
+};
+
+// A FREE-enum compound-assignment returning the value-reduced enum reference itself
+// (the exact <ios> `_Ios_Fmtflags& operator|=` shape). Exposed via a probe struct's
+// static methods so krapper wraps them.
+inline Flag& flagOrEq(Flag& a, Flag b) { a = static_cast<Flag>(a | b); return a; }
+
+struct FlagProbe {
+    inline static Flag state = FlagNone;
+    static void reset() { state = FlagNone; }
+    // returns `Flag&` (value-reduced enum reference) — the Family-2 return shape.
+    static Flag& orInto(Flag b) { return flagOrEq(state, b); }
+    static int stateVal() { return (int) state; }
+};
+
 // A plain user struct, used as the element type of std::vector<Point> to test
 // "user type inside a generated container" (CV-elem-class).
 struct Point {
