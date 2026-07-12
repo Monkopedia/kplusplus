@@ -999,7 +999,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 //  - a fixed concrete return that itself allocates a by-value wrapper.
                 val returnIsTypeParam = (0 until arity).any { returnRendered == typeParamToken(it) }
                 val allocatesScope = returnIsTypeParam ||
-                    perInst.any { allocatesByValueReturn(it.second.returnStyle, it.second.returnType) }
+                    perInst.any {
+                        allocatesByValueReturn(it.second.returnStyle, it.second.returnType)
+                    }
                 methods += TemplateInterfaceMethod(
                     name = key.first,
                     renderedParams = params,
@@ -2296,7 +2298,11 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // equality) + a `valueEquals` method exposing the C++ comparison. The matching
         // `hashCode` override is emitted alongside in onGenerateMethods either way.
         if (operator == ResolvedOperator.EQ) {
-            if (method.isDefaulted) generateEquals(cls, method) else generateValueEquals(cls, method)
+            if (method.isDefaulted) {
+                generateEquals(cls, method)
+            } else {
+                generateValueEquals(cls, method)
+            }
             return
         }
         // C++ `operator<` maps to an idiomatic Kotlin `operator fun compareTo`
@@ -2795,10 +2801,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
     }
 
-    private fun generateConstructorCall(
-        type: ResolvedKotlinType,
-        ptr: Symbol
-    ): Symbol = Call(constructorMethod(type), ptr)
+    private fun generateConstructorCall(type: ResolvedKotlinType, ptr: Symbol): Symbol =
+        Call(constructorMethod(type), ptr)
 
     // CALL the generated `MemScope.<Type>(...)` CONSTRUCTOR factory by its canonical
     // DECLARED name (`plainDeclaredName`, ignoring the per-file import-alias `remap`),

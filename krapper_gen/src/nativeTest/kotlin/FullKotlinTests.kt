@@ -36,16 +36,17 @@ import kotlinx.coroutines.runBlocking
 
 class FullKotlinTests {
 
-    private val stdVectorStringNew = "context(scope: MemScope) fun Vector__String(): Vector__String {\n" +
-        "    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) " +
-        "?: error(\"Allocation failed\"))\n" +
-        "    val obj: COpaquePointer = (std_vector_std_string_new(memory) ?: " +
-        "error(\"Creation failed\"))\n" +
-        "    scope.defer {\n" +
-        "        std_vector_std_string_dispose(obj)\n" +
-        "    }\n" +
-        "    return Vector__String(obj)\n" +
-        "}\n\n"
+    private val stdVectorStringNew =
+        "context(scope: MemScope) fun Vector__String(): Vector__String {\n" +
+            "    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) " +
+            "?: error(\"Allocation failed\"))\n" +
+            "    val obj: COpaquePointer = (std_vector_std_string_new(memory) ?: " +
+            "error(\"Creation failed\"))\n" +
+            "    scope.defer {\n" +
+            "        std_vector_std_string_dispose(obj)\n" +
+            "    }\n" +
+            "    return Vector__String(obj)\n" +
+            "}\n\n"
 
     private val stdVectorStringDispose = ""
 
@@ -380,6 +381,7 @@ class FullKotlinTests {
         "    return TestClass(obj)\n" +
         "}"
 
+    @Suppress("ktlint:standard:max-line-length")
     private val testlibTestclass2New =
         "context(scope: MemScope) fun TestClass__const_TestLib_TestClass(other: TestClass): TestClass {\n" +
             "    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) " +
@@ -393,16 +395,17 @@ class FullKotlinTests {
             "    return TestClass(obj)\n" +
             "}"
 
-    private val testlibTestclass3New = "context(scope: MemScope) fun TestClass__int(a: Int): TestClass {\n" +
-        "    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) " +
-        "?: error(\"Allocation failed\"))\n" +
-        "    val obj: COpaquePointer = (TestLib_TestClass_new__int(memory, a) ?: " +
-        "error(\"Creation failed\"))\n" +
-        "    scope.defer {\n" +
-        "        TestLib_TestClass_dispose(obj)\n" +
-        "    }\n" +
-        "    return TestClass(obj)\n" +
-        "}"
+    private val testlibTestclass3New =
+        "context(scope: MemScope) fun TestClass__int(a: Int): TestClass {\n" +
+            "    val memory: COpaquePointer = (interpretCPointer(scope.alloc(size, size).rawPtr) " +
+            "?: error(\"Allocation failed\"))\n" +
+            "    val obj: COpaquePointer = (TestLib_TestClass_new__int(memory, a) ?: " +
+            "error(\"Creation failed\"))\n" +
+            "    scope.defer {\n" +
+            "        TestLib_TestClass_dispose(obj)\n" +
+            "    }\n" +
+            "    return TestClass(obj)\n" +
+            "}"
 
     private val testlibTestclass4New =
         "context(scope: MemScope) fun TestClass__int_double(a: Int, b: Double): TestClass {\n" +
