@@ -443,7 +443,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             "kplusplusSync[$moduleName]: krapper_gen (cpp model) over ${requested.size} " +
                 "instantiation(s) from $headerPath -> $krappedDir"
         )
-        val exit = ProcessBuilder(args).inheritIO().start().waitFor()
+        // Experimental / diagnostic flag passthrough: `-Pkpp.x=diag.timing` (comma-separated
+        // for several) is forwarded verbatim to krapper_gen via its KRAPPER_X env var, so an
+        // experiment can be driven through the build without touching source. Off by default.
+        val procBuilder = ProcessBuilder(args).inheritIO()
+        (target.findProperty("kpp.x") as? String)?.takeIf { it.isNotBlank() }?.let {
+            procBuilder.environment()["KRAPPER_X"] = it
+        }
+        val exit = procBuilder.start().waitFor()
         if (exit != 0) {
             throw GradleException(
                 "kplusplusSync[$moduleName]: krapper_gen (--parsedModel) failed: exit $exit"
