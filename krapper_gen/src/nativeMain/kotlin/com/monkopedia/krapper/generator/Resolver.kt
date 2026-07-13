@@ -53,6 +53,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedEnumEntry
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedFunctionPointer
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
+import kotlin.time.TimeSource
 
 interface Resolver {
     suspend fun resolve(
@@ -203,6 +204,10 @@ suspend fun List<WrappedElement>.resolveForcing(
     forcedContainerKeys: MutableSet<String> = mutableSetOf(),
     forcingTargets: Set<String> = emptySet()
 ): List<ResolvedElement> {
+    // Gated wall-clock for the whole 3-pass forcing of THIS instantiation request; the mark is
+    // only read when `diag.timing` is on (see the total emitted before the return). Feeds the
+    // upcoming cross-request memoization experiment — the per-pass lines below split it up.
+    val requestMark = if (Diag.timingEnabled) TimeSource.Monotonic.markNow() else null
     val classes = filterIsInstance<WrappedClass>()
     // The `KrapperForce_*` struct's `value` member type IS the forced container
     // specialization (e.g. `std::vector<clang::Decl*>`); resolving it is what
@@ -265,14 +270,16 @@ suspend fun List<WrappedElement>.resolveForcing(
     //     here instead would silently drop those cross-instantiation methods.
     // The shared-tracker invariant still prevents the explosion: see pass 2.
     val pass1 = baseContext.withPolicyKeepingNamer(policy)
-    boundClasses.forEach {
-        if (pass1.resolve(it.type) == null) {
-            DropLedger.record(
-                it.type.toString(),
-                "Filtered class did not resolve",
-                DropPhase.RESOLVE
-            )
-            Log.w("Warning: can't resolve filtered class ${it.type}")
+    Diag.timed("forcing pass 1 (bind ${boundClasses.size} bound class(es))") {
+        boundClasses.forEach {
+            if (pass1.resolve(it.type) == null) {
+                DropLedger.record(
+                    it.type.toString(),
+                    "Filtered class did not resolve",
+                    DropPhase.RESOLVE
+                )
+                Log.w("Warning: can't resolve filtered class ${it.type}")
+            }
         }
     }
 
@@ -285,14 +292,16 @@ suspend fun List<WrappedElement>.resolveForcing(
     // as resolved and does NOT re-expand it — only the std container machinery is
     // pulled in. Result: the container specialization is now bound, bounded.
     val pass2 = baseContext.withPolicyKeepingNamer(ReferencePolicy.INCLUDE_MISSING)
-    forcingStructs.forEach {
-        if (pass2.resolve(it.type) == null) {
-            DropLedger.record(
-                it.type.toString(),
-                "Forcing struct did not resolve",
-                DropPhase.RESOLVE
-            )
-            Log.w("Warning: can't resolve forcing struct ${it.type}")
+    Diag.timed("forcing pass 2 (force ${forcingStructs.size} container(s))") {
+        forcingStructs.forEach {
+            if (pass2.resolve(it.type) == null) {
+                DropLedger.record(
+                    it.type.toString(),
+                    "Forcing struct did not resolve",
+                    DropPhase.RESOLVE
+                )
+                Log.w("Warning: can't resolve forcing struct ${it.type}")
+            }
         }
     }
 
@@ -386,8 +395,10 @@ suspend fun List<WrappedElement>.resolveForcing(
     // shape and seeds the shared tracker so pass 2's container force stays bounded — skipping a
     // class there could shift its first resolution into pass 2's INCLUDE_MISSING and change output.
     val containerConsumers = boundClasses.filter { it.referencesAnyContainer(containerMatchKeys) }
-    containerConsumers.forEach {
-        pass3.resolve(it.type)
+    Diag.timed("forcing pass 3 (recover ${containerConsumers.size} consumer(s))") {
+        containerConsumers.forEach {
+            pass3.resolve(it.type)
+        }
     }
 
     // Re-resolve any namespace-scoped static methods in the scoped set (parity with
@@ -410,6 +421,13 @@ suspend fun List<WrappedElement>.resolveForcing(
         (element as? ResolvedClass)?.type?.toString()?.takeIf { it !in alreadyBoundKeys }
     }
     forcedContainerKeys.addAll(newClassKeys)
+    requestMark?.let {
+        Diag.line(
+            "forcing request total: ${it.elapsedNow().inWholeMicroseconds / 1000.0} ms " +
+                "(${boundClasses.size} bound, ${containerConsumers.size} consumer(s), " +
+                "${newClassKeys.size} new, ${resolved.size} resolved)"
+        )
+    }
     Log.i(
         "Forcing introduced ${newClassKeys.size} new class(es) " +
             "(re-resolved ${resolved.size} total)"

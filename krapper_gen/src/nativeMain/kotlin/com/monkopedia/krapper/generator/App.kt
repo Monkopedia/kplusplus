@@ -184,8 +184,27 @@ class KrapperGen : CliktCommand() {
             "by uniqueCName, strip a stale `const ` prefix from matching return types, etc.). " +
             "Applied during writeTo()."
     )
+    val experimental by option(
+        "-X",
+        "--experimental",
+        help = "Set an experimental / diagnostic flag as `name` (bool → on) or `name=value`. " +
+            "Repeatable. Merges over (and overrides) the KRAPPER_X env var. Unknown names warn " +
+            "to stderr. See --list-experimental for the declared flags."
+    ).multiple()
+    val listExperimental by option(
+        "--list-experimental",
+        help = "Print every declared experimental / diagnostic flag with its default and " +
+            "description, then exit."
+    ).flag()
 
     override fun run() {
+        // Resolve experimental / diagnostic flags ONCE, before any work: CLI -X overrides the
+        // KRAPPER_X env var overrides each flag's declared default. Inert when nothing is set.
+        ExperimentalFlags.init(cli = experimental)
+        if (listExperimental) {
+            print(ExperimentalFlags.listing())
+            return
+        }
         if (serviceMode) {
             return runService()
         }
