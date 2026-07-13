@@ -86,9 +86,26 @@ object ExperimentalFlags {
         description = "Log per-phase wall-clock timings (ms) + counts to stderr."
     )
 
+    // EXPERIMENTAL (off by default): memoize the value-resolved form of pass-1's safely-
+    // memoizable bound classes across successive forcing requests, so the second and later
+    // --instantiate requests don't re-resolve the whole bound set from scratch. Guarded to the
+    // four safety conditions from docs/design/broad-forcing-resolve.md §(b.5): value-based
+    // (cached ResolvedClass, never a re-run against a mutated WrappedClass), restricted to the
+    // whole-run non-consumer + non-consumer-referencing subset, DISABLED under INCLUDE_MISSING
+    // (featuregen's policy — the memo buys nothing there and its on-demand materialization
+    // side effects make a memo hit unsafe), and process-reset per run. With the flag OFF this
+    // is byte-identical to today (the memo is never populated or consulted).
+    val FORCING_CROSS_REQUEST_MEMO = ExperimentalFlag.BoolFlag(
+        "forcing.crossRequestMemo",
+        default = false,
+        description = "EXPERIMENTAL: memoize pass-1's non-consumer bound-class resolutions " +
+            "across forcing requests (IGNORE_MISSING only). Off = byte-identical to today."
+    )
+
     /** Every declared flag. Add new flags here. */
     val all: List<ExperimentalFlag<*>> = listOf(
-        DIAG_TIMING
+        DIAG_TIMING,
+        FORCING_CROSS_REQUEST_MEMO
     )
 
     private val byName: Map<String, ExperimentalFlag<*>> = all.associateBy { it.name }

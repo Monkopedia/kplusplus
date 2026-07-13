@@ -104,6 +104,10 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // (e.g. in writeTo) would be too late.
         DropLedger.reset()
         GenerationContext.reset(config.rootPackage, config.noRtti)
+        // Process-scoped, experimental (off by default), MUST be reset per run so it can't leak
+        // resolved state across in-process runs (the class of bug #11a fixed for elementLookup;
+        // guarded by DeterminismTest.twoInProcessRunsAreByteIdentical).
+        ForcingPass1Memo.reset()
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {

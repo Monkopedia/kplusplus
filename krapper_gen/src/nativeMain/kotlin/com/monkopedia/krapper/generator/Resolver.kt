@@ -55,6 +55,65 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.nullable
 import kotlin.time.TimeSource
 
+/**
+ * EXPERIMENTAL, process-scoped, off by default (gated by
+ * [ExperimentalFlags.FORCING_CROSS_REQUEST_MEMO]).
+ *
+ * Cross-request memo for `resolveForcing`'s PASS 1. Each instantiation request re-decodes a fresh
+ * forcing TU and builds a fresh `ResolveTracker`, so pass 1 re-resolves the SAME base-bound class
+ * set from scratch on every request — O(bound × requests). For the classes that are provably
+ * request-INVARIANT (see the four conditions below), that re-resolution reproduces the same
+ * [ResolvedClass] value each time, so it can be memoized across requests.
+ *
+ * SAFETY (docs/design/broad-forcing-resolve.md §b.5 — all four are enforced at the call site):
+ *  1. VALUE-BASED: the stored value is the finished [ResolvedClass] taken out of the tracker after
+ *     resolution, never a re-run of `WrappedClass.resolve` against a (mutated) cached model element.
+ *     On a hit we inject the cached value straight into the fresh request's tracker.
+ *  2. NON-CONSUMER + NON-CONSUMER-REFERENCING subset only: a container consumer's method set changes
+ *     per forced container (request-dependent), and a class that references a consumer inherits that
+ *     dependence, so both are excluded — only opaque leaves are memoized.
+ *  3. IGNORE_MISSING ONLY: under INCLUDE_MISSING a first resolution can materialize siblings into the
+ *     shared tracker as a side effect; a memo hit would skip that pull and diverge elsewhere. The
+ *     memo is disabled under INCLUDE_MISSING (featuregen's policy — it also buys nothing there).
+ *  4. PROCESS-RESET per run: [reset] is called from `IndexedServiceImpl`'s init block alongside
+ *     `DropLedger`/`GenerationContext`, so it never leaks across in-process runs (guarded by
+ *     DeterminismTest.twoInProcessRunsAreByteIdentical).
+ *
+ * Instrumented with hit/miss/store counters, surfaced through `diag.timing`.
+ */
+object ForcingPass1Memo {
+    private val cache = mutableMapOf<String, ResolvedClass>()
+    var hits: Int = 0
+        private set
+    var misses: Int = 0
+        private set
+
+    /** True only when the experiment flag is on; every method below is inert otherwise. */
+    val enabled: Boolean
+        get() = ExperimentalFlags.isEnabled(ExperimentalFlags.FORCING_CROSS_REQUEST_MEMO)
+
+    /** The memoized value for [key], or null on a miss. Records the hit/miss counters. */
+    fun get(key: String): ResolvedClass? {
+        val hit = cache[key]
+        if (hit != null) hits++ else misses++
+        return hit
+    }
+
+    /** Store the finished resolved value for [key] (first-write-wins; later requests reproduce it). */
+    fun put(key: String, resolved: ResolvedClass) {
+        cache.getOrPut(key) { resolved }
+    }
+
+    fun summary(): String = "ForcingPass1Memo: ${cache.size} cached, $hits hit(s), $misses miss(es)"
+
+    /** Reset the process-scoped state at the start of each generation run. */
+    fun reset() {
+        cache.clear()
+        hits = 0
+        misses = 0
+    }
+}
+
 interface Resolver {
     suspend fun resolve(
         type: WrappedType,
@@ -270,8 +329,39 @@ suspend fun List<WrappedElement>.resolveForcing(
     //     here instead would silently drop those cross-instantiation methods.
     // The shared-tracker invariant still prevents the explosion: see pass 2.
     val pass1 = baseContext.withPolicyKeepingNamer(policy)
+
+    // EXPERIMENTAL cross-request memo (docs/design/broad-forcing-resolve.md §b; flag
+    // `forcing.crossRequestMemo`, OFF by default → this whole block is inert and pass 1 runs
+    // exactly as before). Under the four safety conditions, the MEMOIZABLE SUBSET of the bound
+    // classes resolves to a request-INVARIANT ResolvedClass, so we can serve requests 2..N from a
+    // process-scoped cache instead of re-resolving from scratch.
+    //
+    // The subset = non-consumers (over this request's cumulative `containerMatchKeys`) that also
+    // reference NO container consumer (condition 2 — a consumer's shape is request-dependent, and a
+    // class referencing one inherits that). Both exclusions are cheap structural type-string scans.
+    // Enabled only under IGNORE_MISSING (condition 3): under INCLUDE_MISSING a first resolution can
+    // side-effect-materialize siblings into the shared tracker, which a memo hit would skip.
+    val memoActive = ForcingPass1Memo.enabled && policy == ReferencePolicy.IGNORE_MISSING
+    val memoizable: Set<String> = if (memoActive) {
+        val consumers = boundClasses.filter { it.referencesAnyContainer(containerMatchKeys) }
+        val consumerKeys = consumers.mapTo(HashSet()) { it.type.toString() }
+        boundClasses
+            .filter { it.type.toString() !in consumerKeys }
+            .filterNot { it.referencesAnyClass(consumerKeys) }
+            .mapTo(HashSet()) { it.type.toString() }
+    } else {
+        emptySet()
+    }
     Diag.timed("forcing pass 1 (bind ${boundClasses.size} bound class(es))") {
         boundClasses.forEach {
+            val key = it.type.toString()
+            // On a memoizable-subset HIT, inject the cached finished ResolvedClass straight into
+            // this fresh request's tracker (value-based reuse, condition 1) and skip the resolve.
+            val cached = if (memoActive && key in memoizable) ForcingPass1Memo.get(key) else null
+            if (cached != null) {
+                baseContext.tracker.resolvedClasses[key] = cached
+                return@forEach
+            }
             if (pass1.resolve(it.type) == null) {
                 DropLedger.record(
                     it.type.toString(),
@@ -279,9 +369,13 @@ suspend fun List<WrappedElement>.resolveForcing(
                     DropPhase.RESOLVE
                 )
                 Log.w("Warning: can't resolve filtered class ${it.type}")
+            } else if (memoActive && key in memoizable) {
+                // MISS that just resolved: store the finished value for later requests.
+                baseContext.tracker.resolvedClasses[key]?.let { ForcingPass1Memo.put(key, it) }
             }
         }
     }
+    if (memoActive) Diag.line(ForcingPass1Memo.summary())
 
     // ---- Pass 2: INCLUDE_MISSING — bind the forcing struct (the container). ----
     // Same tracker. The struct's `value` member (`std::vector<clang::Decl*>`) is
@@ -459,6 +553,32 @@ private fun WrappedClass.referencesAnyContainer(containerKeys: Set<String>): Boo
                     child.args.any { it.type.mentionsContainer() }
 
             is WrappedField -> child.type.mentionsContainer()
+
+            else -> false
+        }
+    }
+}
+
+/**
+ * True when any member of this bound class references one of the [classKeys] (exact rendered
+ * type-string match) in its return type, an argument type, or a field type. Used by the
+ * cross-request pass-1 memo (`forcing.crossRequestMemo`) to enforce condition 2 of §b.5: a class
+ * that references a container CONSUMER inherits that consumer's request-dependence and so must NOT
+ * be memoized. Purely structural (no resolution, order-independent). An empty [classKeys] set
+ * (no consumers this request) yields false — nothing to exclude on.
+ */
+private fun WrappedClass.referencesAnyClass(classKeys: Set<String>): Boolean {
+    if (classKeys.isEmpty()) return false
+    fun WrappedType.mentionsClass(): Boolean {
+        val rendered = toString()
+        return classKeys.any { rendered.contains(it) }
+    }
+    return children.any { child ->
+        when (child) {
+            is WrappedMethod ->
+                child.returnType.mentionsClass() || child.args.any { it.type.mentionsClass() }
+
+            is WrappedField -> child.type.mentionsClass()
 
             else -> false
         }
