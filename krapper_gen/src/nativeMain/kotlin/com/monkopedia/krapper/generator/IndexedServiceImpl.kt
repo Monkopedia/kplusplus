@@ -104,6 +104,9 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // (e.g. in writeTo) would be too late.
         DropLedger.reset()
         GenerationContext.reset(config.rootPackage, config.noRtti)
+        // Process-scoped base-resolve profiler (off by default, byte-identical when off). Reset per
+        // run so a partial/timed-out run's counters don't leak into a later in-process run.
+        BaseBindProfiler.reset()
     }
 
     override suspend fun filterAndResolve(filter: FilterDefinition) {

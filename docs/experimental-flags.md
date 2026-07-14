@@ -59,6 +59,27 @@ zero-overhead-when-off timing helper wired into `resolveForcing` (per-pass wall-
 counts, and a per-request total). This is the instrumentation the upcoming cross-request
 memoization experiment needs.
 
+## `diag.baseBindTiming` — base-resolve profiler
+
+`diag.baseBindTiming` profiles the **base resolve** (`filterAndResolve` / `resolveAll` — the pass
+that runs *before* any forcing), gating
+[`BaseBindProfiler`](../krapper_gen/src/nativeMain/kotlin/com/monkopedia/krapper/generator/BaseBindProfiler.kt).
+It exists to answer the issue-#10 question of whether the base-bind cost at broad Clang/LLVM scale
+is uniform-breadth (O(n)) or a hotspot/superlinear (O(n²)) — and because that run can time out, it
+emits **streaming** progress so a partial run still yields a profile:
+
+- every 100 resolved types (or 3 s), a `basebind: resolved=… elapsed=… inst=…/s cum=…/s walks=…
+  nodes=…` line — a decaying instantaneous rate is the O(n²) fingerprint;
+- a running **top-N slowest types** (names the pathological types, if any);
+- **tree-walk counters** — every `ParsedResolver.resolve`/`resolveTemplate` does a full-TU
+  `filterRecursive` walk, so `walks`/`nodes` expose the O(distinct-types × tree-size) cost directly;
+- INCLUDE_MISSING on-demand materialization + re-entry counts.
+
+`BaseBindProfiler.report()` (after `resolveAll` returns) dumps the final distribution. **Inert +
+byte-identical when off** (every method early-returns; the profiler is measurement-only and never
+changes what gets bound). Run it e.g. with
+`krapper_gen … --referencePolicy INCLUDE_MISSING -X diag.baseBindTiming`.
+
 ## Candidates to migrate later (NOT done here — kept out of scope)
 
 These pre-existing ad-hoc toggles could later move into the registry for consistency:
