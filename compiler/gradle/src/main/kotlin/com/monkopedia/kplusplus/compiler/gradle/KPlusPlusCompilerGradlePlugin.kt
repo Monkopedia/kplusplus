@@ -74,10 +74,21 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // ANY module flipped to cpp now self-wires the front-end build generically.
             // resolveKrapperParse covers BOTH the sibling layout (featuregen/cppfixture) and
             // the included-build layout (the standalone v8 example, where krapper_parse lives in
-            // the kplusplus build pulled in via includeBuild) — its link task is null when
-            // clang isn't enabled, in which case the doLast fails fast with the -PenableClang
-            // guidance.
-            if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
+            // the kplusplus build pulled in via includeBuild).
+            //
+            // The dependsOn is gated on `clangEnabled` — the SAME -PenableClang/-PllvmConfig
+            // signal that gates :krapper_parse into the build (settings.gradle.kts). This is
+            // load-bearing for the included-build layout: `IncludedBuild.task(":krapper_parse:…")`
+            // returns a LAZY reference that does NOT validate the project exists, so when the
+            // module is on the cpp front-end but clang is NOT enabled (e.g. an IntelliJ Gradle
+            // sync, which passes no -PenableClang), resolveKrapperParse hands back a dangling
+            // task ref into the included :kplusplus build — where :krapper_parse was never
+            // include()d — and Gradle hard-fails at graph resolution ("Project with path
+            // ':krapper_parse' not found in build ':kplusplus'"), aborting the ENTIRE IDE import.
+            // Skipping the dependsOn when clang is off keeps CONFIGURATION clean; the LLVM
+            // requirement is deferred to EXECUTION, where the doLast fails fast with the
+            // -PenableClang guidance (runKrapperParseSync / the missing-binary check below).
+            if (target.findProperty("kpp.frontend.${target.name}") == "cpp" && clangEnabled(target)) {
                 resolveKrapperParse(target).first?.let { ct -> it.dependsOn(ct) }
             }
             val krappedDir = krappedDirFor(target)
@@ -666,6 +677,22 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * Whether the LLVM/Clang-gated modules (:krapper_parse et al.) are enabled for this build.
+     * Mirrors the gate in the root `settings.gradle.kts` EXACTLY: `-PenableClang` (any value but
+     * "false") OR `-PllvmConfig=<path>` (its mere presence opts in). Gradle propagates `-P`
+     * project properties across the composite, so this reads true in the consumer build (v8)
+     * precisely when :krapper_parse was actually include()d into the pulled-in kplusplus build.
+     * Used to skip the :krapper_parse dependsOn when the module is null — otherwise the lazy,
+     * non-validating included-build task ref dangles and hard-fails graph resolution during an
+     * IDE sync (see the dependsOn site).
+     */
+    private fun clangEnabled(target: Project): Boolean {
+        val enableClang = target.findProperty("enableClang")
+        val llvmConfig = target.findProperty("llvmConfig")
+        return (enableClang != null && enableClang != "false") || llvmConfig != null
     }
 
     /**
