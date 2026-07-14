@@ -425,9 +425,12 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
 
     override fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate =
         templateMap.getOrPut(type.toString()) {
+            var walkedNodes = 0
             val templateCandidates = tu.filterRecursive {
+                if (BaseBindProfiler.enabled) walkedNodes++
                 ((it as? WrappedTemplate)?.qualified == type.toString())
             }
+            BaseBindProfiler.recordTreeWalk(walkedNodes)
             templateCandidates.singleOrNull() as? WrappedTemplate
                 ?: error("Can't resolve template $type (${type::class.simpleName})")
         }
@@ -436,27 +439,47 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         type: WrappedType,
         context: ResolveContext
     ): Pair<ResolvedClass, WrappedClass>? {
-        return classMap.getOrPut(type.toString()) {
-            val existingClass = tu.filterRecursive {
-                (it as? WrappedClass)?.type?.toString() == type.toString() &&
-                    it.isNotEmpty()
-            }.singleOrNull() as? WrappedClass
-            existingClass?.let { cls ->
-                return@getOrPut cls.resolve(context)?.let { it to cls }
+        val key = type.toString()
+        // When the profiler is OFF this is exactly the original `classMap.getOrPut(key) { ... }`.
+        // When ON, a memo HIT returns early (no timing — no work done); only a genuine MISS is
+        // timed + recorded, so the rate reflects real per-type resolve work, not memo lookups.
+        if (!BaseBindProfiler.enabled) {
+            return classMap.getOrPut(key) { computeResolve(type, key, context) }
+        }
+        classMap[key]?.let { return it }
+        val resolveMark = kotlin.time.TimeSource.Monotonic.markNow()
+        val result = classMap.getOrPut(key) { computeResolve(type, key, context) }
+        BaseBindProfiler.recordResolved(key, resolveMark.elapsedNow().inWholeMicroseconds / 1000.0)
+        return result
+    }
+
+    private suspend fun computeResolve(
+        type: WrappedType,
+        key: String,
+        context: ResolveContext
+    ): Pair<ResolvedClass, WrappedClass>? {
+        var walkedNodes = 0
+        val existingClass = tu.filterRecursive {
+            if (BaseBindProfiler.enabled) walkedNodes++
+            (it as? WrappedClass)?.type?.toString() == key &&
+                it.isNotEmpty()
+        }.singleOrNull() as? WrappedClass
+        BaseBindProfiler.recordTreeWalk(walkedNodes)
+        existingClass?.let { cls ->
+            return cls.resolve(context)?.let { it to cls }
+        }
+        return when (type) {
+            is WrappedTemplateType -> {
+                val template = resolveTemplate(type.baseType, context)
+                template.typedAs(type, context)
             }
-            when (type) {
-                is WrappedTemplateType -> {
-                    val template = resolveTemplate(type.baseType, context)
-                    template.typedAs(type, context)
-                }
 
-                is WrappedTemplateRef -> {
-                    throw IllegalArgumentException("Can't resolve $type since it is templated")
-                }
+            is WrappedTemplateRef -> {
+                throw IllegalArgumentException("Can't resolve $type since it is templated")
+            }
 
-                else -> {
-                    error("Can't resolve $type (${type::class.simpleName})")
-                }
+            else -> {
+                error("Can't resolve $type (${type::class.simpleName})")
             }
         }
     }

@@ -132,6 +132,7 @@ suspend fun List<WrappedElement>.resolveAll(
         )
         .withClasses(classes)
         .withPolicy(policy)
+    BaseBindProfiler.begin(classes.size)
     classes.forEach {
         if (resolveContext.resolve(it.type) == null) {
             DropLedger.record(
@@ -142,6 +143,7 @@ suspend fun List<WrappedElement>.resolveAll(
             Log.w("Warning: can't resolve filtered class ${it.type}")
         }
     }
+    BaseBindProfiler.report()
     val methods = filterIsInstance<WrappedMethod>().mapNotNull { method ->
         (method.parent as? WrappedNamespace)?.let { nm ->
             method.resolve(resolveContext + nm)
@@ -743,8 +745,10 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                         // class isn't deduped and resolution descends until the native
                         // stack overflows.
                         if (context.tracker.otherResolved.contains(it.toString())) {
+                            BaseBindProfiler.recordInclude(reentry = true)
                             return@operateOn ElementUnchanged
                         }
+                        BaseBindProfiler.recordInclude(reentry = false)
                         context.tracker.otherResolved.add(it.toString())
                         try {
                             // Reference expansion: keep the legacy hard-fail when a

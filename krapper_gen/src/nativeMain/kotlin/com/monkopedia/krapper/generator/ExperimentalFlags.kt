@@ -86,9 +86,23 @@ object ExperimentalFlags {
         description = "Log per-phase wall-clock timings (ms) + counts to stderr."
     )
 
+    // Profile the BASE resolve (filterAndResolve / resolveAll — the pass that runs BEFORE any
+    // forcing). Emits STREAMING progress (cumulative classes resolved, elapsed, classes/sec) so a
+    // run that times out still yields a profile, plus a per-type resolve-time distribution: a
+    // running top-N of the slowest types and the full-tree-walk (`filterRecursive`) counters that
+    // reveal whether the cost is uniform-breadth O(n) or a superlinear O(n²) tree-walk hotspot. Off
+    // by default and byte-identical when off (measurement only — never changes what gets bound).
+    val DIAG_BASE_BIND_TIMING = ExperimentalFlag.BoolFlag(
+        "diag.baseBindTiming",
+        default = false,
+        description = "Profile the base resolve: streaming classes/sec progress + per-type " +
+            "slowest-N distribution + tree-walk counters (O(n) vs O(n²) diagnosis)."
+    )
+
     /** Every declared flag. Add new flags here. */
     val all: List<ExperimentalFlag<*>> = listOf(
-        DIAG_TIMING
+        DIAG_TIMING,
+        DIAG_BASE_BIND_TIMING
     )
 
     private val byName: Map<String, ExperimentalFlag<*>> = all.associateBy { it.name }
