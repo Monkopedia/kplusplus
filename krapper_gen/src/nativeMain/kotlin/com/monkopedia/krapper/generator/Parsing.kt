@@ -423,15 +423,71 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
     private val classMap = mutableMapOf<String, Pair<ResolvedClass, WrappedClass>?>()
     private val templateMap = mutableMapOf<String, WrappedTemplate>()
 
+    // ---- Type-string index over the TU (issue #10 / PR #160 base-bind hotspot) ----
+    //
+    // `resolve`/`resolveTemplate` used to locate a class/template by re-walking the ENTIRE
+    // ~73k-node TU with `filterRecursive` on every distinct type — O(distinct-types × tree-size),
+    // measured at ~1.27 B node visits / ~309 s by the #160 profiler. These indices replace that
+    // with an O(1) map lookup keyed by the SAME strings `filterRecursive` compared against:
+    //   * classIndex:    `WrappedClass.type.toString()` -> the WrappedClass node(s) with that type
+    //   * templateIndex: `WrappedTemplate.qualified`     -> the WrappedTemplate node(s) with it
+    //
+    // BYTE-IDENTICAL contract — the index must return EXACTLY what `filterRecursive{…}.singleOrNull()`
+    // returned. Two invariants make that hold:
+    //
+    //  1. Match semantics preserved AT QUERY TIME. `filterRecursive` returned ALL matches and the
+    //     callers took `singleOrNull()` (the node iff exactly one match; null for 0 or 2+). So the
+    //     index stores a LIST per key (grouped, pre-order — same order filterRecursive produced) and
+    //     the query applies `singleOrNull()` itself. Crucially the `isNotEmpty()` predicate the class
+    //     scan ANDs in is evaluated at QUERY time on the (small) candidate list, NOT frozen at build
+    //     time: `isNotEmpty()` reflects the class's live children, and although the resolve loop can
+    //     mutate a class's children (modifyMethodsIfNeeded adds a default ctor + sizeOf/alignOf;
+    //     dropConstOverloadDuplicates / hasHiddenDelete remove members), evaluating it lazily makes
+    //     the index observe the exact same value the live `filterRecursive` scan would have. (In
+    //     practice the synthetic additions are excluded by `calculateNotEmpty`, so emptiness is
+    //     stable, but querying live keeps us correct without relying on that.)
+    //
+    //  2. The indexed node SET is FIXED for the resolver's lifetime, so a one-time build is complete.
+    //     No WrappedClass or WrappedTemplate is ever ADDED to `tu` during resolution: INCLUDE_MISSING
+    //     materializations (`typedAs`) build a DETACHED WrappedClass stored only in classMap/tracker
+    //     (never `tu.addChild`-ed), and the only in-tree mutations are non-Class/non-Template members
+    //     (ctor/sizeOf/alignOf) and the pre-resolution rewrites that all run BEFORE the first query.
+    //     The key strings (`type`/`qualified`) derive from the parent chain, which is likewise stable
+    //     once resolution starts (the forcing first-seen reorder runs during loadForcingModel, before
+    //     resolve). So building once (lazily, on first query) captures every node any scan could match.
+    //
+    // Built lazily on first use (after findClasses / the pre-resolution rewrites have run) in ONE
+    // `forEachRecursive` pass: ~1.27 B node visits collapse to a single ~73k-node walk.
+    private var indexBuilt = false
+    private val classIndex = mutableMapOf<String, MutableList<WrappedClass>>()
+    private val templateIndex = mutableMapOf<String, MutableList<WrappedTemplate>>()
+
+    private fun ensureIndex() {
+        if (indexBuilt) return
+        var walkedNodes = 0
+        tu.forEachRecursive { element ->
+            if (BaseBindProfiler.enabled) walkedNodes++
+            when (element) {
+                is WrappedClass ->
+                    classIndex.getOrPut(element.type.toString()) { mutableListOf() }.add(element)
+
+                is WrappedTemplate ->
+                    templateIndex.getOrPut(element.qualified) { mutableListOf() }.add(element)
+
+                else -> {}
+            }
+        }
+        // One build pass instead of one whole-TU walk per distinct type — the whole point of #10.
+        BaseBindProfiler.recordTreeWalk(walkedNodes)
+        indexBuilt = true
+    }
+
     override fun resolveTemplate(type: WrappedType, context: ResolveContext): WrappedTemplate =
         templateMap.getOrPut(type.toString()) {
-            var walkedNodes = 0
-            val templateCandidates = tu.filterRecursive {
-                if (BaseBindProfiler.enabled) walkedNodes++
-                ((it as? WrappedTemplate)?.qualified == type.toString())
-            }
-            BaseBindProfiler.recordTreeWalk(walkedNodes)
-            templateCandidates.singleOrNull() as? WrappedTemplate
+            ensureIndex()
+            // Mirror `filterRecursive { qualified == key }.singleOrNull()`: the single template
+            // with this qualified name, or fail (0 or 2+ candidates -> singleOrNull() == null).
+            templateIndex[type.toString()]?.singleOrNull()
                 ?: error("Can't resolve template $type (${type::class.simpleName})")
         }
 
@@ -458,13 +514,13 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         key: String,
         context: ResolveContext
     ): Pair<ResolvedClass, WrappedClass>? {
-        var walkedNodes = 0
-        val existingClass = tu.filterRecursive {
-            if (BaseBindProfiler.enabled) walkedNodes++
-            (it as? WrappedClass)?.type?.toString() == key &&
-                it.isNotEmpty()
-        }.singleOrNull() as? WrappedClass
-        BaseBindProfiler.recordTreeWalk(walkedNodes)
+        ensureIndex()
+        // Mirror `filterRecursive { type.toString() == key && it.isNotEmpty() }.singleOrNull()`:
+        // among the classes indexed under this type-string, keep the non-empty ones (evaluated
+        // LIVE, not at index-build time — see the invariant note above) and take singleOrNull().
+        val existingClass = classIndex[key]
+            ?.filter { it.isNotEmpty() }
+            ?.singleOrNull()
         existingClass?.let { cls ->
             return cls.resolve(context)?.let { it to cls }
         }
