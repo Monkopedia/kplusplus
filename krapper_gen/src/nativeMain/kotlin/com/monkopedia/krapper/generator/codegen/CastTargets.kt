@@ -109,14 +109,64 @@ data class DownCastTarget(
     }
 }
 
-// True when [cls] declares a static `classof` member — the LLVM-style-RTTI signal. LLVM's
-// `dyn_cast<T>` routes the runtime check through `T::classof(const Base*)` (a discriminator
+// The static `classof` member(s) of [cls] — the LLVM-style-RTTI signal. LLVM's
+// `dyn_cast<T>` routes the runtime check through `T::classof(const Root *)` (a discriminator
 // /Kind-enum check), so such a type is castable WITHOUT C++ RTTI and, being compiled
 // `-fno-rtti`, can NOT use `dynamic_cast`. `classof` survives resolution as a STATIC method
 // (confirmed against the real Clang AST: `clang::TypeDecl::classof` et al. bind cleanly).
-private fun hasLlvmClassof(cls: ResolvedClass): Boolean =
+private fun classofMethods(cls: ResolvedClass): List<ResolvedMethod> =
     cls.children.filterIsInstance<ResolvedMethod>()
-        .any { it.methodType == MethodType.STATIC && it.name == "classof" }
+        .filter { it.methodType == MethodType.STATIC && it.name == "classof" }
+
+// True when [cls] declares a static `classof` — i.e. it participates in LLVM-style RTTI.
+private fun hasLlvmClassof(cls: ResolvedClass): Boolean = classofMethods(cls).isNotEmpty()
+
+// The LLVM-RTTI ROOT type-string(s) that [derived]'s `classof` accepts, e.g. for
+// `InheritableAttr::classof(const Attr *)` -> "clang::Attr". `dyn_cast<derived>(b)` lowers
+// to `derived::classof(const Root *)`, so the operand pointer must convert to `Root *`. We
+// read those Root types straight off the bound `classof` signature(s) (the first parameter,
+// stripped of `const`/`&`/`*`/whitespace) rather than guessing them, so the convertibility
+// gate below is exact for whatever hierarchy the model actually carries.
+private fun classofRootTypeStrings(derived: ResolvedClass): Set<String> =
+    classofMethods(derived).mapNotNullTo(mutableSetOf()) {
+        it.args.firstOrNull()?.type?.typeString?.stripToTypeName()
+    }
+
+// Strip a parameter type spelling (`const clang::Attr *`) down to the bare class type name
+// (`clang::Attr`) so it can be compared to a ResolvedClass's `type.toString()`.
+private fun String.stripToTypeName(): String =
+    replace("const", " ").replace("*", " ").replace("&", " ").replace(Regex("\\s+"), "").trim()
+
+// True when `llvm::dyn_cast<derived>(base *)` is well-formed. LLVM's cast machinery accepts
+// the operand in two ways, and we admit exactly those:
+//
+//  1. [base] is (or transitively derives from) a `classof` Root of [derived] — the plain
+//     case: `base *` up-converts to the `classof(const Root *)` parameter. This is what
+//     lets `dyn_cast<InheritableAttr>(Attr *)` work even though `Attr` itself declares no
+//     `classof` (its subclasses' `classof` takes `const Attr *`, so `Attr` IS the Root).
+//
+//  2. [base] itself declares a `classof` — it is an LLVM-RTTI node in its own right, so
+//     LLVM provides the cross-hierarchy bridge (e.g. `Decl`<->`DeclContext` via
+//     `castFromDeclContext`). This lets `dyn_cast<TagDecl>(DeclContext *)` work even though
+//     `DeclContext` is a PARALLEL base of `TagDecl`, not on the `Decl` Root chain.
+//
+// A mixin/utility ancestor satisfies NEITHER and is correctly rejected: `AttributeCommonInfo`
+// (a base OF the Root `Attr`, with no `classof` of its own), the intrusive
+// `llvm::FoldingSetBase::Node`, the CRTP `Redeclarable<T>`/`Mergeable<T>` bases of `Decl`.
+// Feeding one to `classof(const Root *)` is the "cannot initialize a parameter of type
+// 'const Root *' with an rvalue of type 'const Base *'" broad-surface compile error.
+private fun dynCastFromBaseIsWellFormed(
+    base: ResolvedClass,
+    derived: ResolvedClass,
+    lookup: (String) -> ResolvedClass?
+): Boolean {
+    if (hasLlvmClassof(base)) return true
+    val roots = classofRootTypeStrings(derived)
+    if (roots.isEmpty()) return false
+    if (base.type.toString() in roots) return true
+    // `base *` -> `Root *` is valid when Root is a (transitive, public) base of base.
+    return castTargetsFor(base, lookup).any { it.base.type.toString() in roots }
+}
 
 // True when [cls] itself declares a virtual member (method or destructor) — i.e. it has
 // its own vtable. `dynamic_cast<D*>(b)` requires the OPERAND type (the base) to be
@@ -151,7 +201,16 @@ fun downCastTargetsFor(
             it.base.type.toString() == baseTypeStr
         }
         if (!reachesBase) continue
-        val useLlvmDynCast = hasLlvmClassof(derived)
+        // Use the LLVM `classof` down-cast only when the derived declares a `classof` (the
+        // Kind-check to run) AND `llvm::dyn_cast<derived>(base *)` is actually well-formed —
+        // see `dynCastFromBaseIsWellFormed`. That guards the broad-surface break where a
+        // mixin/utility ancestor (e.g. `AttributeCommonInfo` above the Root `Attr`, the
+        // intrusive `FoldingSetBase::Node`, the CRTP `Redeclarable<T>`/`Mergeable<T>` bases
+        // of `Decl`) was fed to a `classof(const Root *)` it can't convert to. A valid base
+        // (the Root, a node between Root and derived, or an LLVM-RTTI node with its own
+        // `classof` such as `DeclContext`) still takes this RTTI-free path unchanged.
+        val useLlvmDynCast = hasLlvmClassof(derived) &&
+            dynCastFromBaseIsWellFormed(base, derived, lookup)
         // A `-fno-rtti` target library (config.noRtti) exports no `typeinfo` symbols, so the
         // generic `dynamic_cast<D*>` path below would reference a `typeinfo for D` the library
         // doesn't provide and fail to LINK (e.g. v8's TracingController / ExternalStringResource
