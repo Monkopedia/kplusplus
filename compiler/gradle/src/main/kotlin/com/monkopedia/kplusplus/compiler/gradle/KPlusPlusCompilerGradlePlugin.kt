@@ -928,7 +928,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         const val PLUGIN_ID = "com.monkopedia.kplusplus.compiler"
         const val PLUGIN_GROUP = "com.monkopedia.kplusplus"
         const val PLUGIN_NAME = "kplusplus-compiler-plugin"
-        const val PLUGIN_VERSION = "0.3.2"
+        const val PLUGIN_VERSION = "0.3.3"
         const val MIN_KOTLIN_VERSION = "2.3.20"
 
         // The C++ standard the cpp front-end parses (and krapper_gen compiles the wrapper)

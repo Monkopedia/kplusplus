@@ -11,7 +11,7 @@ plugins {
 
 allprojects {
     group = "com.monkopedia.kplusplus"
-    version = "0.3.2"
+    version = "0.3.3"
 }
 
 // Aggregate publish for the two consumer-facing JVM artifacts that live in this

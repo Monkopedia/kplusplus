@@ -13,7 +13,7 @@ plugins {
 }
 
 group = "com.monkopedia.kplusplus"
-version = "0.3.2"
+version = "0.3.3"
 
 // Sign only when a key is present (CI); otherwise local publishToMavenLocal fails with "no
 // configured signatory". See compiler/gradle/build.gradle.kts for the full rationale.
