@@ -50,7 +50,7 @@ class CppCodeTests {
     """.trimIndent()
     private val stdVectorStringNew = """
         void* std_vector_std_string_new(void* location) {
-            return new (location) std::vector<std::string>();
+            return ::new (location) std::vector<std::string>();
         }
     """.trimIndent()
     private val stdVectorStringDispose = """
@@ -68,7 +68,7 @@ class CppCodeTests {
     """.trimIndent()
     private val testlibOtherclassNew = """
         void* TestLib_OtherClass_new(void* location) {
-            return new (location) TestLib::OtherClass();
+            return ::new (location) TestLib::OtherClass();
         }
     """.trimIndent()
     private val testlibOtherclassDispose = """
@@ -123,23 +123,23 @@ class CppCodeTests {
     """.trimIndent()
     private val testlibTestclassNew = """
         void* TestLib_TestClass_new(void* location) {
-            return new (location) TestLib::TestClass();
+            return ::new (location) TestLib::TestClass();
         }
     """.trimIndent()
     private val testlibTestclass2New = """
         void* TestLib_TestClass_new__const_TestLib_TestClass_and(void* location, void* other) {
             const TestLib::TestClass* other_cast = reinterpret_cast<const TestLib::TestClass*>(other);
-            return new (location) TestLib::TestClass(*other_cast);
+            return ::new (location) TestLib::TestClass(*other_cast);
         }
     """.trimIndent()
     private val testlibTestclass3New = """
         void* TestLib_TestClass_new__int(void* location, int a) {
-            return new (location) TestLib::TestClass(a);
+            return ::new (location) TestLib::TestClass(a);
         }
     """.trimIndent()
     private val testlibTestclass4New = """
         void* TestLib_TestClass_new__int_double(void* location, int a, double b) {
-            return new (location) TestLib::TestClass(a, b);
+            return ::new (location) TestLib::TestClass(a, b);
         }
     """.trimIndent()
     private val testlibTestclassDispose = """
@@ -526,14 +526,14 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast - *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast - *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassMinusUnary = """
             void TestLib_TestClass_op_unary_minus(void* thiz, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator-());
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator-());
         }
     """.trimIndent()
     private val testlibTestclassPlus = """
@@ -541,14 +541,14 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast + *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast + *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassPlusUnary = """
             void TestLib_TestClass_op_unary_plus(void* thiz, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator+());
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator+());
         }
     """.trimIndent()
     private val testlibTestclassTimes = """
@@ -556,7 +556,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast * *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast * *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassDivide = """
@@ -564,7 +564,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast / *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast / *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassModulo = """
@@ -572,35 +572,35 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast % *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast % *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassPreInc = """
         void TestLib_TestClass_op_increment(void* thiz, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator++());
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator++());
         }
     """.trimIndent()
     private val testlibTestclassPostInc = """
          void TestLib_TestClass_op_post_increment(void* thiz, int dummy, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator++(dummy));
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator++(dummy));
         }
     """.trimIndent()
     private val testlibTestclassPreDec = """
         void TestLib_TestClass_op_decrement(void* thiz, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator--());
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator--());
         }
     """.trimIndent()
     private val testlibTestclassPostDec = """
         void TestLib_TestClass_op_post_decrement(void* thiz, int dummy, void* ret_value) {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator--(dummy));
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator--(dummy));
         }
     """.trimIndent()
     private val testlibTestclassEqCmp = """
@@ -608,7 +608,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast == *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast == *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassNeq = """
@@ -616,7 +616,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast != *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast != *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassLt = """
@@ -624,7 +624,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast < *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast < *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassGt = """
@@ -632,7 +632,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast > *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast > *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassLteq = """
@@ -640,7 +640,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast <= *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast <= *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassGteq = """
@@ -648,7 +648,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast >= *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast >= *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassBnot = """
@@ -662,7 +662,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c_cast = reinterpret_cast<TestLib::TestClass*>(c);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast && *c_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast && *c_cast);
         }
     """.trimIndent()
     private val testlibTestclassBor = """
@@ -670,7 +670,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast || *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast || *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassNot = """
@@ -684,7 +684,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c_cast = reinterpret_cast<TestLib::TestClass*>(c);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast & *c_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast & *c_cast);
         }
     """.trimIndent()
     private val testlibTestclassOr = """
@@ -692,7 +692,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast | *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast | *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassXor = """
@@ -700,7 +700,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast ^ *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast ^ *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassShl = """
@@ -708,7 +708,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast << *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast << *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassShr = """
@@ -716,7 +716,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             TestLib::TestClass* c2_cast = reinterpret_cast<TestLib::TestClass*>(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(*thiz_cast >> *c2_cast);
+            ::new (ret_value_cast) TestLib::TestClass(*thiz_cast >> *c2_cast);
         }
     """.trimIndent()
     private val testlibTestclassInd = """
@@ -724,7 +724,7 @@ class CppCodeTests {
             TestLib::TestClass* thiz_cast = reinterpret_cast<TestLib::TestClass*>(thiz);
             std::string c2_cast = std::string(c2);
             TestLib::TestClass* ret_value_cast = reinterpret_cast<TestLib::TestClass*>(ret_value);
-            new (ret_value_cast) TestLib::TestClass(thiz_cast->operator[](c2_cast));
+            ::new (ret_value_cast) TestLib::TestClass(thiz_cast->operator[](c2_cast));
         }
     """.trimIndent()
     private val testlibMypairTestlibOtherclassA = """
