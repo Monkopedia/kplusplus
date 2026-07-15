@@ -69,7 +69,34 @@ class WrappedModifiedType(val baseType: WrappedType, val modifier: String) : Wra
     override val unconst: WrappedType
         get() = WrappedModifiedType(baseType.unconst, modifier)
 
-    override fun toString(): String = "${baseType}$modifier"
+    // A pointer/reference/array applied on top of a base type. The base renders itself,
+    // then this level's `*`/`&`/`[]` is appended.
+    //
+    // One base shape needs care: a `const`-qualified POINTER (`WrappedPrefixedType(ptr,
+    // "const")`, i.e. a `T* const` — the top-level const TypeBuilder re-applies to a pointer
+    // via maybeConst). That base renders itself WEST as `const T*`; appending this level's
+    // `*` yields `const T**`, which C++ re-parses as the DIFFERENT type
+    // pointer-to-(pointer-to-const-T) — the pointee's const wrongly migrated one level in.
+    // The intended type is pointer-to-(`T* const`), which C++ can only spell EAST as
+    // `T* const*`. So when the base is exactly a const-qualified pointer, spell that base
+    // east before appending. (A bare top-level `const T*` return/param base is never wrapped
+    // by an outer modifier, so its idiomatic west spelling is untouched — see the clangwalk
+    // slice, unchanged.) Reached e.g. by ArrayRef<T*>'s `const T* data` ctor arg with
+    // T = `IdentifierInfo*`: `const T*` -> `IdentifierInfo* const*`, matching the ArrayRef
+    // `const T *` constructor instead of failing with "no matching constructor".
+    override fun toString(): String {
+        val base = baseType
+        val baseSpelling =
+            if (base is WrappedPrefixedType &&
+                base.modifier == "const" &&
+                base.baseType.isPointer
+            ) {
+                "${base.baseType} ${base.modifier}"
+            } else {
+                base.toString()
+            }
+        return "$baseSpelling$modifier"
+    }
 }
 
 class WrappedPrefixedType(val baseType: WrappedType, val modifier: String) : WrappedType() {
