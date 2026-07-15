@@ -104,11 +104,20 @@ class New(private val s: Symbol, private val location: Symbol? = null) :
         get() = listOf(s)
 
     override fun build(builder: CodeStringBuilder) {
-        builder.append("new ")
         if (location != null) {
-            builder.append('(')
+            // Global-scope placement new: construct into the caller-provided buffer
+            // via ::operator new(size_t, void*). The leading `::` is load-bearing —
+            // classes that declare a class-scoped `operator new` (e.g. clang's
+            // Attr/Decl allocator news taking an ASTContext) HIDE the standard
+            // placement new, so an unqualified `new (buf) T(...)` would resolve to
+            // the allocator overload and fail to match. `::new` bypasses class-scope
+            // lookup and is identical to unqualified placement-new for every type
+            // that does not declare its own operator new.
+            builder.append("::new (")
             location.build(builder)
             builder.append(") ")
+        } else {
+            builder.append("new ")
         }
         s.build(builder)
     }
