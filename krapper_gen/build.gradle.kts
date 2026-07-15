@@ -57,7 +57,7 @@ kotlin {
             all {
                 @OptIn(KotlinNativeCacheApi::class)
                 disableNativeCache(
-                    version = DisableCacheInKotlinVersion.`2_4_0`,
+                    version = DisableCacheInKotlinVersion.`2_4_10`,
                     reason = "clikt 5.1.0 duplicate-symbol with cached native libs",
                 )
             }
