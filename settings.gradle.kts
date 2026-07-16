@@ -14,7 +14,7 @@ pluginManagement {
     // so their dev loop is still immediate; PLUGIN development happens in an example (samples/*)
     // that includeBuilds compiler. Bump this version on each release.
     plugins {
-        id("com.monkopedia.kplusplus.compiler") version "0.3.2"
+        id("com.monkopedia.kplusplus.compiler") version "0.3.3"
     }
 }
 
