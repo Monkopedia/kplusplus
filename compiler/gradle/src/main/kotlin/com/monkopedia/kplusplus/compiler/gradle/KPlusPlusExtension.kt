@@ -92,6 +92,21 @@ open class KPlusPlusExtension {
      */
     var referencePolicy: String? = null
 
+    /**
+     * Path to the consumer's `llvm-config` (#124, #128 R4). The cpp front-end
+     * (`kpp.frontend.<module>=cpp`) parses your headers with a bundled Clang. Clang's
+     * OWN builtin headers (stddef.h etc.) are located by krapper_parse via
+     * `clang++ -print-resource-dir` on `PATH`; but a library's headers under a
+     * NON-default-path LLVM install (e.g. apt.llvm.org under `/usr/lib/llvm-22/include`,
+     * where `<clang/AST/...>` lives) are only found if explicitly on the include path.
+     * When left null the plugin auto-discovers via `llvm-config` on `PATH` (mirroring
+     * the root `settings.gradle.kts` probe) and honors `-PllvmConfig=<path>`; set this
+     * to point at a specific install's `llvm-config`, and the plugin runs
+     * `<llvmConfig> --includedir` and threads that dir into the parse as a `-I`. Takes
+     * precedence over the `-PllvmConfig` property.
+     */
+    var llvmConfig: String? = null
+
     internal val only: MutableList<String> = mutableListOf()
     internal var onlyFile: String? = null
 

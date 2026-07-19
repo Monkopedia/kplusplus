@@ -31,6 +31,10 @@ kplusplus {
 
     cppStandard = "c++17"             // default c++14
 
+    // Point the front-end at a non-default-path LLVM-22 install, if your `llvm-config`
+    // isn't on PATH (auto-discovered otherwise; also settable via -PllvmConfig).
+    // llvmConfig = "/usr/lib/llvm-22/bin/llvm-config"
+
     // Force template specializations you use (C++ instantiates templates at
     // compile time, so each concrete type you call needs to be requested).
     instantiate("std::vector<int>")
@@ -38,6 +42,12 @@ kplusplus {
 ```
 
 Build, and the generated Kotlin bindings are on the classpath — call your C++ API directly.
+
+New to K++, or consuming the **published** plugin from an external project? Start with the
+step-by-step [docs/getting-started.md](docs/getting-started.md) — the full external-consumer flow
+(declare the plugin from `mavenCentral()`/the Plugin Portal, the LLVM-22 prerequisite + how to
+point K++ at a non-default-path install via `llvmConfig` / `-PllvmConfig`, minimal config, build +
+run).
 
 Runnable samples live under [`samples/`](samples). Start with
 [`samples/minimal`](samples/minimal) — a tiny hand-written C++ geometry library bound and run

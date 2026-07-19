@@ -130,6 +130,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.property("cppStandard", e.cppStandard ?: "")
                 it.inputs.property("noRtti", e.noRtti)
                 it.inputs.property("rootPackage", e.rootPackage ?: "")
+                it.inputs.property("llvmConfig", e.llvmConfig ?: "")
                 it.inputs.property("only", e.only.sorted())
                 it.inputs.property("onlyFile", e.onlyFile ?: "")
                 it.inputs.property("fixups", e.fixups.toJsonArray())
@@ -350,7 +351,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val modelsDir = File(krappedDir, "cpp-models").apply { mkdirs() }
         // The include dirs ride the trailing args as -I tokens; krapper_parse partitions them
         // from the type specs (which never start with -I) — see --parity-emit / parityEmit.
-        val includeFlags = includeDirs.map { "-I$it" }
+        // Prepend the consumer's LLVM include dir (#124, #128 R4): a from-published consumer
+        // whose LLVM-22 headers are NOT on the default include path (e.g. apt.llvm.org under
+        // /usr/lib/llvm-22/include) would otherwise fail to resolve <clang/AST/...>-style
+        // headers, because krapper_parse's bundled Clang only searches its resource-dir +
+        // the driver's default paths. Discovered via `llvm-config --includedir` (or the
+        // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
+        val llvmIncludeDirs = resolveLlvmIncludeDirs(target, ext)
+        val includeFlags = (llvmIncludeDirs + includeDirs).map { "-I$it" }
         fun emit(specs: List<String>): String {
             val proc = ProcessBuilder(
                 listOf(cppBinary.absolutePath, "--parity-emit", modelsDir.absolutePath, headerPath, std) +
@@ -496,6 +504,94 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
         File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
         println("kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s).")
+    }
+
+    /**
+     * Resolve the consumer's LLVM/Clang include dir(s) to thread into the cpp-parse as `-I`
+     * (#124, #128 R4). The cpp front-end's bundled Clang finds Clang's OWN builtin headers via
+     * its resource-dir (`clang++ -print-resource-dir`, resolved inside krapper_parse) and system
+     * C++ headers via the driver's default GCC detection, but a library's OWN headers under a
+     * NON-default-path LLVM install (e.g. apt.llvm.org's /usr/lib/llvm-22/include, where
+     * <clang/AST/...> lives) are found ONLY if explicitly on the include path. In-tree this box
+     * has system LLVM-22 on the default path so no -I was needed; a from-published consumer on a
+     * versioned install has neither the settings.gradle.kts probe nor that default path — this
+     * closes that gap.
+     *
+     * Discovery order, mirroring settings.gradle.kts:
+     *   1. the `kplusplus { llvmConfig = ... }` DSL override;
+     *   2. the `-PllvmConfig=<path>` project property (the SAME opt-in settings.gradle.kts uses);
+     *   3. `llvm-config` on PATH.
+     * When an override is set but unusable, fail fast with an actionable message. When NOTHING is
+     * configured and `llvm-config` is not on PATH, return empty (the header may still be on the
+     * default path, as in-tree) rather than hard-failing — if it is not, krapper_parse's own
+     * parse error surfaces. Idempotent + additive: absent config on a default-path box adds no -I.
+     */
+    private fun resolveLlvmIncludeDirs(target: Project, ext: KPlusPlusExtension?): List<String> {
+        val llvmConfigOverride = ext?.llvmConfig?.takeIf { it.isNotBlank() }
+            ?: (target.findProperty("llvmConfig") as? String)?.takeIf { it.isNotBlank() }
+        val llvmConfigExec = resolveExecutable(llvmConfigOverride ?: "llvm-config")
+        if (llvmConfigExec == null) {
+            if (llvmConfigOverride != null) {
+                throw GradleException(
+                    "kplusplus: the configured llvm-config '$llvmConfigOverride' " +
+                        "(kplusplus { llvmConfig = ... } or -PllvmConfig=) is not an executable " +
+                        "file. Point it at your LLVM-22 install's llvm-config, e.g. " +
+                        "/usr/lib/llvm-22/bin/llvm-config."
+                )
+            }
+            // Nothing configured + none on PATH: don't hard-fail — the header may still be on
+            // the default include path (the in-tree case). Surface the override hint at info.
+            target.logger.info(
+                "kplusplus: no llvm-config on PATH and none configured; the cpp front-end will " +
+                    "rely on the default include path for library headers. If parsing fails to " +
+                    "find your LLVM/library headers, set kplusplus { llvmConfig = " +
+                    "\"/path/to/llvm-config\" } or pass -PllvmConfig=<path>."
+            )
+            return emptyList()
+        }
+        val includeDir = probeExec(llvmConfigExec, "--includedir")
+        if (includeDir.isNullOrBlank() || !File(includeDir).isDirectory) {
+            throw GradleException(
+                "kplusplus: `${llvmConfigExec.absolutePath} --includedir` returned " +
+                    "'${includeDir.orEmpty()}', which is not a directory. Is this a valid LLVM " +
+                    "install? Override with kplusplus { llvmConfig = \"...\" } or -PllvmConfig=."
+            )
+        }
+        // Additive-only guard (protects the in-tree path): a system LLVM install reports its
+        // includedir as a DEFAULT system path (e.g. /usr/include). Clang already searches those,
+        // so injecting them as an explicit `-I` adds nothing AND would reorder search precedence
+        // (user `-I` before system) — exactly the in-tree case we must not alter. Only thread the
+        // dir when it is a NON-default path (the versioned-install case #124 is about, e.g.
+        // /usr/lib/llvm-22/include).
+        val canonical = File(includeDir).canonicalPath
+        if (canonical in DEFAULT_SYSTEM_INCLUDE_DIRS) return emptyList()
+        return listOf(includeDir)
+    }
+
+    /** First line of `<exec> <arg>` stdout, trimmed; null on non-zero exit or no output. */
+    private fun probeExec(exec: File, arg: String): String? {
+        return try {
+            val proc = ProcessBuilder(exec.absolutePath, arg)
+                .redirectErrorStream(true).start()
+            val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
+            if (proc.waitFor() != 0) null else out.ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Look up an executable: an absolute/relative path is taken verbatim (must be executable);
+     * a bare name is searched on PATH. Mirrors settings.gradle.kts's resolveExecutable so the
+     * consumer-side discovery matches the in-tree toolchain probe. Null when nothing is found.
+     */
+    private fun resolveExecutable(name: String): File? {
+        val direct = File(name)
+        if (direct.path.contains(File.separatorChar)) {
+            return direct.takeIf { it.canExecute() }
+        }
+        return System.getenv("PATH").orEmpty().split(File.pathSeparatorChar)
+            .map { File(it, name) }.firstOrNull { it.canExecute() }
     }
 
     /**
@@ -935,5 +1031,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // under when a module sets no kplusplus { cppStandard = ... }. Matches krapper_gen's
         // own default and the former featuregen-hardcoded cpp path.
         const val DEFAULT_CPP_STANDARD = "c++14"
+
+        // Default system include dirs a system LLVM reports as its --includedir. When
+        // llvm-config --includedir returns one of these, threading it as an explicit `-I`
+        // is a no-op that would only reorder Clang's search precedence, so it is skipped
+        // (keeps the in-tree, system-LLVM cpp path byte-for-byte unchanged). See
+        // resolveLlvmIncludeDirs.
+        val DEFAULT_SYSTEM_INCLUDE_DIRS = setOf("/usr/include", "/usr/local/include")
     }
 }
