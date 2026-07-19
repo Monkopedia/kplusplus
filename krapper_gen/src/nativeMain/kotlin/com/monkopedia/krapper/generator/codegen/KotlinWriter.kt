@@ -1777,28 +1777,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         else -> method
     }
 
-    // NB: this is the KOTLIN-name operator-symbol table. There are sibling tables on the C
-    // side (NameHandler.cleanupName, NameHandler.cleanupOperatorName) — keep them in mind if
-    // adding a symbol here; they intentionally differ (Kotlin vs C identifier rules).
-    private fun String.kotlinMethodName() = replace("<", "_lt")
-        .replace(">", "_gt")
-        .replace("\"\"", "_qts")
-        .replace("\"", "_qt")
-        .replace("()", "_call") // operator() → a plain `_call` method (not idiomatic invoke yet)
-        .replace("==", "_cmp")
-        .replace("=", "_eq")
-        .replace("+", "_plus")
-        .replace("-", "_minus")
-        .replace("/", "_div")
-        .replace("*", "_star")
-        .replace("%", "_mod")
-        .replace("!", "_not")
-        // Bitwise/logic operators from free functions (e.g. std::operator& from <memory>),
-        // which fall through the member-operator path to a plainly-named function.
-        .replace("&", "_and")
-        .replace("|", "_or")
-        .replace("^", "_xor")
-        .replace("~", "_inv")
+    // The Kotlin-name operator-symbol rewrite. The symbol set + ordering come from the
+    // shared [OPERATOR_SYMBOLS] table (via [kotlinToken]); the C-side renderer
+    // (NameHandler.cleanupOperatorName) reads the SAME table's C column, so the two
+    // intentionally-different renderings cannot drift apart. NameHandler.cleanupName is a
+    // separate general sanitizer (see the note on OPERATOR_SYMBOLS).
+    private fun String.kotlinMethodName() = replaceKotlinOperatorTokens()
         // A C++ method whose name IS a Kotlin hard keyword (`in`/`is`/`when`/`object`/…)
         // has no operator symbols to replace, so it reaches here unchanged and would emit
         // `fun in(...)` (won't parse). Back-tick-escape it (mirrors the param/field path).

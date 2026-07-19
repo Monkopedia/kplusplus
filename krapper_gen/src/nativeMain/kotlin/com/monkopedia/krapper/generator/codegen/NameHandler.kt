@@ -128,8 +128,9 @@ class NameHandler {
 // name path). Every C++ operator symbol is mapped to a DISTINCT, alphabetic,
 // valid C-identifier token so that (a) no invalid character leaks into the C
 // name and (b) two different operators never collide / truncate to the same
-// token. Multi-character symbols are replaced before their single-character
-// components so e.g. `<<=` does not get eaten by the `<`/`=` rules first.
+// token. The symbol set + longest-first ordering come from the shared
+// [OPERATOR_SYMBOLS] table (via [cOperatorToken]) so this and the Kotlin-side
+// renderer cannot drift apart.
 //
 // This is intentionally a SEPARATE pass from `cleanupName()` (which is also
 // applied to type spellings like `type-parameter-0-0`): mapping `-`/`+`/`/`
@@ -140,39 +141,7 @@ internal fun String.cleanupOperatorName(): String {
     // Only operator method names carry these symbols; bail early otherwise so
     // the common (non-operator) case stays cheap and untouched.
     if (!startsWith("operator")) return this
-    var result = this
-    // (symbol -> token), ordered longest-first so multi-char compounds win.
-    val replacements = listOf(
-        "<<=" to "_shleq",
-        ">>=" to "_shreq",
-        "<<" to "_shl",
-        ">>" to "_shr",
-        "<=" to "_le",
-        ">=" to "_ge",
-        "!=" to "_ne",
-        "->" to "_arrow",
-        "+=" to "_pluseq",
-        "-=" to "_minuseq",
-        "*=" to "_timeseq",
-        "/=" to "_diveq",
-        "%=" to "_modeq",
-        "&=" to "_andeq",
-        "|=" to "_oreq",
-        "^=" to "_xoreq",
-        "++" to "_inc",
-        "--" to "_dec",
-        "+" to "_plus",
-        "-" to "_minus",
-        "/" to "_div",
-        "%" to "_mod",
-        "<" to "_lt",
-        ">" to "_gt",
-        "," to "_comma"
-    )
-    for ((symbol, token) in replacements) {
-        result = result.replace(symbol, token)
-    }
-    return result
+    return replaceCOperatorTokens()
 }
 
 internal fun String.cleanupName(): String = replace("::", "_")
