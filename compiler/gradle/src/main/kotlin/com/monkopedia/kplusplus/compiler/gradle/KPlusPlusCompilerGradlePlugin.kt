@@ -507,14 +507,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Pick a C++ compiler for krapper_gen's wrapper-library step. krapper_gen
-     * generates C++ code that references some libstdc++ internals (matching
-     * what v8's own headers expose); newer host gcc / clang reject those.
-     * The konan-bundled toolchain (gcc 8.3 / glibcxx 7) accepts them. Try
-     * the konan toolchain first if present; otherwise fall back to clang++.
-     * Override via `kplusplus { compiler = "..." }`.
-     */
-    /**
      * Resolve the consumer's LLVM/Clang include dir(s) to thread into the cpp-parse as `-I`
      * (#124, #128 R4). The cpp front-end's bundled Clang finds Clang's OWN builtin headers via
      * its resource-dir (`clang++ -print-resource-dir`, resolved inside krapper_parse) and system
@@ -602,6 +594,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             .map { File(it, name) }.firstOrNull { it.canExecute() }
     }
 
+    /**
+     * Pick a C++ compiler for krapper_gen's wrapper-library step. krapper_gen
+     * generates C++ code that references some libstdc++ internals (matching
+     * what v8's own headers expose); newer host gcc / clang reject those.
+     * The konan-bundled toolchain (gcc 8.3 / glibcxx 7) accepts them. Try
+     * the konan toolchain first if present; otherwise fall back to clang++.
+     * Override via `kplusplus { compiler = "..." }`.
+     */
     private fun resolveDefaultCompiler(): String {
         val konanRoot = System.getProperty("user.home") + "/.konan/dependencies"
         val konanDir = File(konanRoot)
