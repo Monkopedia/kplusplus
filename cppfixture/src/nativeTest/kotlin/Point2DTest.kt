@@ -7,8 +7,7 @@ import kotlin.test.assertEquals
 // header (point2d.h). Under `-Pkpp.frontend.cppfixture=cpp` those bindings are produced by
 // the cpp front-end through the GENERIC plugin path (krapper_parse -> ModelIo -> krapper_gen
 // --frontend=cpp), driven by this module's own kplusplus{} config — proving the path
-// generalizes beyond featuregen. Under plain `-PenableClang` they are the libclang bindings;
-// the same tests pass either way.
+// generalizes beyond featuregen.
 class Point2DTest {
     @Test fun construct_fields_and_const_method() = memScoped {
         val p = with(Point2D) { Point2D__double_double(3.0, 4.0) }

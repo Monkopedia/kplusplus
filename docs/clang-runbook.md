@@ -2,19 +2,20 @@
 
 Operational setup for building and running the clang self-bootstrap modules (`:clangwalk`,
 `:krapper_parse`). These are the stage1 consumers that bind Clang's own C++ AST
-(`libclang-cpp`) and run on kplusplus-generated bindings. They are **off by default** and
-require an LLVM/Clang toolchain a plain build host won't have. The campaign strategy/log
-lives in [`campaigns/self-hosting.md`](campaigns/self-hosting.md); this is the how-to-build companion.
+(`libclang-cpp`) and run on kplusplus-generated bindings. An LLVM/Clang toolchain is a
+**hard requirement** to build kplusplus at all — the build fails fast if it's absent. The
+campaign strategy/log lives in [`campaigns/self-hosting.md`](campaigns/self-hosting.md); this
+is the how-to-build companion.
 
 ## 1. LLVM/Clang toolchain
 
 The clang modules link against **LLVM 22** (pinned `22.1.6` — LLVM's C++ API is
 version-unstable, so the bindings are regenerated on a bump). The major version is **not**
 hardcoded: `settings.gradle.kts` probes the toolchain once via `llvm-config` and threads
-the discovered major (`--version`) and libdir (`--libdir`) to both modules, so a `22 → 23`
+the discovered major (`--version`) and libdir (`--libdir`) to the modules, so a `22 → 23`
 bump or a non-`/usr/lib` install needs no per-module edit.
 
-What must be present when the modules are enabled:
+What must be present (LLVM is always required):
 
 - `llvm-config` and `clang++` on `PATH` (or point at a specific `llvm-config` with
   `-PllvmConfig=<exec>` — an absolute/relative path is taken verbatim, a bare name is
@@ -22,21 +23,19 @@ What must be present when the modules are enabled:
 - The shared libs the final link resolves: `libclang-cpp.so` and `libLLVM-<major>.so`
   under `llvm-config --libdir`.
 
-### Enabling the modules
+### The modules are always included (LLVM required)
 
-The clang modules are gated two equivalent ways:
+LLVM is a **hard requirement**. `settings.gradle.kts` always includes `:clangwalk`,
+`:krapper_parse`, and `:cppfixture`, and probes the toolchain **unconditionally** — there is
+no opt-in flag and no LLVM-free partial build. Full project, or a clear error.
 
-- **`-PenableClang`** (or `enableClang=true`) — presence-based opt-in; any value other than
-  `false` enables.
-- **`-PllvmConfig=<path>`** — both an opt-in (its presence enables the modules) *and* the
-  override that points the probe at a specific `llvm-config`.
-
-Without either, `settings.gradle.kts` never includes `:clangwalk`/`:krapper_parse`, so the
-default `./gradlew` build needs no LLVM and stays green everywhere.
+- **`-PllvmConfig=<path>`** is a **location override only**: it points the probe at a specific
+  `llvm-config` (e.g. a side-by-side install or a versioned `llvm-config-22`). Its *absence*
+  means "use `llvm-config` on `PATH`", **not** "skip the clang modules".
 
 ### Failure behavior (hardened in #11b)
 
-When the modules are enabled but the toolchain is missing, the build fails **at configure
+When the toolchain is missing, the build fails **at configure
 time** with an actionable `GradleException` naming exactly what's missing (`llvm-config`
 and/or `clang++`) — instead of a cryptic `cannot find -lLLVM-22` linker error ~8 minutes
 into a release link. If `llvm-config` and `clang++` resolve but neither `libLLVM-<major>.so`
@@ -91,9 +90,9 @@ C++ wrapper, it is not parsed in-process. There is no `--frontend` flag and no `
 Because there is no second front-end, the historical libclang-vs-cpp parity/oracle tasks
 (`goldenCompare`, `handoffInstDiff`'s byte-oracle, `featuregenParity` + `parity-expectations.txt`)
 were removed in #92. The standing cpp-side gates are the end-to-end generate-and-compile
-tasks below plus `:featuregen:nativeTest -PenableClang` (the self-hosted feature suite).
+tasks below plus `:featuregen:nativeTest` (the self-hosted feature suite).
 
-The gated verification tasks (all require `-PenableClang`):
+The verification tasks (all need the LLVM toolchain, which is always required):
 
 | Task | What it proves |
 | --- | --- |
@@ -118,9 +117,9 @@ normal build picks up the generated bindings.
   org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError
   ```
 
-  6g reliably builds the default (LLVM-free) gate and the gated cpp front-end
-  (`-PenableClang`) — no manual per-build heap bump needed. If a *heavier* gated release
-  link (the cpp/clang modules under `-PenableClang`) still OOMs, raise the heap — edit that
+  6g reliably builds the krapper_gen gate and the cpp/clang front-end modules — no manual
+  per-build heap bump needed. If a *heavier* release link (the cpp/clang modules) still
+  OOMs, raise the heap — edit that
   line, or add the same key to `~/.gradle/gradle.properties` (a per-user override that keeps
   the committed default sane for low-RAM contributors):
 
@@ -131,7 +130,7 @@ normal build picks up the generated bindings.
   Then re-run, e.g.:
 
   ```
-  ./gradlew :clangwalk:runReleaseExecutableKlinker -PenableClang
+  ./gradlew :clangwalk:runReleaseExecutableKlinker
   ```
 
 - **Known issue — `:clangwalk` release generation against LLVM-22.1.6.** There is a current

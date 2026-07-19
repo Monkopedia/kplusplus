@@ -15,10 +15,10 @@ K++ repo). If you want to read a finished version of exactly this, see
   below.
 - A C++ library to bind (headers + a `.a`/`.so`), or just hand-write a small one as the sample does.
 
-You do **not** need to build K++ from source, and you do **not** pass `-PenableClang` in your
-consumer build — that flag only gates modules *inside* the K++ repository. The `krapper_gen` /
-`krapper_parse` tool binaries ride bundled inside the published plugin jar; the plugin extracts and
-runs them itself.
+You do **not** need to build K++ from source: the `krapper_gen` / `krapper_parse` tool binaries
+ride bundled inside the published plugin jar; the plugin extracts and runs them itself. (The LLVM
+toolchain requirement inside the K++ repository does not apply to a from-published consumer — it
+only needs LLVM present at *runtime*, since the bundled `krapper_parse` is LLVM-linked.)
 
 ## 1. Declare the plugin
 

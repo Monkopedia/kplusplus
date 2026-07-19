@@ -68,27 +68,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             if (!seedMode) linkTask?.let { lt -> it.dependsOn(lt) }
             // Phase E step 3 (#47, flip brick B2): in cpp-front-end mode this sync drives
             // the module's own config through the :krapper_parse binary, so build it first.
-            // Gated by the property + only when :krapper_parse is in the build (LLVM-gated,
-            // -PenableClang); the default path never references it. This replaces the old
-            // per-module manual `dependsOn(":krapper_parse:featuregenCppBindings")` wiring —
-            // ANY module flipped to cpp now self-wires the front-end build generically.
-            // resolveKrapperParse covers BOTH the sibling layout (featuregen/cppfixture) and
-            // the included-build layout (the standalone v8 example, where krapper_parse lives in
-            // the kplusplus build pulled in via includeBuild).
-            //
-            // The dependsOn is gated on `clangEnabled` — the SAME -PenableClang/-PllvmConfig
-            // signal that gates :krapper_parse into the build (settings.gradle.kts). This is
-            // load-bearing for the included-build layout: `IncludedBuild.task(":krapper_parse:…")`
-            // returns a LAZY reference that does NOT validate the project exists, so when the
-            // module is on the cpp front-end but clang is NOT enabled (e.g. an IntelliJ Gradle
-            // sync, which passes no -PenableClang), resolveKrapperParse hands back a dangling
-            // task ref into the included :kplusplus build — where :krapper_parse was never
-            // include()d — and Gradle hard-fails at graph resolution ("Project with path
-            // ':krapper_parse' not found in build ':kplusplus'"), aborting the ENTIRE IDE import.
-            // Skipping the dependsOn when clang is off keeps CONFIGURATION clean; the LLVM
-            // requirement is deferred to EXECUTION, where the doLast fails fast with the
-            // -PenableClang guidance (runKrapperParseSync / the missing-binary check below).
-            if (target.findProperty("kpp.frontend.${target.name}") == "cpp" && clangEnabled(target)) {
+            // This replaces the old per-module manual
+            // `dependsOn(":krapper_parse:featuregenCppBindings")` wiring — ANY module flipped
+            // to cpp now self-wires the front-end build generically. resolveKrapperParse covers
+            // BOTH the sibling layout (featuregen/cppfixture, where :krapper_parse is always
+            // include()d — LLVM is a hard requirement) and the included-build/published layout
+            // (the standalone v8 example, where the parser comes from the bundled plugin jar and
+            // resolveKrapperParse returns a null task, so dependsOn is simply skipped).
+            if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
                 resolveKrapperParse(target).first?.let { ct -> it.dependsOn(ct) }
             }
             val krappedDir = krappedDirFor(target)
@@ -179,9 +166,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 throw GradleException(
                     "kplusplusSync[$moduleName]: the in-tree libclang front-end was removed " +
                         "in flip B5 (#47) — krapper_gen no longer parses headers in-process. " +
-                        "Set kpp.frontend.$moduleName=cpp (generate via the LLVM krapper_parse; " +
-                        "build with -PenableClang or -PllvmConfig=<path>) or " +
-                        "kpp.frontend.$moduleName=seed (recompile the committed stage-0 seed)."
+                        "Set kpp.frontend.$moduleName=cpp (generate via the LLVM krapper_parse) " +
+                        "or kpp.frontend.$moduleName=seed (recompile the committed stage-0 seed)."
                 )
             }
         }
@@ -304,16 +290,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         kexe: File
     ) {
         // Resolve the krapper_parse binary across BOTH layouts (sibling project / included
-        // build) — see resolveKrapperParse. A non-existent binary means clang isn't enabled
-        // (krapper_parse is LLVM-gated and then in neither build), so guide to -PenableClang.
+        // build) — see resolveKrapperParse. A non-existent binary means the parser could not
+        // be built or extracted (it links against LLVM, which must be present).
         val cppBinary = resolveKrapperParse(target).second
         if (!cppBinary.exists()) {
             throw GradleException(
                 "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp but the krapper_parse " +
-                    "binary was not found at $cppBinary. The cpp front-end needs the LLVM-gated " +
-                    "modules — build with -PenableClang (or -PllvmConfig=<path-to-llvm-config>); " +
-                    "in a standalone consumer that pulls kplusplus in via includeBuild, the flag " +
-                    "must reach that included build too."
+                    "binary was not found at $cppBinary. The cpp front-end needs the LLVM " +
+                    "krapper_parse — ensure an LLVM/Clang toolchain is installed (llvm-config + " +
+                    "clang++ on PATH, or -PllvmConfig=<path-to-llvm-config>); in a standalone " +
+                    "consumer the parser comes from the bundled plugin jar and still needs LLVM " +
+                    "present at runtime."
             )
         }
         val headers = ext?.headers.orEmpty()
@@ -776,22 +763,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Whether the LLVM/Clang-gated modules (:krapper_parse et al.) are enabled for this build.
-     * Mirrors the gate in the root `settings.gradle.kts` EXACTLY: `-PenableClang` (any value but
-     * "false") OR `-PllvmConfig=<path>` (its mere presence opts in). Gradle propagates `-P`
-     * project properties across the composite, so this reads true in the consumer build (v8)
-     * precisely when :krapper_parse was actually include()d into the pulled-in kplusplus build.
-     * Used to skip the :krapper_parse dependsOn when the module is null — otherwise the lazy,
-     * non-validating included-build task ref dangles and hard-fails graph resolution during an
-     * IDE sync (see the dependsOn site).
-     */
-    private fun clangEnabled(target: Project): Boolean {
-        val enableClang = target.findProperty("enableClang")
-        val llvmConfig = target.findProperty("llvmConfig")
-        return (enableClang != null && enableClang != "false") || llvmConfig != null
-    }
-
-    /**
      * Find the :krapper_parse release binary and its link task — the SAME two layouts
      * resolveKrapperGen handles, because a cpp-front-end module can equally be a sibling
      * project (featuregen/cppfixture in the kplusplus build) or a consumer that pulls
@@ -799,8 +770,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * case `rootProject.findProject(":krapper_parse")` is null — krapper_parse lives in the OTHER
      * build — so we resolve its task + binary through `gradle.includedBuilds`.
      *
-     * krapper_parse is LLVM-gated (`-PenableClang`); when the flag is absent it is in NEITHER
-     * build, so a null binary here means "not enabled". Returns the link task (or null) plus
+     * krapper_parse links against LLVM (a hard requirement); in the sibling layout it is always
+     * include()d. Returns the link task (or null — e.g. the bundled/published consumer path) plus
      * the binary File; the caller fails fast at execution time if the binary doesn't exist.
      */
     private fun resolveKrapperParse(target: Project): Pair<Any?, File> {
@@ -846,11 +817,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // The root kplusplus build ALWAYS pulls in the `compiler` build via
             // includeBuild("compiler"), and IncludedBuild.task(":krapper_parse:...") returns
             // a LAZY reference that does NOT validate the project exists — so without this
-            // guard the `compiler` build (which has no :krapper_parse) falsely matches when
-            // :krapper_parse isn't in the root build (no -PenableClang) yet the module is on
-            // the cpp front-end, and we wire a dependsOn to a project that lives in neither
-            // build → "Project with path ':krapper_parse' not found in build ':compiler'" at
-            // graph-resolution time (breaking even IDE sync). Filter on the module dir.
+            // guard the `compiler` build (which has no :krapper_parse) falsely matches in a
+            // consumer layout where :krapper_parse lives in neither build, and we wire a
+            // dependsOn to a project that doesn't exist → "Project with path ':krapper_parse'
+            // not found in build ':compiler'" at graph-resolution time (breaking even IDE
+            // sync). Filter on the module dir.
             if (!File(included.projectDir, "krapper_parse").isDirectory) continue
             val taskRef = try {
                 included.task(":krapper_parse:linkReleaseExecutableKlinker")
@@ -866,8 +837,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // a sibling :krapper_parse project nor an includeBuild that hosts it. Resolve
         // the LLVM parser tool from its published Maven coordinate (needs mavenLocal()).
         // The published krapper_parse binary is LLVM-linked and needs LLVM present at
-        // RUNTIME — but a standalone consumer has no in-tree LLVM-gated modules, so no
-        // -PenableClang is needed here (that flag only gates in-tree root-build modules).
+        // RUNTIME — the standalone consumer gets it from the bundled plugin jar (no in-tree
+        // clang modules to build).
         // Consumer path: prefer the binary bundled in the plugin jar (0.4.0 model), then the
         // published Maven coordinate (fallback for an unbundled/0.3.0 plugin jar).
         extractBundledTool(target, "krapper_parse")?.let { return null to it }

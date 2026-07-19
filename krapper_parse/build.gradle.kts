@@ -252,7 +252,6 @@ kplusplus {
 // reducer (--dumpParsedModel); that reducer was DELETED in the self-hosting flip (B5, #88),
 // so the libclang baseline is gone and the comparison was removed (#92) — the standing cpp
 // regression lock is now handoffGenerate (cpp e2e, below) + :featuregen:nativeTest.
-// Gated with the module (-PenableClang).
 val goldenDir = layout.buildDirectory.dir("golden").get().asFile
 val krapperParseBinary = layout.buildDirectory
     .file("bin/klinker/krapper_parseRelease/krapper_parse").get().asFile
@@ -270,7 +269,7 @@ val goldenEmit = tasks.register<Exec>("goldenEmit") {
 // self-contained reduction of v8::Persistent's NonCopyable shape N times (separate
 // ASTContexts) and asserts the special-member set is byte-identical and complete across
 // parses — the standing regression lock for the Persistent<v8::Value> parse-dependent
-// copy-member report (a non-zero exit fails the task). Gated with the module (-PenableClang).
+// copy-member report (a non-zero exit fails the task).
 tasks.register<Exec>("noncopyableDeterminismCheck") {
     dependsOn("linkReleaseExecutableKlinker")
     commandLine(krapperParseBinary.absolutePath, "--noncopyable-determinism")
@@ -288,8 +287,7 @@ tasks.register<Exec>("noncopyableDeterminismCheck") {
 //                      exit fails the task), proving the handed-off model carries
 //                      everything the real pipeline consumes.
 // --instantiate is scoped out on this path (forcing re-parses synthesized headers
-// through libclang); the fixture needs no instantiations. Gated with the module
-// (-PenableClang), like the golden tasks above.
+// through libclang); the fixture needs no instantiations.
 val handoffDir = layout.buildDirectory.dir("handoff").get().asFile
 
 tasks.register<Exec>("handoffGenerate") {
