@@ -643,6 +643,7 @@ suspend fun WrappedTemplate.typedAs(
     dropMistypedInitializerListMembers(outputClass, fullyQualified)
     rewritePairSecondReturns(outputClass, fullyQualified)
     rewriteViewReturns(outputClass)
+    dropValueEqualityIfElementLacksEquals(outputClass, templateSpec, baseContext, fullyQualified)
     return outputClass.resolve(localContext)?.let { it to outputClass }
 }
 
@@ -798,6 +799,53 @@ internal suspend fun rewriteViewReturns(element: WrappedElement) =
 // via `.str()` (T1.10, rewriteViewReturns); as a PARAM they are constructed from an inbound
 // `const char*` at the C boundary (T1.10p, determineArgumentCastMode -> STRING_VIEW).
 internal val STRING_VIEW_TYPES = setOf("llvm::StringRef")
+
+// #10 GATE 1 (value-equality). The container member names whose BODY instantiates
+// `element == element`: llvm::ArrayRef<T>::equals delegates to std::equal, and the
+// std::vector<T> free `operator==`/`operator!=` compare element-wise. When the concrete
+// element type `T` is a RECORD that declares no `operator==` anywhere in scope, these
+// members fail to instantiate deep in <stl_algobase.h> — the exact invalid-operands tail
+// (#10). Drop them here, at template materialization, when the element is PROVEN to lack
+// `==` (its parse-time metadata flag is false); keep-on-doubt otherwise.
+private val VALUE_EQUALITY_MEMBERS = setOf("equals", "operator==", "operator!=")
+
+/**
+ * #10 GATE 1 consumer. For the just-materialized specialization [outputClass], drop each
+ * [VALUE_EQUALITY_MEMBERS] member iff the container's element type is a record PROVEN to have
+ * no `operator==` — the parse-time [ClassMetadata.hasEqualityOperator] fact carried on the
+ * element's [WrappedClass] in [baseContext]'s tracker.
+ *
+ * Keep-on-doubt is load-bearing (a false DROP loses a valid binding — forbidden):
+ *  - a non-record element (scalar / pointer / enum — which have a builtin `==`) is never in
+ *    the class tracker, so it is left untouched;
+ *  - a record we can't find in the tracker (unbound / out-of-scope) is left untouched;
+ *  - ONLY an element record whose metadata says `hasEqualityOperator == false` gates.
+ */
+private fun dropValueEqualityIfElementLacksEquals(
+    outputClass: WrappedClass,
+    templateSpec: WrappedTemplateType,
+    baseContext: ResolveContext,
+    fullyQualified: String
+) {
+    val element = templateSpec.templateArgs.singleOrNull()
+        ?.let { if (it.isConst) it.unconst else it }
+        ?: return
+    // Only a bare record element can lack `==`; a pointer/reference element (std::vector<T*>)
+    // compares pointers with the builtin `==` and must never be gated.
+    if (element.isPointer || element.isReference) return
+    val elementClass = baseContext.tracker.classes[element.toString()] ?: return
+    if (elementClass.metadata.hasEqualityOperator) return
+    for (method in outputClass.children.filterIsInstance<WrappedMethod>()) {
+        if (method.name !in VALUE_EQUALITY_MEMBERS) continue
+        DropLedger.record(
+            "$fullyQualified::${method.name}",
+            "Element type $element has no operator== (container value-equality would " +
+                "fail to instantiate) [#10 gate 1]",
+            DropPhase.RESOLVE
+        )
+        outputClass.removeChild(method)
+    }
+}
 
 /**
  * T1.7e unique_ptr-return marshalling. A by-value `std::unique_ptr<T>` return is

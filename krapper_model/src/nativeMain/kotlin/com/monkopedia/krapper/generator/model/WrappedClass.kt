@@ -48,12 +48,24 @@ data class ClassMetadata(
     // Same idea for copy ASSIGNMENT (`operator=`): when it's deleted/inaccessible the
     // generated field setter's `field = *value` won't compile, so the setter is dropped.
     var hasDeletedCopyAssignment: Boolean = false,
-    // Set when this class can't be DEFAULT-constructed because it has a (public) reference
-    // data member and declares no usable constructor: its implicit default constructor is
-    // deleted (a reference must be initialized), so krapper must NOT synthesize a
-    // default-construct path (`new T()`) for it — that would emit a call to the
-    // implicitly-deleted default ctor (T-skip residual, e.g. FunctionEffectSet::Conflict).
-    var hasDeletedDefaultConstructor: Boolean = false
+    // Set when this class can't be DEFAULT-constructed because its default constructor is
+    // deleted — either a materialized default ctor decl is `isDeleted()`, or the structural
+    // `[class.default.ctor]` check fires (a base/field with no usable default ctor, a
+    // reference field, or a const-qualified field). krapper must NOT synthesize a
+    // default-construct path (`new T()`) for such a class — that would emit a call to the
+    // implicitly-deleted default ctor (#10 gate 2; the reference-field case is the original
+    // T-skip residual, e.g. FunctionEffectSet::Conflict).
+    var hasDeletedDefaultConstructor: Boolean = false,
+    // Set when this class (a RECORD) has an accessible `operator==` reachable for value
+    // comparison — as a member, an inherited member on a public base, or a free function in
+    // the enclosing namespace. Consumed by the #10 gate-1 value-equality drop: a container
+    // member whose body instantiates `element == element` (`llvm::ArrayRef<T>::equals` /
+    // `std::vector<T>::operator==` and their `!=` peers) is dropped when the element record
+    // has NO `operator==` (the body would fail to instantiate deep in <stl_algobase.h>).
+    // Keep-on-doubt: only a class PROVEN to lack `==` disables the container member; a
+    // non-record element (scalar/pointer/enum, which have a builtin `==`) never sets this
+    // flag and is never gated (see the gate's non-record exemption).
+    var hasEqualityOperator: Boolean = false
 )
 
 class WrappedClass(
