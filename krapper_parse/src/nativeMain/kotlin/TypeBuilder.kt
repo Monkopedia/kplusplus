@@ -281,6 +281,39 @@ fun buildWrappedType(type: QualType): WrappedType {
             ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
         // #123: an inaccessible nested record can't be named from the wrapper — drop it.
         if (!record.asDecl().isAccessibleTagType()) return UNRESOLVABLE
+        // FULLY-DEFAULTED template specialization (#10): a use written with an EMPTY
+        // argument list (`BumpPtrAllocatorImpl<>`, or `TimePoint<>` = the alias
+        // `time_point<system_clock, D>` whose sole non-defaulted arg is itself defaulted)
+        // carries ZERO *written* args, so the sugared-TST branch above (guarded on the
+        // written count) never fires and the type reaches this record leaf. Spelling it as
+        // the bare template NAME (`llvm::BumpPtrAllocatorImpl`) is not a valid type — C++
+        // rejects the naked template-name ("requires template arguments; argument deduction
+        // not allowed here") wherever the binding names it by value (a field getter's
+        // `reinterpret_cast<T*>`, a return placement-`new T(...)`). The CANONICAL record IS
+        // a ClassTemplateSpecializationDecl carrying the FULL, resolved argument list, so
+        // recover it here and emit a real `WrappedTemplateType` (`BumpPtrAllocatorImpl<...>`).
+        // Only fully-defaulted specializations reach this point — any with ≥1 written arg
+        // took the sugared branch — so the `vector<Item*>` written-arg preference is intact.
+        val canonArgCount = numTemplateArgs(canonical)
+        if (canonArgCount > 0) {
+            val args = (0u until canonArgCount.toUInt()).map { i ->
+                val arg = templateArgAsType(canonical, i)
+                if (arg.typePtr() == null) UNRESOLVABLE else buildWrappedType(arg)
+            }
+            // A `void` TYPE argument marks a TRANSPARENT / incomplete-friendly specialization
+            // (`std::less<void>` & the other `<void>` transparent comparators): the member
+            // signatures then take dependent params that resolve to a bare `void` BY VALUE
+            // (`operator()(const void, const void)`), which is ill-formed C++ ("'void' must be
+            // the first and only parameter"). Such a type never legitimately binds by value, so
+            // KEEP the prior bare-name leaf here — on which the resolver never materialized a
+            // usable binding anyway (the naked name is inert, not named by value) — rather than
+            // expanding it into a specialization whose newly-resolved members emit `void`
+            // value params. `time_point`/`BumpPtrAllocatorImpl` carry no `void` arg and expand.
+            if (args.none { it.isVoid }) {
+                return WrappedTemplateType(WrappedTypeReference(qualified), args)
+                    .maybeConst(isConst)
+            }
+        }
         return WrappedTypeReference(qualified).maybeConst(isConst)
     }
     if (canonTy != null && canonTy.isEnumeralType()) {
