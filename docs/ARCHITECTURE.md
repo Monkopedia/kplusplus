@@ -52,13 +52,14 @@ it runs on.
 
 Two practical consequences:
 
-- **LLVM/Clang is required to build** the front-end and the modules that regenerate their bindings.
-  Those modules are gated behind `-PenableClang` so a default checkout still configures without
-  LLVM. See [clang-runbook.md](clang-runbook.md) for toolchain setup.
+- **LLVM/Clang is required to build.** LLVM is a hard requirement: the root `settings.gradle.kts`
+  probes the toolchain unconditionally and fails fast with an actionable message if it's absent —
+  full project, or a clear error, no opt-out. `-PllvmConfig=<path>` is a location override only.
+  See [clang-runbook.md](clang-runbook.md) for toolchain setup.
 - **Committed "seed" bindings + `-Pkpp.frontend.<module>=…`.** Some modules carry committed
   generated bindings (`<module>/krapped/`) so the tree can bootstrap without first running the
   generator. A module's source is selected per build:
-  - `=cpp` — regenerate the bindings via `krapper_parse` (needs `-PenableClang`).
+  - `=cpp` — regenerate the bindings via `krapper_parse`.
   - `=seed` — build from the committed bindings (just recompiles the C++ wrapper; no parse).
 
   This is how a freshly-checked-out tree converges: laggard modules build from seed, the cpp-ready

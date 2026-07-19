@@ -53,7 +53,8 @@ Runnable samples live under [`samples/`](samples). Start with
 [`samples/minimal`](samples/minimal) — a tiny hand-written C++ geometry library bound and run
 end-to-end (no stdlib, no monolith), the fastest first contact. For the heavyweight demo that
 binds and executes **V8** (Google's JavaScript engine), see [`samples/v8`](samples/v8); it links
-the ~62 MB `libv8_monolith.a`. Run either with `./gradlew runReleaseExecutableKlinker -PenableClang`.
+the ~62 MB `libv8_monolith.a`. Run either with `./gradlew runReleaseExecutableKlinker` (LLVM 22
+must be installed — see [docs/clang-runbook.md](docs/clang-runbook.md)).
 
 ### Fixups
 

@@ -139,7 +139,7 @@ kplusplus {
     library("libv8_monolith.a")
     // v8 needs C++17 (the default is c++14); the cpp front-end parses AND the wrapper
     // compiles under this standard. The frontend flip itself is in gradle.properties
-    // (kpp.frontend.v8=cpp), built with -PenableClang.
+    // (kpp.frontend.v8=cpp); an LLVM 22 toolchain must be installed.
     cppStandard = "c++17"
 
     // v8 brick 2 (#99): force the v8::Maybe<int> model so Value::Int32Value(context) — whose

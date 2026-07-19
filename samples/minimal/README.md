@@ -35,7 +35,7 @@ plugin set with them bundled (this is the release "local dry run"; see
 
 ```
 ./gradlew :krapper_gen:linkReleaseExecutableNative \
-          :krapper_parse:linkReleaseExecutableKlinker -PenableClang
+          :krapper_parse:linkReleaseExecutableKlinker
 ./gradlew -p compiler publishToMavenLocal \
   -Pkpp.bundleTools.krapperGen="$PWD/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe" \
   -Pkpp.bundleTools.krapperParse="$PWD/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
@@ -47,9 +47,10 @@ Then, from this directory:
 ./gradlew runReleaseExecutableKlinker
 ```
 
-No `-PenableClang` is needed here: a standalone consumer has no in-tree LLVM-gated modules;
-the `krapper_parse` tool comes from the bundled plugin jar (`-PenableClang` only gates modules
-inside the kplusplus root build, which this consumer does not include).
+No LLVM toolchain is needed to RUN this consumer: it is a from-published standalone project
+(no includeBuild of the kplusplus root), so it never evaluates the root build's LLVM-requiring
+settings, and the `krapper_parse` tool comes prebuilt inside the bundled plugin jar. (The
+repo-root publish step above does need LLVM 22 — that's where `:krapper_parse` is built.)
 
 Expected output:
 

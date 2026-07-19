@@ -18,13 +18,12 @@
 // plugin drives THIS module's own kplusplus { header(...) } config through krapper_parse ->
 // ModelIo -> krapper_gen --frontend=cpp into build/krapped-cpp, then compiles + runs the
 // tests against those cpp-front-end bindings — exactly the same generic machinery featuregen
-// now uses, on a different module's own config. The default `./gradlew` never sees this
-// module (it is included only under the LLVM gate in settings.gradle.kts), so it cannot
-// affect the default build.
+// now uses, on a different module's own config. LLVM is a hard requirement, so this module is
+// always included (settings.gradle.kts) and `kpp.frontend.cppfixture=cpp` is the committed
+// default.
 //
 // Run the demo:
-//   ./gradlew :cppfixture:nativeTest -PenableClang                       (libclang path)
-//   ./gradlew :cppfixture:nativeTest -PenableClang -Pkpp.frontend.cppfixture=cpp  (cpp path)
+//   ./gradlew :cppfixture:nativeTest -Pkpp.frontend.cppfixture=cpp  (cpp path)
 
 plugins {
     kotlin("multiplatform")

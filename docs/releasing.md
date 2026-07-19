@@ -70,7 +70,7 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
 3. The workflow, on an LLVM-equipped runner:
    - installs the LLVM/Clang toolchain (`krapper_parse` links against `libclang-cpp`/`libLLVM`);
    - **builds the two tool binaries** (`:krapper_gen:linkReleaseExecutableNative` +
-     `:krapper_parse:linkReleaseExecutableKlinker -PenableClang`) so the publish steps can bundle
+     `:krapper_parse:linkReleaseExecutableKlinker`) so the publish steps can bundle
      them into the plugin jar (`-Pkpp.bundleTools.<tool>=<path>`);
    - `:kplusplus-compiler-gradle:publishPlugins` → Gradle Plugin Portal (bundled);
    - `-p compiler publishToMavenCentral` → uploads the signed bundle (plugin + marker + FIR jar,
@@ -90,7 +90,7 @@ Everything is validated locally against `~/.m2` without any credentials:
 ```sh
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
 # 1. Build the tool binaries, then publish the plugin (tools bundled) to mavenLocal:
-./gradlew :krapper_gen:linkReleaseExecutableNative :krapper_parse:linkReleaseExecutableKlinker -PenableClang
+./gradlew :krapper_gen:linkReleaseExecutableNative :krapper_parse:linkReleaseExecutableKlinker
 ./gradlew -p compiler publishToMavenLocal \
   -Pkpp.bundleTools.krapperGen="$PWD/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe" \
   -Pkpp.bundleTools.krapperParse="$PWD/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
