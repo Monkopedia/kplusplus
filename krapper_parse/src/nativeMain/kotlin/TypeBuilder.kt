@@ -52,11 +52,11 @@ import kppbridge.templateBaseName
 // QualType::getTypePtrOrNull() is declared to return the TypeApi *interface* (the generated
 // related-object-getter convention); re-wrap to the concrete Type so the shape predicates
 // (which live on the concrete class) resolve. Same pattern as the type-decode probe.
-private fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr) }
+internal fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr) }
 
 // Type::getAsCXXRecordDecl() likewise returns the Api interface; re-wrap so the
 // dyn-cast helpers + NamedDecl upcasts resolve.
-private fun Type.asRecord(): CXXRecordDecl? =
+internal fun Type.asRecord(): CXXRecordDecl? =
     getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr) }
 
 // BRIDGE: the generated down-cast helper `Type.asTypedefType()` is missing — TypedefType's

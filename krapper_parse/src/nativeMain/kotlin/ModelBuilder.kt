@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import clang.AccessSpecifier
+import clang.CXXBaseSpecifier
 import clang.CXXConstructorDecl
 import clang.CXXDestructorDecl
 import clang.CXXMethodDecl
@@ -26,6 +27,7 @@ import clang.FunctionDecl
 import clang.NamedDecl
 import clang.NamespaceDecl
 import clang.ParmVarDecl
+import clang.QualType
 import clang.RecordDecl
 import clang.TemplateDecl
 import clang.TemplateParameterList
@@ -66,6 +68,16 @@ import kppbridge.defaultArgType
 // "cpp:<id>". The two front-ends therefore NEVER agree on the literal identity string —
 // Phase C's tree-diff treats identity fields as maskable and compares structure only.
 private fun Decl.canonical(): Decl = (getCanonicalDecl() as? Decl) ?: this
+
+// The DEFINING redeclaration of a record (or null when it is never defined). A base/field
+// type may be spelled through a forward declaration whose own `decls()` carries no members;
+// the #10 gates must introspect the definition. Re-view the RecordDecl-Api result as a
+// CXXRecordDecl (address-identical), returning the record itself when it is already the
+// definition.
+private fun CXXRecordDecl.definitionOrNull(): CXXRecordDecl? = when {
+    isThisDeclarationADefinition() -> this
+    else -> recordDeclGetDefinition()?.let { CXXRecordDecl(it.ptr) }
+}
 
 // Shared with TypeBuilder (the dependent-T WrappedTemplateRef must key on the SAME
 // identity string as the WrappedTemplateParam it refers to).
@@ -381,6 +393,157 @@ private class ModelBuilder(private val memScope: MemScope) {
             if (decl.isImplicit()) continue
             addMember(decl, parent, metadata)
         }
+        // #10 GATE 2 (deleted default ctor): generalize the reference-field-only fact
+        // addField already records so the resolver's `_new` guard covers ALL deletion
+        // reasons, not just a reference member. The direct decl scan catches an already-
+        // materialized deleted default ctor (Module::Header family), the structural check
+        // the still-lazy implicit case (TargetInfo::GCCRegAlias const-array family). Runs
+        // AFTER the member loop so it sees the same decls addMember walked.
+        if (defaultCtorIsDeleted(record)) metadata.hasDeletedDefaultConstructor = true
+        // #10 GATE 1 (value-equality): record whether this record has an accessible
+        // `operator==` (member / public base / enclosing-namespace free function). The
+        // consumer (krapper_gen typedAs) drops a container `equals`/`operator==` whose
+        // element is a record proven to lack `==`, so the container body never fails to
+        // instantiate `element == element` deep in <stl_algobase.h>.
+        if (recordHasEqualityOperator(record)) metadata.hasEqualityOperator = true
+    }
+
+    // #10 GATE 2 predicate — is [record]'s DEFAULT constructor deleted? Two-step hybrid
+    // (`hasDefaultConstructor()` is useless: it returns true even for an implicitly-deleted
+    // default ctor, and clang 22 has no `defaultedDefaultConstructorIsDeleted()`):
+    //  1. DIRECT — a materialized `CXXConstructorDecl` that isDefaultConstructor() AND
+    //     isDeleted() (clang already built the decl because it was odr-used in the parse);
+    //  2. STRUCTURAL — when the implicit default ctor is still lazy
+    //     (needsImplicitDefaultConstructor), apply `[class.default.ctor]` deletion rules
+    //     over bases + non-in-class-initialized fields.
+    // Keep-on-doubt: returns true ONLY on a positive proof of deletion; every ambiguous
+    // case leaves the existing behaviour (a false KEEP is at worst an unchanged error, a
+    // false DROP would lose a valid `_new`).
+    private fun defaultCtorIsDeleted(record: CXXRecordDecl): Boolean = with(memScope) {
+        for (decl in record.asDeclContext().decls()) {
+            if (decl == null) continue
+            val ctor = decl.asCXXConstructorDecl() ?: continue
+            if (ctor.isDefaultConstructor() &&
+                ctor.asFunctionDecl().isDeleted()
+            ) {
+                return true
+            }
+        }
+        // Only reach the structural rules when the implicit default ctor hasn't been
+        // materialized (otherwise the direct scan above is authoritative). If a usable
+        // default ctor decl exists, needsImplicitDefaultConstructor() is false and we
+        // correctly keep the `_new`.
+        if (!record.needsImplicitDefaultConstructor()) return false
+        structuralDefaultCtorDeleted(record)
+    }
+
+    // `[class.default.ctor]` structural deletion over the AST: the implicit default ctor is
+    // deleted if any base or non-in-class-initialized field can't be default-constructed —
+    // a record base/field whose OWN default ctor is unusable (recurse), a reference field,
+    // or a const-qualified field. Recursion is depth-bounded by [seen] (a self-referential
+    // record type can't complete-construct anyway). Anything not positively proven deleting
+    // is treated as constructible (keep-on-doubt).
+    private fun structuralDefaultCtorDeleted(
+        record: CXXRecordDecl,
+        seen: MutableSet<String> = mutableSetOf()
+    ): Boolean = with(memScope) {
+        if (!seen.add(record.asNamedDecl().getNameAsString().orEmpty().ifEmpty { return false })) {
+            return false
+        }
+        for (base in record.bases()) {
+            if (base == null) continue
+            if (baseOrFieldTypeDeletesDefaultCtor(base.getType(), seen)) return true
+        }
+        for (decl in record.asDeclContext().decls()) {
+            if (decl == null) continue
+            val field = decl.asFieldDecl() ?: continue
+            // A field with an in-class initializer (`int n = 0;`) is default-initialized by
+            // that initializer, so it never deletes the default ctor.
+            if (field.hasInClassInitializer()) continue
+            if (baseOrFieldTypeDeletesDefaultCtor(field.getType(), seen)) return true
+        }
+        false
+    }
+
+    // Whether a base/field of [type] makes the enclosing class's implicit default ctor
+    // deleted: a reference member (must be initialized), a const-qualified member (a const
+    // scalar/array/pointer has no default initializer), or a record member whose own
+    // default ctor is deleted (recurse). A non-const scalar/pointer/enum default-initializes
+    // fine and does not delete.
+    private fun baseOrFieldTypeDeletesDefaultCtor(
+        type: QualType,
+        seen: MutableSet<String>
+    ): Boolean = with(memScope) {
+        val ty = type.typePtr() ?: return false
+        if (ty.isReferenceType()) return true
+        if (type.isConstQualified()) return true
+        val nested = ty.asRecord() ?: return false
+        // Only a DEFINED record can be introspected; reach the definition when the leaf
+        // itself is a forward declaration, and leave a never-defined record as
+        // constructible (keep-on-doubt).
+        val defn = nested.definitionOrNull() ?: return false
+        defaultCtorIsDeletedForNested(defn, seen)
+    }
+
+    // The nested-record arm of the structural recursion: a direct deleted default-ctor decl
+    // OR (when still lazy) the structural rules again.
+    private fun defaultCtorIsDeletedForNested(
+        record: CXXRecordDecl,
+        seen: MutableSet<String>
+    ): Boolean = with(memScope) {
+        for (decl in record.asDeclContext().decls()) {
+            if (decl == null) continue
+            val ctor = decl.asCXXConstructorDecl() ?: continue
+            if (ctor.isDefaultConstructor() && ctor.asFunctionDecl().isDeleted()) return true
+        }
+        if (!record.needsImplicitDefaultConstructor()) return false
+        structuralDefaultCtorDeleted(record, seen)
+    }
+
+    // #10 GATE 1 predicate — does [record] have an accessible `operator==` usable for value
+    // comparison? Mirrors the design's probe (§4.1): a member/base `operator==` OR a free
+    // `operator==` in the enclosing namespace. The free scan is LOAD-BEARING — SourceLocation
+    // / StringRef have no member `==` but a namespace-level one, and dropping their container
+    // value-equality would be a false DROP. Keep-on-doubt everywhere else: an unresolvable or
+    // undefined record returns... nothing here (the caller only ACTS on a positive hit at the
+    // element side, so a missing flag simply keeps the container member).
+    private fun recordHasEqualityOperator(record: CXXRecordDecl): Boolean = with(memScope) {
+        if (recordDeclaresEqualityMember(record, mutableSetOf())) return true
+        // Enclosing-namespace free `operator==`. getEnclosingNamespaceContext walks past the
+        // record's own context to the nearest namespace (`clang` for `clang::Module::Header`).
+        val enclosing = record.asDecl().getDeclContext()?.getEnclosingNamespaceContext()
+            ?: return false
+        if (!enclosing.isNamespace()) return false
+        for (decl in enclosing.decls()) {
+            if (decl == null) continue
+            if (decl.asCXXMethodDecl() != null) continue
+            val fn = decl.asFunctionDecl() ?: continue
+            if (fn.asNamedDecl().getNameAsString() == "operator==") return true
+        }
+        false
+    }
+
+    // A member `operator==` on [record] or any of its public bases (recurse, depth-bounded).
+    private fun recordDeclaresEqualityMember(
+        record: CXXRecordDecl,
+        seen: MutableSet<String>
+    ): Boolean = with(memScope) {
+        if (!seen.add(record.asNamedDecl().getNameAsString().orEmpty().ifEmpty { return false })) {
+            return false
+        }
+        for (decl in record.asDeclContext().decls()) {
+            if (decl == null) continue
+            val method = decl.asCXXMethodDecl() ?: continue
+            if (method.asNamedDecl().getNameAsString() == "operator==") return true
+        }
+        for (base in record.bases()) {
+            if (base == null) continue
+            if (base.getAccessSpecifier() != AccessSpecifier.AS_public) continue
+            val baseRecord = base.getType().typePtr()?.asRecord() ?: continue
+            val defn = baseRecord.definitionOrNull() ?: continue
+            if (recordDeclaresEqualityMember(defn, seen)) return true
+        }
+        false
     }
 
     private fun addMember(decl: Decl, parent: WrappedElement, metadata: ClassMetadata) {
