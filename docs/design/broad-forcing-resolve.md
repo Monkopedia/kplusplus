@@ -201,9 +201,11 @@ byte-identical output on the existing gates.
 
 ## 4. Options
 
-Non-negotiable safety constraint: **byte-identical output on `:cppfrontend:featuregenParity`
-and the 17-instantiation unit gate** (this loop is load-bearing for ALL binding, not just
-the broad case).
+Non-negotiable safety constraint: **byte-identical output on the regenerate-and-diff gate**
+— regenerating featuregen's `build/krapped-cpp/` binding tree and diffing it against the
+unfiltered baseline (this loop is load-bearing for ALL binding, not just the broad case).
+(This gate replaces the retired `:cppfrontend:featuregenParity` + 17-instantiation-unit
+harness, removed in the Phase-E flip; see the "Stale gate names" note in §5.)
 
 ### Option (a) — bound the closure / rethink INCLUDE_MISSING semantics
 Make the base resolve only expand the requested surface + genuine binding-necessary
@@ -573,18 +575,18 @@ consequences:
   same gate-blindness that bit #156's pass-1 attempt. A valid alternative to accepting that
   residual risk is to run broad forcing as an **offline measurement**, not a per-build gate.
 
-- **Stale gate names (flip landed).** The safety constraint above and §5's verification plan
-  cite `:cppfrontend:featuregenParity` and "the 17-instantiation ALL unit" — **both no longer
-  exist** (the Phase-E flip removed the parity harness and that unit). The equivalent
-  machine-check used to validate PR #156 is **regenerating featuregen's `build/krapped-cpp/`
-  binding tree and diffing it** against the unfiltered baseline (byte-identical), which is
-  what was done for this change. Read the `:cppfrontend:featuregenParity` / 17-unit
-  references throughout this doc as "regenerate `build/krapped-cpp/` and diff".
+- **Retired gate names (flip landed).** Earlier drafts of this doc cited
+  `:cppfrontend:featuregenParity` and "the 17-instantiation ALL unit" as the safety gate;
+  **both no longer exist** (the Phase-E flip removed the parity harness and that unit, and
+  the `cppfrontend` module is now `krapper_parse`). The equivalent machine-check used to
+  validate PR #156 — now written throughout this doc — is **regenerating featuregen's
+  `build/krapped-cpp/` binding tree and diffing it** against the unfiltered baseline
+  (byte-identical), which is what was done for this change.
 
 ### Verification plan (how we prove no regression)
-1. **Byte-identical gates (blocking):** `:cppfrontend:featuregenParity` and the
-   17-instantiation ALL unit under `--frontend=cpp` must stay on their committed ratchet
-   ledger (zero regression). Because (c) only *skips re-resolving classes that recover
+1. **Byte-identical gate (blocking):** regenerating featuregen's `build/krapped-cpp/`
+   binding tree under `--frontend=cpp` and diffing it against the unfiltered baseline must
+   show zero regression. Because (c) only *skips re-resolving classes that recover
    nothing*, the featuregen output is unchanged by construction; the gate confirms it.
 2. **`krapper_gen :nativeTest` + featuregen sync** green (the standing determinism +
    codegen guards; per the memory discipline, re-run featuregen sync after the generator
