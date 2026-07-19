@@ -46,7 +46,7 @@ kotlin {
                     "-lLLVM-${rootProject.extra.properties["llvmMajor"] ?: "22"}",
                     "-lstdc++",
                     "-lm",
-                    "-lpthread"
+                    "-lpthread",
                 )
                 runTask()
             }
@@ -205,7 +205,7 @@ kplusplus {
         // preference + dependent-specialization decode (see clang_slice.h).
         "kppbridge::numTemplateArgs",
         "kppbridge::templateArgAsType",
-        "kppbridge::templateBaseName"
+        "kppbridge::templateBaseName",
     )
     // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation
     // emits invalid Kotlin for four of llvm::APSInt's C++ operators —
@@ -249,17 +249,27 @@ kplusplus {
 // goldenEmit makes the cpp front-end parse the fixture and write the bytes (fixture.h) +
 // the full-fidelity ModelIo handoff JSON (model.json) that handoffGenerate consumes. The
 // standing cpp regression lock is handoffGenerate (cpp e2e, below) + :featuregen:nativeTest.
-val goldenDir = layout.buildDirectory.dir("golden").get().asFile
-val krapperParseBinary = layout.buildDirectory
-    .file("bin/klinker/krapper_parseRelease/krapper_parse").get().asFile
-val krapperGenKexe = rootProject.layout.projectDirectory
-    .file("krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe").asFile
+val goldenDir =
+    layout.buildDirectory
+        .dir("golden")
+        .get()
+        .asFile
+val krapperParseBinary =
+    layout.buildDirectory
+        .file("bin/klinker/krapper_parseRelease/krapper_parse")
+        .get()
+        .asFile
+val krapperGenKexe =
+    rootProject.layout.projectDirectory
+        .file("krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe")
+        .asFile
 
-val goldenEmit = tasks.register<Exec>("goldenEmit") {
-    dependsOn("linkReleaseExecutableKlinker")
-    doFirst { goldenDir.mkdirs() }
-    commandLine(krapperParseBinary.absolutePath, "--golden-emit", goldenDir.absolutePath)
-}
+val goldenEmit =
+    tasks.register<Exec>("goldenEmit") {
+        dependsOn("linkReleaseExecutableKlinker")
+        doFirst { goldenDir.mkdirs() }
+        commandLine(krapperParseBinary.absolutePath, "--golden-emit", goldenDir.absolutePath)
+    }
 
 // ---- #101: NONCOPYABLE special-member determinism guard ----
 // Runs the krapper_parse binary's `--noncopyable-determinism` mode, which parses a
@@ -283,7 +293,11 @@ tasks.register<Exec>("noncopyableDeterminismCheck") {
 //                      clang++ -c; a non-zero exit fails the task), proving the handed-off
 //                      model carries everything the real pipeline consumes.
 // --instantiate is scoped out on this path; the fixture needs no instantiations.
-val handoffDir = layout.buildDirectory.dir("handoff").get().asFile
+val handoffDir =
+    layout.buildDirectory
+        .dir("handoff")
+        .get()
+        .asFile
 
 tasks.register<Exec>("handoffGenerate") {
     dependsOn(goldenEmit, ":krapper_gen:linkReleaseExecutableNative")
@@ -299,7 +313,7 @@ tasks.register<Exec>("handoffGenerate") {
         File(goldenDir, "model.json").absolutePath,
         "-o",
         handoffDir.absolutePath,
-        "fixture"
+        "fixture",
     )
     doLast {
         // The run already failed on any resolve/codegen/compile error; assert the
@@ -307,8 +321,11 @@ tasks.register<Exec>("handoffGenerate") {
         val expected = listOf("fixture.h", "fixture.cc", "fixture.def", "libfixture.a")
         val missing = expected.filter { !File(handoffDir, it).exists() }
         check(missing.isEmpty()) { "handoffGenerate: missing generated artifact(s): $missing" }
-        val kotlinFiles = File(handoffDir, "src").walkTopDown()
-            .filter { it.isFile && it.extension == "kt" }.toList()
+        val kotlinFiles =
+            File(handoffDir, "src")
+                .walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .toList()
         check(kotlinFiles.isNotEmpty()) { "handoffGenerate: no Kotlin bindings generated" }
         println("handoffGenerate: generated " + (expected + kotlinFiles.map { it.name }))
     }
@@ -326,30 +343,36 @@ tasks.register<Exec>("handoffGenerate") {
 //                         task), then functionally asserts the recovered range accessor
 //                         (Bag::items()) and the vector specialization's core surface
 //                         materialized.
-val handoffInstDir = layout.buildDirectory.dir("handoff_inst").get().asFile
+val handoffInstDir =
+    layout.buildDirectory
+        .dir("handoff_inst")
+        .get()
+        .asFile
 
-val handoffInstEmit = tasks.register<Exec>("handoffInstEmit") {
-    dependsOn("linkReleaseExecutableKlinker")
-    doFirst { handoffInstDir.mkdirs() }
-    commandLine(krapperParseBinary.absolutePath, "--handoff-emit", handoffInstDir.absolutePath)
-}
+val handoffInstEmit =
+    tasks.register<Exec>("handoffInstEmit") {
+        dependsOn("linkReleaseExecutableKlinker")
+        doFirst { handoffInstDir.mkdirs() }
+        commandLine(krapperParseBinary.absolutePath, "--handoff-emit", handoffInstDir.absolutePath)
+    }
 
 // The CLI tail: fixture, standard, allowlist scope and instantiation for the cpp run.
-fun instGenerateArgs(outDir: File) = listOf(
-    "-h",
-    File(handoffInstDir, "bag.h").absolutePath,
-    "--std",
-    "c++17",
-    "--only",
-    "Bag",
-    "--only",
-    "Item",
-    "--instantiate",
-    "std::vector<Item*>",
-    "-o",
-    outDir.absolutePath,
-    "bag"
-)
+fun instGenerateArgs(outDir: File) =
+    listOf(
+        "-h",
+        File(handoffInstDir, "bag.h").absolutePath,
+        "--std",
+        "c++17",
+        "--only",
+        "Bag",
+        "--only",
+        "Item",
+        "--instantiate",
+        "std::vector<Item*>",
+        "-o",
+        outDir.absolutePath,
+        "bag",
+    )
 
 tasks.register<Exec>("handoffInstGenerate") {
     dependsOn(handoffInstEmit, ":krapper_gen:linkReleaseExecutableNative")
@@ -362,8 +385,8 @@ tasks.register<Exec>("handoffInstGenerate") {
             File(handoffInstDir, "bag_model.json").absolutePath,
             "--forcingModel",
             "std::vector<Item*>=" +
-                File(handoffInstDir, "KrapperForce_std_vector_ItemPtr.json").absolutePath
-        ) + instGenerateArgs(outDir)
+                File(handoffInstDir, "KrapperForce_std_vector_ItemPtr.json").absolutePath,
+        ) + instGenerateArgs(outDir),
     )
     doLast {
         // Functional gate. The wrapper already COMPILED (writeTo's CppCompiler step fails the
@@ -374,23 +397,24 @@ tasks.register<Exec>("handoffInstGenerate") {
             "handoffInstGenerate: Bag::items() was not recovered by pass-3 forcing"
         }
         val vector = File(outDir, "src/std_Vector__Item_P.kt").readText()
-        val expectedSurface = listOf(
-            "fun size(): size_t",
-            "fun push_back(",
-            "fun at(",
-            "operator fun get(",
-            "fun front(): Item?",
-            "fun back(): Item?",
-            "fun empty(): Boolean",
-            "fun clear(): Unit"
-        )
+        val expectedSurface =
+            listOf(
+                "fun size(): size_t",
+                "fun push_back(",
+                "fun at(",
+                "operator fun get(",
+                "fun front(): Item?",
+                "fun back(): Item?",
+                "fun empty(): Boolean",
+                "fun clear(): Unit",
+            )
         val missing = expectedSurface.filter { !vector.contains(it) }
         check(missing.isEmpty()) {
             "handoffInstGenerate: vector specialization is missing core surface: $missing"
         }
         println(
             "handoffInstGenerate: cpp instantiation-forcing run compiled + materialized " +
-                "the specialization and recovered items()"
+                "the specialization and recovered items()",
         )
     }
 }
