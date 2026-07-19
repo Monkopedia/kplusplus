@@ -65,17 +65,17 @@ kotlin {
         }
     }
     sourceSets["nativeMain"].dependencies {
-        // The whole point of this module (#44 brick 2): construct :krapper_model's pure
-        // parse-output model (WrappedTU/WrappedClass/WrappedMethod/WrappedType) from the
-        // kplusplus-generated libclang-cpp bindings instead of libclang-C cursors.
+        // The whole point of this module: construct :krapper_model's pure parse-output model
+        // (WrappedTU/WrappedClass/WrappedMethod/WrappedType) from the kplusplus-generated
+        // libclang-cpp bindings.
         implementation(project(":krapper_model"))
         implementation(libs.serialization.json)
     }
 }
 
-// Stage1 front-end scaffold (#44 brick 2): bind the same Clang C++ AST slice :clangwalk
-// proved out (EXTRACT/TRAVERSE/IDENTITY), parse a fixture, and CONSTRUCT a WrappedTU from
-// the walk. Scoped import (only + IGNORE_MISSING) keeps the bound surface to the allowlist.
+// Front-end scaffold: bind the same Clang C++ AST slice :clangwalk uses
+// (EXTRACT/TRAVERSE/IDENTITY), parse a fixture, and CONSTRUCT a WrappedTU from the walk.
+// Scoped import (only + IGNORE_MISSING) keeps the bound surface to the allowlist.
 kplusplus {
     header("include/clang_slice.h")
     // Clang's AST headers must be compiled with clang++, NOT the konan-bundled GCC-8.3
@@ -245,13 +245,10 @@ kplusplus {
     instantiate("std::vector<clang::CXXBaseSpecifier*>")
 }
 
-// ---- #44 brick 7 / post-flip (#92): the cpp golden EMIT ----
+// ---- the cpp golden EMIT ----
 // goldenEmit makes the cpp front-end parse the fixture and write the bytes (fixture.h) +
 // the full-fidelity ModelIo handoff JSON (model.json) that handoffGenerate consumes. The
-// historical goldenDump/goldenCompare tasks compared this against krapper_gen's libclang-C
-// reducer (--dumpParsedModel); that reducer was DELETED in the self-hosting flip (B5, #88),
-// so the libclang baseline is gone and the comparison was removed (#92) — the standing cpp
-// regression lock is now handoffGenerate (cpp e2e, below) + :featuregen:nativeTest.
+// standing cpp regression lock is handoffGenerate (cpp e2e, below) + :featuregen:nativeTest.
 val goldenDir = layout.buildDirectory.dir("golden").get().asFile
 val krapperParseBinary = layout.buildDirectory
     .file("bin/klinker/krapper_parseRelease/krapper_parse").get().asFile
@@ -275,19 +272,17 @@ tasks.register<Exec>("noncopyableDeterminismCheck") {
     commandLine(krapperParseBinary.absolutePath, "--noncopyable-determinism")
 }
 
-// ---- #45 brick 2: THE HANDOFF (Phase C) ----
-// The first time generated-bindings-parsed C++ flows through krapper_gen's REAL pipeline:
+// ---- THE HANDOFF ----
+// generated-bindings-parsed C++ flows through krapper_gen's REAL pipeline:
 //   goldenEmit       — the krapper_parse binary parses the fixture with the Clang C++ AST
 //                      and writes model.json (full-fidelity ModelIo JSON) next to the
 //                      compare projection;
-//   handoffGenerate  — krapper_gen --frontend=cpp loads that model (libclang parse
-//                      SKIPPED), runs resolution + codegen, emits the Kotlin bindings +
-//                      C++ wrapper for the fixture, and COMPILES the wrapper against
-//                      fixture.h (writeTo's CppCompiler step — clang++ -c; a non-zero
-//                      exit fails the task), proving the handed-off model carries
-//                      everything the real pipeline consumes.
-// --instantiate is scoped out on this path (forcing re-parses synthesized headers
-// through libclang); the fixture needs no instantiations.
+//   handoffGenerate  — krapper_gen loads that model (--parsedModel), runs resolution +
+//                      codegen, emits the Kotlin bindings + C++ wrapper for the fixture, and
+//                      COMPILES the wrapper against fixture.h (writeTo's CppCompiler step —
+//                      clang++ -c; a non-zero exit fails the task), proving the handed-off
+//                      model carries everything the real pipeline consumes.
+// --instantiate is scoped out on this path; the fixture needs no instantiations.
 val handoffDir = layout.buildDirectory.dir("handoff").get().asFile
 
 tasks.register<Exec>("handoffGenerate") {
@@ -319,22 +314,18 @@ tasks.register<Exec>("handoffGenerate") {
     }
 }
 
-// ---- #45 brick 3 / post-flip (#92): INSTANTIATION FORCING on the cpp path ----
+// ---- INSTANTIATION FORCING on the cpp path ----
 // The cpp instantiation-forcing e2e gate: `--instantiate` end-to-end on an instantiation-
 // bearing fixture (Bag/Item + std::vector<Item*> — featuregen's RangeHolder shape).
 //   handoffInstEmit     — the krapper_parse binary parses the fixture (base model) AND the
 //                         synthesized KrapperForce header (forcing model, a separate
 //                         args-bearing parse pulling in <vector>), emitting both as
 //                         ModelIo JSON (KrapperParse.handoffEmit);
-//   handoffInstGenerate — krapper_gen loads BOTH models (the cpp front-end; libclang never
-//                         called), runs the resolveForcing 3-pass flow over them, emits +
-//                         COMPILES the wrapper (a clang++ failure fails the task), then
-//                         functionally asserts the recovered range accessor (Bag::items())
-//                         and the vector specialization's core surface materialized.
-// The historical libclang baseline arm (handoffInstBaseline/handoffOracleGenerate +
-// handoffInstDiff's byte-compare) was removed in #92: krapper_gen's --dumpModels libclang
-// reducer is gone (flip B5, #88), so there is no second front-end to diff against — the
-// functional asserts below are the standing cpp-side check.
+//   handoffInstGenerate — krapper_gen loads BOTH models, runs the resolveForcing 3-pass flow
+//                         over them, emits + COMPILES the wrapper (a clang++ failure fails the
+//                         task), then functionally asserts the recovered range accessor
+//                         (Bag::items()) and the vector specialization's core surface
+//                         materialized.
 val handoffInstDir = layout.buildDirectory.dir("handoff_inst").get().asFile
 
 val handoffInstEmit = tasks.register<Exec>("handoffInstEmit") {
@@ -375,10 +366,9 @@ tasks.register<Exec>("handoffInstGenerate") {
         ) + instGenerateArgs(outDir)
     )
     doLast {
-        // Functional gate (formerly handoffInstDiff gate 2, now cpp-only — the libclang
-        // baseline it diffed against is gone). The wrapper already COMPILED (writeTo's
-        // CppCompiler step fails the run otherwise); assert pass-3 forcing recovered the
-        // range accessor and the specialization materialized its core container surface.
+        // Functional gate. The wrapper already COMPILED (writeTo's CppCompiler step fails the
+        // run otherwise); assert pass-3 forcing recovered the range accessor and the
+        // specialization materialized its core container surface.
         val bag = File(outDir, "src/root_Bag.kt").readText()
         check(bag.contains("fun items(): Vector__Item_P")) {
             "handoffInstGenerate: Bag::items() was not recovered by pass-3 forcing"

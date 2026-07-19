@@ -14,11 +14,10 @@
  * limitations under the License.
  */
 
-// The pure parse-output model (issue #44 brick 1b): the WrappedElement/WrappedType
-// hierarchy a front-end produces and the resolver consumes. No libclang cinterop, no
-// codegen — both the libclang-C front-end (:krapper_gen) and the future C++-AST
-// front-end depend on this module. Targets mirror :krapper_gen (host native + jvm,
-// the jvm side carrying the commonMain enums shared with the resolved schema).
+// The pure parse-output model: the WrappedElement/WrappedType hierarchy the front-end
+// (:krapper_parse) produces and the resolver (:krapper_gen) consumes. No cinterop, no
+// codegen. Targets mirror :krapper_gen (host native + jvm, the jvm side carrying the
+// commonMain enums shared with the resolved schema).
 plugins {
     kotlin("multiplatform")
     alias(libs.plugins.kotlin.serialization)

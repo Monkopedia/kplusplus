@@ -13,14 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// #47 flip brick B2 — the GENERALITY DEMO. A minimal, std-free binding consumer that
-// proves the GENERIC cpp-front-end path: under `-Pkpp.frontend.cppfixture=cpp` the kplusplus
-// plugin drives THIS module's own kplusplus { header(...) } config through krapper_parse ->
-// ModelIo -> krapper_gen --frontend=cpp into build/krapped-cpp, then compiles + runs the
-// tests against those cpp-front-end bindings — exactly the same generic machinery featuregen
-// now uses, on a different module's own config. LLVM is a hard requirement, so this module is
-// always included (settings.gradle.kts) and `kpp.frontend.cppfixture=cpp` is the committed
-// default.
+// The GENERALITY DEMO. A minimal, std-free binding consumer that exercises the GENERIC
+// cpp-front-end path: under `-Pkpp.frontend.cppfixture=cpp` the kplusplus plugin drives THIS
+// module's own kplusplus { header(...) } config through krapper_parse -> ModelIo -> krapper_gen
+// into build/krapped-cpp, then compiles + runs the tests against those bindings — the same
+// generic machinery featuregen uses, on a different module's own config.
+// `kpp.frontend.cppfixture=cpp` is the committed default.
 //
 // Run the demo:
 //   ./gradlew :cppfixture:nativeTest -Pkpp.frontend.cppfixture=cpp  (cpp path)
