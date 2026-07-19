@@ -1,5 +1,6 @@
 import com.vanniktech.maven.publish.JavadocJar
 import com.vanniktech.maven.publish.KotlinJvm
+import com.vanniktech.maven.publish.SourcesJar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -24,7 +25,7 @@ val signingConfigured =
 mavenPublishing {
     publishToMavenCentral(automaticRelease = true)
     if (signingConfigured) signAllPublications()
-    configure(KotlinJvm(javadocJar = JavadocJar.Empty(), sourcesJar = true))
+    configure(KotlinJvm(javadocJar = JavadocJar.Empty(), sourcesJar = SourcesJar.Sources()))
     pom {
         name.set("kplusplus compiler (FIR plugin)")
         description.set(

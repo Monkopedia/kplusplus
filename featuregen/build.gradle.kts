@@ -47,11 +47,11 @@ kplusplus {
     // Seed the user template `Box<T>` instantiations: their Kotlin facade is itself
     // generated, so the compiler can't request them via SYNC_REQUIRED (see the
     // instantiate() KDoc). One per featuregen Box test.
-    instantiate("Box<int>")              // UT-box: primitive arg
-    instantiate("Box<Point>")            // UT-box-point: user-type arg -> Box__Point
-    instantiate("Box<Box<int>>")         // UT-box-nested: nested -> Box<Box__Int>()
-    instantiate("Pair2<int, double>")    // UT-pair2: 2-type-param user template -> Pair2__Int__Double
-    instantiate("std::unique_ptr<int>")  // SP-unique: get/release/operator-> via pointer typedef
+    instantiate("Box<int>") // UT-box: primitive arg
+    instantiate("Box<Point>") // UT-box-point: user-type arg -> Box__Point
+    instantiate("Box<Box<int>>") // UT-box-nested: nested -> Box<Box__Int>()
+    instantiate("Pair2<int, double>") // UT-pair2: 2-type-param user template -> Pair2__Int__Double
+    instantiate("std::unique_ptr<int>") // SP-unique: get/release/operator-> via pointer typedef
     // RG-range (T1.3): RangeHolder::items() is materialized into std::vector<Thing*>.
     // Like the Box facade, this vector instantiation is generated on demand by the
     // range rewrite (not via a Kotlin call site), so it can't be discovered through
@@ -87,17 +87,24 @@ if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
     // hardcoded. This is ENTIRELY under the property guard: the default
     // `./gradlew :featuregen:nativeTest` never enters this block, so the standard test
     // link path is untouched.
-    val systemStdcxxSo: File = run {
-        val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
-            .redirectErrorStream(true).start()
-        val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
-        proc.waitFor()
-        File(out).canonicalFile.takeIf { it.isFile }
-            ?: error(
-                "#78: could not resolve the system libstdc++.so from " +
-                    "`clang++ -print-file-name=libstdc++.so` (got: '$out')"
-            )
-    }
+    val systemStdcxxSo: File =
+        run {
+            val proc =
+                ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
+                    .redirectErrorStream(true)
+                    .start()
+            val out =
+                proc.inputStream
+                    .readBytes()
+                    .toString(Charsets.UTF_8)
+                    .trim()
+            proc.waitFor()
+            File(out).canonicalFile.takeIf { it.isFile }
+                ?: error(
+                    "#78: could not resolve the system libstdc++.so from " +
+                        "`clang++ -print-file-name=libstdc++.so` (got: '$out')",
+                )
+        }
     val systemStdcxxLibDir = systemStdcxxSo.parentFile.absolutePath
     kotlin {
         linuxX64("native") {
@@ -117,7 +124,7 @@ if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
                 "-rpath",
                 systemStdcxxLibDir,
                 "-rpath-link",
-                systemStdcxxLibDir
+                systemStdcxxLibDir,
             )
         }
     }

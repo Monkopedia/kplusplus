@@ -951,7 +951,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 return@afterEvaluate
             }
             compilation.cinterops.create("kplusplus") { interop ->
-                interop.defFile = krappedDef
+                interop.definitionFile.set(krappedDef)
             }
             // The cinterop task reads the generated .def; make it regenerate via
             // kplusplusSync first so it can't process a stale def (issue #16).
