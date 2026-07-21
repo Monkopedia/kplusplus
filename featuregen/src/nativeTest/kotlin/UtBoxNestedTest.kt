@@ -1,8 +1,8 @@
-import root.Box
-import root.Box__Int
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Box
+import root.Box__Int
 
 // UT-box-nested: the user template nested in itself — `Box<Box<int>>`. As with the
 // cppVector<Vector__Int> two-cycle pattern, the inner `Box<int>` is named at the

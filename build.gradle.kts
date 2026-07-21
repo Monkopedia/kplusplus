@@ -13,6 +13,18 @@ subprojects {
     configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
         version.set(rootProject.libs.versions.ktlint.cli)
         android.set(true)
+        // Exclude generated binding output from ktlint.  The kplusplus compiler plugin
+        // places generated Kotlin bindings in two possible directories:
+        //   • <module>/krapped/src/   — the committed seed (default / libclang path)
+        //   • build/krapped-cpp/src/  — the cpp front-end output (kpp.frontend.<mod>=cpp)
+        // Linting machine-generated code produces thousands of spurious violations that
+        // drown real hand-written source findings, so we skip both trees here.
+        filter {
+            exclude { element ->
+                val path = element.file.absolutePath
+                path.contains("/krapped/") || path.contains("/krapped-cpp/")
+            }
+        }
     }
 }
 

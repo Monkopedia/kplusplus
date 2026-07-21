@@ -1,7 +1,7 @@
 import com.monkopedia.kplusplus.cppVector
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
 
 // CV-elem-double: element-type generality — std::vector<double>.
 class CvElemDoubleTest {

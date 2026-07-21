@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import outer2.Inner2
 import root.Outer2
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // T-typename-b: a class nested inside a class TEMPLATE (`Wrapper<T>::Inner`) has a
 // qualified name that can't be spelled without the enclosing template's argument, so

@@ -1,13 +1,13 @@
+import kotlin.math.PI
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.cinterop.memScoped
 import root.Circle
 import root.Rectangle
 import root.Shape
 import root.ShapeApi
 import root.ShapeProbe
-import kotlin.math.PI
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 // IH-upcast / IH-virtual-dispatch: single public inheritance generates an
 // `interface ShapeApi` (the base's ptr + virtual surface) that Shape/Circle/Rectangle
@@ -50,7 +50,7 @@ class IhUpcastTest {
     // really the larger argument; calling area() on the returned base interface dispatches
     // to whichever derived it actually is.
     @Test fun shape_pointer_return_upcast_dispatches() = memScoped {
-        val small = with(Circle) { Circle__double(1.0) }     // area = π
+        val small = with(Circle) { Circle__double(1.0) } // area = π
         val big = with(Rectangle) { Rectangle__double_double(10.0, 10.0) } // area = 100
         val winner: ShapeApi? = with(ShapeProbe) { biggest(small, big) }
         assertTrue(winner != null)

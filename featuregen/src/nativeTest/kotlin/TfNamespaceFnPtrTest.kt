@@ -1,9 +1,9 @@
-import kotlinx.cinterop.invoke
-import kotlinx.cinterop.memScoped
-import root.HandlerProbe
 import kotlin.test.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.cinterop.invoke
+import kotlinx.cinterop.memScoped
+import root.HandlerProbe
 
 // T-forcing-scope-2b: a NAMESPACE-SCOPED function-pointer typedef (`hh::handler_t`,
 // `void(*)()`) used as a method return / parameter type. This is the exact shape of the

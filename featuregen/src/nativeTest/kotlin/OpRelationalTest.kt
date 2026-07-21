@@ -1,10 +1,10 @@
-import kotlinx.cinterop.memScoped
-import root.Vec2
-import root.VecEq
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import root.Vec2
+import root.VecEq
 
 // OP-eq / OP-neq / OP-compare / OP-index: comparison + subscript operators.
 //
@@ -107,9 +107,12 @@ class OpRelationalTest {
                 Vec2__double_double(1.0, 9.0),
                 Vec2__double_double(1.0, 1.0)
             ).sorted()
-            assertEquals(1.0, sorted[0].x); assertEquals(1.0, sorted[0].y)
-            assertEquals(1.0, sorted[1].x); assertEquals(9.0, sorted[1].y)
-            assertEquals(2.0, sorted[2].x); assertEquals(0.0, sorted[2].y)
+            assertEquals(1.0, sorted[0].x)
+            assertEquals(1.0, sorted[0].y)
+            assertEquals(1.0, sorted[1].x)
+            assertEquals(9.0, sorted[1].y)
+            assertEquals(2.0, sorted[2].x)
+            assertEquals(0.0, sorted[2].y)
         }
     }
 

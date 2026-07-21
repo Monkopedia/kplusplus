@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Convertible
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Convertible
 
 // T-typename-a: a user-defined conversion operator to a NAMESPACED struct
 // (`Convertible::operator nn::Tok() const`). libclang spells the method `operator Tok`

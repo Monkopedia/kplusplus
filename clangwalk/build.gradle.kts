@@ -54,7 +54,7 @@ kotlin {
                     "-lLLVM-${rootProject.extra.properties["llvmMajor"] ?: "22"}",
                     "-lstdc++",
                     "-lm",
-                    "-lpthread"
+                    "-lpthread",
                 )
                 runTask()
             }
@@ -114,7 +114,7 @@ kplusplus {
         // survive and exposes QualType::getAsString() (a by-value std::string return) — the
         // #37 EXTRACT payoff: under IGNORE_MISSING the string return now normalizes to a
         // Kotlin String instead of dropping the whole method.
-        "clang::QualType"
+        "clang::QualType",
     )
     // Materialize the range returns the walk iterates (decls()/methods()/bases()).
     instantiate("std::vector<clang::Decl*>")

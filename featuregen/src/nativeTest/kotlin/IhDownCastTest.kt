@@ -1,11 +1,11 @@
-import kotlinx.cinterop.memScoped
-import root.DcBase
-import root.DcFactory
-import root.Derived1
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlinx.cinterop.memScoped
+import root.DcBase
+import root.DcFactory
+import root.Derived1
 
 // IH-down-cast (T1.2 dyn_cast): the CHECKED, nullable `B.asD(): D?` down-cast. Backed by a
 // `DcBase_dyncast_DerivedN` C shim doing `dynamic_cast<DerivedN*>` (the generic RTTI path),

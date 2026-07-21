@@ -1,11 +1,11 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Animal
 import root.AnimalApi
 import root.AnimalProbe
 import root.Dog
 import root.Puppy
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // IH-flatten (3-level chain): Animal <- Dog <- Puppy. The inherited virtual
 // surface flattens onto each binding with the intermediate-override de-dup intact:

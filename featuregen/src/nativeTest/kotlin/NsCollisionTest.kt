@@ -1,8 +1,8 @@
 import acolor.Tag
 import bflavor.Tag as FlavorTag
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
 
 // NS-collision: same short name `Tag` in two namespaces `acolor` and `bflavor`.
 // Because the Kotlin package is derived from the full C++ qualified name, the

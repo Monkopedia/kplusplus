@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Vec2
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Vec2
 
 // OP-call: C++ `operator()` used to SIGABRT the whole sync (operator() isn't in
 // ALL_OPERATORS and its parens weren't sanitized into a valid identifier). It now

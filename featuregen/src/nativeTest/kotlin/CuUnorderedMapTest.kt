@@ -1,10 +1,10 @@
 import com.monkopedia.kplusplus.cppUnorderedMap
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.pointed
-import kotlinx.cinterop.value
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.pointed
+import kotlinx.cinterop.value
 
 // CU-unordered-map: std::unordered_map<int,int> via the cppUnorderedMap<K,V> facade.
 //

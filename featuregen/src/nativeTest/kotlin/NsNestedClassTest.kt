@@ -1,8 +1,8 @@
-import outer.Inner
-import root.Outer
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import outer.Inner
+import root.Outer
 
 // NS-nested-class: a C++ nested class `Outer::Inner` does NOT collide in `root`
 // (the review's prediction). Instead krapper turns the outer-class name into a

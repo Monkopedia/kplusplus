@@ -12,7 +12,8 @@ class PrWcharTest {
     @BeforeTest fun reset() = pr_wchar_reset()
 
     @Test fun round_trips_ascii_and_astral() {
-        for (v in listOf('A'.code, 0, 0x1F600 /* 😀, needs 4-byte wchar_t */)) {
+        // 0x1F600 = '😀'; the astral value requires 4-byte wchar_t (Linux/macOS)
+        for (v in listOf('A'.code, 0, 0x1F600)) {
             pr_wchar_reset()
             assertEquals(v, pr_wchar_echo(v))
             assertEquals(v, pr_wchar_last_arg())

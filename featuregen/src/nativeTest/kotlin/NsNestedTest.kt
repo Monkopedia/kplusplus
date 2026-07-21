@@ -1,7 +1,7 @@
 import geo.detail.Impl
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
 
 // NS-nested: a two-level C++ namespace `geo::detail { struct Impl; }` maps to
 // `package geo.detail`, class `Impl`, imported as `geo.detail.Impl`. The C

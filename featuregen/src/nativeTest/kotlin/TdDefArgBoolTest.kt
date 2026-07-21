@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.BoolFilterable
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.BoolFilterable
 
 // T-defarg-bool (fix #1): the same skip-not-crash guard as T-defarg (Mask<4>), but the
 // un-modelable param's non-type template argument is a `bool` (`Flags<true>`) rather than

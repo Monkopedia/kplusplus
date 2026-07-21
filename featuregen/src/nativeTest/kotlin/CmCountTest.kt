@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppMap
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CM-count: count() recovered by the size_type typedef fix.
 class CmCountTest {

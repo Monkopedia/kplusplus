@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.KeywordMethods
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.KeywordMethods
 
 // Ticket #7 fix #2: a C++ method whose name IS a Kotlin hard keyword (`in`/`is`) must be
 // back-tick-escaped in the generated binding — otherwise the Kotlin emits `fun in(...)` and

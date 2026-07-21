@@ -23,18 +23,24 @@ val compileFeatureTestsCpp by tasks.registering {
     doLast {
         val objDir = cppObjDir.get().asFile.also { it.mkdirs() }
         val libFile = cppLib.get().asFile.also { it.parentFile.mkdirs() }
-        val objs = sources.files.map { src ->
-            val obj = objDir.resolve(src.nameWithoutExtension + ".o")
-            val cmd = listOf(
-                "clang++", "-std=c++17", "-fPIC", "-c",
-                "-I${includeDir.absolutePath}",
-                src.absolutePath,
-                "-o", obj.absolutePath
-            )
-            val rc = ProcessBuilder(cmd).inheritIO().start().waitFor()
-            if (rc != 0) throw GradleException("clang++ failed on $src (rc=$rc)")
-            obj.absolutePath
-        }
+        val objs =
+            sources.files.map { src ->
+                val obj = objDir.resolve(src.nameWithoutExtension + ".o")
+                val cmd =
+                    listOf(
+                        "clang++",
+                        "-std=c++17",
+                        "-fPIC",
+                        "-c",
+                        "-I${includeDir.absolutePath}",
+                        src.absolutePath,
+                        "-o",
+                        obj.absolutePath,
+                    )
+                val rc = ProcessBuilder(cmd).inheritIO().start().waitFor()
+                if (rc != 0) throw GradleException("clang++ failed on $src (rc=$rc)")
+                obj.absolutePath
+            }
         // Recreate the archive each run so removed rows drop out.
         if (libFile.exists()) libFile.delete()
         val arCmd = listOf("ar", "rcs", libFile.absolutePath) + objs
@@ -90,10 +96,14 @@ val matrixReport by tasks.registering {
 
     // Every module's nativeTest results dir. The pure-cinterop harness
     // (this module) plus any generator-backed modules.
-    val resultDirs = listOf(
-        layout.buildDirectory.dir("test-results/nativeTest").get().asFile,
-        rootProject.file("featuregen/build/test-results/nativeTest")
-    )
+    val resultDirs =
+        listOf(
+            layout.buildDirectory
+                .dir("test-results/nativeTest")
+                .get()
+                .asFile,
+            rootProject.file("featuregen/build/test-results/nativeTest"),
+        )
     val matrixFile = rootProject.file("docs/features.md")
     resultDirs.filter { it.exists() }.forEach { inputs.dir(it) }
     inputs.file(matrixFile)
@@ -113,12 +123,22 @@ val matrixReport by tasks.registering {
         val idPattern = Regex("^[A-Z]{2,}-")
 
         val attr = { text: String, name: String ->
-            Regex("""$name="(\d+)"""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
+            Regex("""$name="(\d+)"""")
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.toInt() ?: 0
         }
 
-        val xmlByClass = resultDirs
-            .flatMap { (it.listFiles { f -> f.name.endsWith(".xml") } ?: emptyArray()).toList() }
-            .associateBy { it.name.removePrefix("TEST-nativeTest.").removeSuffix(".xml") }
+        val xmlByClass =
+            resultDirs
+                .flatMap {
+                    (
+                        it.listFiles { f ->
+                            f.name.endsWith(".xml")
+                        } ?: emptyArray()
+                    ).toList()
+                }.associateBy { it.name.removePrefix("TEST-nativeTest.").removeSuffix(".xml") }
 
         val lines = matrixFile.readLines()
         var statusIdx = -1
@@ -127,51 +147,78 @@ val matrixReport by tasks.registering {
         val notScaffolded = mutableListOf<String>()
         val turnedRed = mutableListOf<String>()
 
-        val out = lines.map { line ->
-            val trimmed = line.trim()
-            val isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|")
-            if (!isTableRow) return@map line
-            val cells = trimmed.removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+        val out =
+            lines.map { line ->
+                val trimmed = line.trim()
+                val isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|")
+                if (!isTableRow) return@map line
+                val cells =
+                    trimmed
+                        .removePrefix("|")
+                        .removeSuffix("|")
+                        .split("|")
+                        .map { it.trim() }
 
-            // Lock onto the header that owns the Status column.
-            if (statusIdx == -1 && cells.contains("Status") && cells.contains("ID")) {
-                statusIdx = cells.indexOf("Status")
-                headerCells = cells.size
-                return@map line
-            }
-            // Only rewrite real data rows of that table.
-            if (statusIdx == -1 || cells.size != headerCells) return@map line
-            val id = cells.firstOrNull() ?: return@map line
-            if (!idPattern.containsMatchIn(id)) return@map line
+                // Lock onto the header that owns the Status column.
+                if (statusIdx == -1 && cells.contains("Status") && cells.contains("ID")) {
+                    statusIdx = cells.indexOf("Status")
+                    headerCells = cells.size
+                    return@map line
+                }
+                // Only rewrite real data rows of that table.
+                if (statusIdx == -1 || cells.size != headerCells) return@map line
+                val id = cells.firstOrNull() ?: return@map line
+                if (!idPattern.containsMatchIn(id)) return@map line
 
-            val cls = rowIdToClass(id)
-            val xml = xmlByClass[cls]
-            if (xml == null) {
-                notScaffolded += "$id (expected $cls)"
-                return@map line
+                val cls = rowIdToClass(id)
+                val xml = xmlByClass[cls]
+                if (xml == null) {
+                    notScaffolded += "$id (expected $cls)"
+                    return@map line
+                }
+                matchedClasses += cls
+                val text = xml.readText()
+                val failed = attr(text, "failures") + attr(text, "errors")
+                val current = cells[statusIdx]
+                val newStatus =
+                    when {
+                        failed > 0 -> "🔴"
+
+                        // 🔴
+                        current.contains("🟡") -> current
+
+                        // keep manual 🟡
+                        else -> "🟢" // 🟢
+                    }
+                if (failed > 0) turnedRed += "$id ($cls: $failed failing)"
+                val updated = cells.toMutableList().also { it[statusIdx] = newStatus }
+                "| " + updated.joinToString(" | ") + " |"
             }
-            matchedClasses += cls
-            val text = xml.readText()
-            val failed = attr(text, "failures") + attr(text, "errors")
-            val current = cells[statusIdx]
-            val newStatus = when {
-                failed > 0 -> "🔴" // 🔴
-                current.contains("🟡") -> current // keep manual 🟡
-                else -> "🟢" // 🟢
-            }
-            if (failed > 0) turnedRed += "$id ($cls: $failed failing)"
-            val updated = cells.toMutableList().also { it[statusIdx] = newStatus }
-            "| " + updated.joinToString(" | ") + " |"
-        }
 
         val newText = out.joinToString("\n") + "\n"
         val changed = newText != matrixFile.readText()
         if (changed) matrixFile.writeText(newText)
 
         val orphans = (xmlByClass.keys - matchedClasses - "SmokeTest").sorted()
-        logger.lifecycle("matrixReport: ${if (changed) "updated" else "no change to"} ${matrixFile.relativeTo(rootProject.projectDir)}")
-        if (turnedRed.isNotEmpty()) logger.lifecycle("  🔴 failing rows: ${turnedRed.joinToString(", ")}")
-        if (notScaffolded.isNotEmpty()) logger.lifecycle("  ⚪ rows with no tests yet: ${notScaffolded.joinToString(", ")}")
-        if (orphans.isNotEmpty()) logger.lifecycle("  ⚠️  test classes with no matrix row: ${orphans.joinToString(", ")}")
+        logger.lifecycle(
+            "matrixReport: ${if (changed) "updated" else "no change to"} ${matrixFile.relativeTo(
+                rootProject.projectDir,
+            )}",
+        )
+        if (turnedRed.isNotEmpty()) {
+            logger.lifecycle(
+                "  🔴 failing rows: ${turnedRed.joinToString(", ")}",
+            )
+        }
+        if (notScaffolded.isNotEmpty()) {
+            logger.lifecycle(
+                "  ⚪ rows with no tests yet: ${notScaffolded.joinToString(", ")}",
+            )
+        }
+        if (orphans.isNotEmpty()) {
+            logger.lifecycle(
+                "  ⚠️  test classes with no matrix row: ${orphans.joinToString(", ")}",
+            )
+        }
     }
 }

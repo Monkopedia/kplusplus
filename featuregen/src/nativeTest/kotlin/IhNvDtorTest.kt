@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Gadget
 import root.Sprocket
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // IH-nvdtor (decision B diagnostic): `Gadget` is polymorphic (virtual tick() and
 // used as a base by Sprocket) but its destructor is non-virtual. The generator
@@ -25,7 +25,7 @@ class IhNvDtorTest {
     @Test fun derived_inheriting_nonvirtual_dtor_still_works() = memScoped {
         val s = with(Sprocket) { Sprocket() }
         assertEquals(0, s.spun())
-        s.tick()       // override -> increments spins, not ticks
+        s.tick() // override -> increments spins, not ticks
         s.tick()
         assertEquals(2, s.spun())
         assertEquals(0, s.read()) // base counter untouched by the override

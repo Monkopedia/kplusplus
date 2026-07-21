@@ -3,14 +3,14 @@ import feature_tests.st_wcstr_last_len
 import feature_tests.st_wcstr_name
 import feature_tests.st_wcstr_reset
 import feature_tests.st_wcstr_take
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toKStringFromUtf32
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // Wide C string on Linux/macOS: wchar_t is 4 bytes, so cinterop types the param
 // as CValuesRef<IntVar>? (not the 2-byte .wcstr). We build the wchar_t array by

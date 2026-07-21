@@ -49,14 +49,25 @@ fun resolveExecutable(name: String): File? {
     if (direct.path.contains(File.separatorChar)) {
         return direct.takeIf { it.canExecute() }
     }
-    return System.getenv("PATH").orEmpty().split(File.pathSeparator)
-        .map { File(it, name) }.firstOrNull { it.canExecute() }
+    return System
+        .getenv("PATH")
+        .orEmpty()
+        .split(File.pathSeparator)
+        .map { File(it, name) }
+        .firstOrNull { it.canExecute() }
 }
 
 // First line of `<exec> <arg>` stdout, trimmed (e.g. `llvm-config --version`/`--libdir`).
-fun probe(exec: File, arg: String): String {
+fun probe(
+    exec: File,
+    arg: String,
+): String {
     val proc = ProcessBuilder(exec.absolutePath, arg).redirectErrorStream(true).start()
-    val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
+    val out =
+        proc.inputStream
+            .readBytes()
+            .toString(Charsets.UTF_8)
+            .trim()
     proc.waitFor()
     return out
 }
@@ -77,8 +88,10 @@ if (llvmConfigProbe == null || clangxx == null) {
         |LLVM is REQUIRED to build kplusplus, but the LLVM/Clang toolchain was not found:
         |  - llvm-config: ${
             llvmConfigProbe?.absolutePath
-                ?: (llvmConfigProp?.let { "'$it' is not an executable file" }
-                    ?: "not found on PATH")
+                ?: (
+                    llvmConfigProp?.let { "'$it' is not an executable file" }
+                        ?: "not found on PATH"
+                )
         }
         |  - clang++:     ${clangxx?.absolutePath ?: "not found on PATH"}
         |
@@ -86,7 +99,7 @@ if (llvmConfigProbe == null || clangxx == null) {
         |  * install LLVM 22 so `llvm-config` and `clang++` are on PATH; or
         |  * point the build at a specific install:
         |        ./gradlew <task> -PllvmConfig=/path/to/llvm-config
-        """.trimMargin()
+        """.trimMargin(),
     )
 }
 val llvmConfig: File = llvmConfigProbe!!
@@ -103,7 +116,7 @@ if (!File(llvmLibDir, "libLLVM-$llvmMajor.so").exists() &&
     println(
         "WARNING: clang modules expect libLLVM-$llvmMajor.so + libclang-cpp.so under " +
             "$llvmLibDir (from ${llvmConfig.absolutePath} --libdir), but neither was " +
-            "found there; the gated link may fail. Override with -PllvmConfig."
+            "found there; the gated link may fail. Override with -PllvmConfig.",
     )
 }
 

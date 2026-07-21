@@ -1,10 +1,10 @@
-import kotlinx.cinterop.memScoped
-import root.PassObj
-import root.Point2
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlinx.cinterop.memScoped
+import root.PassObj
+import root.Point2
 
 // OB-* return conventions: by-value (placement-new into a Holder), borrowed
 // pointer (non-owning wrapper, no free), owned pointer (manual freePoint),
@@ -17,8 +17,7 @@ import kotlin.test.assertNull
 class ObReturnTest {
 
     context(scope: kotlinx.cinterop.MemScope)
-    private fun pt(x: Int, y: Int): Point2 =
-        with(Point2) { Point2__int_int(x, y) }
+    private fun pt(x: Int, y: Int): Point2 = with(Point2) { Point2__int_int(x, y) }
 
     // OB-return-byval: Point2 clonePoint(const Point2&) → placement-new into a
     // Point2_Holder; fields match input.
@@ -112,7 +111,7 @@ class ObReturnTest {
             assertNotNull(p)
             assertEquals(7, p.x)
             assertEquals(8, p.y)
-            freePoint(p)   // explicit free does not crash
+            freePoint(p) // explicit free does not crash
         }
     }
 

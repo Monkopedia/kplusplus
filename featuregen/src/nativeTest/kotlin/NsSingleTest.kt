@@ -1,7 +1,7 @@
 import geo.Vec
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
 
 // NS-single: a struct in a single C++ namespace `geo { struct Vec; }` maps to
 // `package geo`, class `Vec`, imported as `geo.Vec`. The C wrapper symbols are

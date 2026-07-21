@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Direction
 import root.DirectionFeature
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // EN-unscoped: plain `enum Direction { North=0, East=1, South=2, West=3 }`. Its
 // underlying type is unsigned, so the synthesized Kotlin `enum class

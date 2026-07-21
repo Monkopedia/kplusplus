@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppSet
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
 
 // CS-set: std::set<int> via the cppSet<T> facade.
 //

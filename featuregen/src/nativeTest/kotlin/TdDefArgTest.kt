@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Filterable
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Filterable
 
 // T-defarg (skip-not-crash at the method level): when a method has a REQUIRED
 // parameter krapper cannot model, the whole method must be DROPPED — never emitted

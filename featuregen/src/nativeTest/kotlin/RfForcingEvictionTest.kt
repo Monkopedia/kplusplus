@@ -1,10 +1,10 @@
 import com.monkopedia.kplusplus.cppVector
-import kotlinx.cinterop.memScoped
-import root.StringFeature
-import std.__cxx11.Basic_string__Char
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import root.StringFeature
+import std.__cxx11.Basic_string__Char
 
 // RF-forcing-eviction (issue #18, the eviction-policy gate that BLEW UP in June):
 // resolveForcing's pass-3 eviction must, under INCLUDE_MISSING, evict ONLY the forcing

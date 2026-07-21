@@ -1,9 +1,9 @@
-import kotlinx.cinterop.memScoped
-import root.Widget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import root.Widget
 
 // UC-static-method / UC-operator-eq / UC-operator-plus: the static factory
 // `make(count_)` returning a Widget by value (placement-new into a Holder), and

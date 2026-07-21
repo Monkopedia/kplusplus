@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppVector
-import kotlinx.cinterop.memScoped
-import std.__cxx11.Basic_string__Char
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.cinterop.memScoped
+import std.__cxx11.Basic_string__Char
 
 // CV-elem-string: std::vector<std::string> — a generated element type
 // (Basic_string__Char) inside a generated container. Transitive instantiation:

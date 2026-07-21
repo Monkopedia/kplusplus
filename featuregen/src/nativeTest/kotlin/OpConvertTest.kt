@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Vec2
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Vec2
 
 // OP-convert: a C++ user-defined conversion operator. Vec2 has
 // `explicit operator double() const { return x*x + y*y; }` (its squared length),

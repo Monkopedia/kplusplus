@@ -1,12 +1,12 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlinx.cinterop.memScoped
 import root.MiProbe
 import root.PlainBase
 import root.Tagged
 import root.VDerived
 import root.Widget2
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 // IH-multi-inherit / IH-cast: uniform offset-correct `.asBase()` upcast methods. Each
 // is backed by a `D_as_B` C helper doing `static_cast<B*>(reinterpret_cast<D*>(p))`,

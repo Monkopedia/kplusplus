@@ -1,8 +1,8 @@
-import root.Box
-import root.Point
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Box
+import root.Point
 
 // UT-box-point: the same user class template `Box<T>` instantiated over a
 // USER-defined type — `Box<Point>()` (where `Point` is itself a generated

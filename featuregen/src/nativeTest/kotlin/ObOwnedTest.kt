@@ -1,8 +1,8 @@
-import kotlinx.cinterop.memScoped
-import root.Tracked
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.memScoped
+import root.Tracked
 
 // OB-return-ptr-owned / IH-destruction: caller-controlled destruction. A `T*`
 // return is a NON-owning wrapper; the wrapper exposes two caller-choice methods

@@ -370,7 +370,9 @@ private var failures = 0
 
 private fun check(name: String, pass: Boolean, detail: String = "") {
     if (!pass) failures++
-    println("  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}")
+    println(
+        "  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}"
+    )
 }
 
 // #44 bricks 3-5: parse the fixture with Clang's C++ AST (on the kplusplus-generated
@@ -1036,7 +1038,7 @@ fun main(args: Array<String>): Unit = memScoped {
         argOf("configure", 0)?.let { !it.hasDefault && it.defaultValue == null } == true &&
             argOf("configure", 1)?.let { it.hasDefault && it.defaultValue == "1" } == true &&
             argOf("configure", 2)
-            ?.let { it.hasDefault && it.defaultValue == "nullptr" } == true,
+                ?.let { it.hasDefault && it.defaultValue == "nullptr" } == true,
         "got ${dMethods.find { it.name == "configure" }?.args
             ?.map { "${it.hasDefault}/${it.defaultValue}" }}"
     )
@@ -1132,7 +1134,7 @@ fun main(args: Array<String>): Unit = memScoped {
         miniHashTypedefs.find { it.name == "hasher" }?.targetType
             ?.toString() == "typename!<HashTraits>" &&
             miniHashTypedefs.find { it.name == "key_equal" }?.targetType
-            ?.toString() == "typename!<traits_type::hash_fn>",
+                ?.toString() == "typename!<traits_type::hash_fn>",
         "got ${miniHashTypedefs.map { "${it.name}=${it.targetType}" }}"
     )
     check(
@@ -1140,7 +1142,7 @@ fun main(args: Array<String>): Unit = memScoped {
         miniHash?.methods?.find { it.name == "rehash" }?.args?.singleOrNull()
             ?.type?.toString() == "const typename!<HashTraits>&" &&
             miniHash?.methods?.find { it.name == "requal" }?.args?.singleOrNull()
-            ?.type?.toString() == "const typename!<traits_type::hash_fn>&",
+                ?.type?.toString() == "const typename!<traits_type::hash_fn>&",
         "got rehash=${miniHash?.methods?.find { it.name == "rehash" }?.args} " +
             "requal=${miniHash?.methods?.find { it.name == "requal" }?.args}"
     )
@@ -1151,7 +1153,7 @@ fun main(args: Array<String>): Unit = memScoped {
         "DefBox param T carries NO default; param A captures 'unresolveable<template<T>>'",
         defBox?.templateArgs?.getOrNull(0)?.defaultType == null &&
             defBox?.templateArgs?.getOrNull(1)?.defaultType
-            ?.toString() == "unresolveable<template<T>>",
+                ?.toString() == "unresolveable<template<T>>",
         "got ${defBox?.templateArgs?.map { "${it.name}=${it.defaultType}" }}"
     )
     check(
@@ -1357,6 +1359,7 @@ private fun printElements(elements: List<WrappedElement>, indent: String) {
                 println("${indent}namespace ${child.namespace}")
                 printElements(child.children, "$indent  ")
             }
+
             is WrappedClass -> {
                 println(
                     "${indent}class ${child.name}" +
@@ -1365,6 +1368,7 @@ private fun printElements(elements: List<WrappedElement>, indent: String) {
                 )
                 printElements(child.children, "$indent  ")
             }
+
             is WrappedTemplate -> {
                 println(
                     "${indent}template<${child.templateArgs.joinToString(", ") { it.name }}> " +
@@ -1372,14 +1376,19 @@ private fun printElements(elements: List<WrappedElement>, indent: String) {
                 )
                 printElements(child.children, "$indent  ")
             }
+
             is WrappedTypedef -> println("${indent}typedef ${child.name} = ${child.targetType}")
+
             is WrappedBase -> println("$indent: ${child.type} (public=${child.isPublic})")
+
             is WrappedField -> println("${indent}val $child")
+
             is WrappedMethod -> println(
                 "$indent$child [${child.methodType}]" +
                     (if (child.isConst) " const" else "") +
                     (if (child.isVirtual) " virtual" else "")
             )
+
             else -> println("$indent${child::class.simpleName}")
         }
     }
