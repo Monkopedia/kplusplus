@@ -56,3 +56,21 @@ kplusplus {
     // so this module is "cpp-ready" today (unlike v8/clang-slice consumers).
     header("include/point2d.h")
 }
+
+// TRANSITIONAL BRIDGE (remove once the consumed plugin is 0.3.4+): this module applies the
+// PUBLISHED kplusplus plugin pinned in settings.gradle.kts (currently 0.3.3), whose
+// kplusplusSync still gates the ":krapper_parse:linkReleaseExecutableKlinker" dependsOn on the
+// -PenableClang flag — a flag PR #173 REMOVED. So under the committed default
+// -Pkpp.frontend.cppfixture=cpp, without that flag the in-tree parser is never auto-built and
+// kplusplusSync fails ("krapper_parse binary was not found at …") — which breaks IntelliJ sync
+// (the IDE model-fetch doesn't pre-build the parser the way a manual :krapper_parse:link would).
+// The in-tree plugin (compiler/gradle/.../KPlusPlusCompilerGradlePlugin.kt) already wires this
+// unconditionally post-#173; this bridge restores that wiring against the CONSUMED 0.3.3 plugin.
+// tasks.matching{}.configureEach is used (not tasks.named) so it resolves cleanly even while the
+// IDE is modeling the task graph and regardless of plugin-apply ordering. Delete when 0.3.4
+// (with the require-LLVM plugin that always-wires) is the pinned version.
+if (providers.gradleProperty("kpp.frontend.cppfixture").orNull == "cpp") {
+    tasks.matching { it.name == "kplusplusSync" }.configureEach {
+        dependsOn(":krapper_parse:linkReleaseExecutableKlinker")
+    }
+}
