@@ -1,8 +1,8 @@
 import com.monkopedia.kplusplus.cppPair
-import kotlinx.cinterop.memScoped
-import std.Pair__Int__Int
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import std.Pair__Int__Int
 
 // CP-pair: std::pair<int,int> via the transparent cppPair<A,B>() facade. pair's
 // first/second are plain fields, which generate as var accessors.

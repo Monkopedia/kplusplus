@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Color
 import root.EnumFeature
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // EN-scoped: `enum class Color : int { Red=0, Green=1, Blue=2 }` with static
 // methods taking/returning Color. krapper now synthesizes a real Kotlin

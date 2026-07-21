@@ -1,10 +1,10 @@
+import kotlin.math.PI
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Circle
 import root.Rectangle
 import root.ShapeBag
-import kotlin.math.PI
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CV-getat-base-elem (#7 item 3): ShapeBag is a `get`/`at`-keyed index container
 // (size_t size + size_t index, no operator[]) whose ELEMENT type is the BASE class
@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
 class CvGetAtBaseElemTest {
     @Test fun at_and_get_return_concrete_elements() = memScoped {
         val bag = with(ShapeBag) { ShapeBag() }
-        val circle = with(Circle) { Circle__double(2.0) }            // area = π·4
+        val circle = with(Circle) { Circle__double(2.0) } // area = π·4
         val rect = with(Rectangle) { Rectangle__double_double(3.0, 4.0) } // area = 12
         bag.add(circle)
         bag.add(rect)
@@ -36,9 +36,9 @@ class CvGetAtBaseElemTest {
     // the concrete element type, so iteration + the stdlib Iterable surface work.
     @Test fun iterates_as_concrete_elements() = memScoped {
         val bag = with(ShapeBag) { ShapeBag() }
-        bag.add(with(Circle) { Circle__double(1.0) })   // area = π
+        bag.add(with(Circle) { Circle__double(1.0) }) // area = π
         bag.add(with(Rectangle) { Rectangle__double_double(2.0, 5.0) }) // area = 10
-        bag.add(with(Circle) { Circle__double(3.0) })   // area = π·9
+        bag.add(with(Circle) { Circle__double(3.0) }) // area = π·9
 
         // The iterator yields the CONCRETE element type (`Shape?`), so area() dispatches
         // through it; the elements are non-null here.

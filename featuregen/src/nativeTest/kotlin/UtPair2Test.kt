@@ -1,7 +1,7 @@
-import root.Pair2
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Pair2
 
 // UT-pair2: a user class template over TWO type params, instantiated from Kotlin as
 // `Pair2<Int, Double>()` via the generated `interface Pair2<T1, T2>` + same-named

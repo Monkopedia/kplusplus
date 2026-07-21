@@ -1,9 +1,9 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.Buffer
 import root.DefaultArgs
 import std.Initializer_list__Int
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // DA-* : Default arguments & overloading.
 //
@@ -90,9 +90,9 @@ class DaDefaultOverloadTest {
     // DA-overload-free / DA-overload-member: 🟢 (via underscore-prefix names).
     @Test fun overloads_each_callable_independently() = memScoped {
         with(DefaultArgs) {
-            assertEquals(5, process(5))          // process(int): x*1
-            assertEquals(7, _process(3, 4))      // process(int,int): x+y
-            assertEquals(25, __process(2.5))     // process(double): x*10
+            assertEquals(5, process(5)) // process(int): x*1
+            assertEquals(7, _process(3, 4)) // process(int,int): x+y
+            assertEquals(25, __process(2.5)) // process(double): x*10
         }
     }
 

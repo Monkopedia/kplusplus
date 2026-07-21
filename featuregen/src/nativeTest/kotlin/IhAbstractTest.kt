@@ -1,11 +1,11 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.cinterop.memScoped
 import root.Button
 import root.Drawable
 import root.DrawableApi
 import root.DrawableProbe
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 // IH-abstract: `Drawable` has a pure-virtual draw()/kind() so it's an abstract C++
 // class. Its constructors are dropped in resolution, so NO `Drawable()` construction

@@ -1,9 +1,9 @@
-import kotlinx.cinterop.memScoped
-import root.FieldSetterHolder
-import root.NonCopyableHolder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.memScoped
+import root.FieldSetterHolder
+import root.NonCopyableHolder
 
 // T-skip (skip-not-crash for non-copyable by-value shapes): a by-value (Holder) field
 // getter whose element type has a DELETED copy constructor, and a generated field

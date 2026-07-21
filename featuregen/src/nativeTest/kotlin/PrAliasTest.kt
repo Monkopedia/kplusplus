@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.AliasFeature
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.AliasFeature
 
 // PR-ptrdiff / PR-wchar (generator-backed): a direct ptrdiff_t / wchar_t param
 // surfaces as the platform.posix alias (ptrdiff_t -> Long, wchar_t -> Int on
@@ -20,8 +20,8 @@ class PrAliasTest {
 
     @Test fun wchar_round_trips() = memScoped {
         with(AliasFeature) {
-            assertEquals(65, echoWide(65))           // 'A'
-            assertEquals(0x20AC, echoWide(0x20AC))   // BMP €
+            assertEquals(65, echoWide(65)) // 'A'
+            assertEquals(0x20AC, echoWide(0x20AC)) // BMP €
             assertEquals(0x1F600, echoWide(0x1F600)) // astral 😀 (4-byte wchar_t)
         }
     }

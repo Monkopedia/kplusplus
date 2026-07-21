@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Widget
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Widget
 
 // UC-ctor-default / UC-ctor-args / UC-ctor-overload: the two constructors of the
 // plain user class `Widget`. The default ctor surfaces as `Widget()` and zeroes

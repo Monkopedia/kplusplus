@@ -1,8 +1,8 @@
-import kotlinx.cinterop.memScoped
-import root.Vec2
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.memScoped
+import root.Vec2
 
 // OP-assign / OP-pluseq: the assignment-style operators on Vec2.
 //
@@ -151,7 +151,7 @@ class OpAssignTest {
             val b = Vec2__double_double(2.0, 3.0)
             a.operator_minus_eq(b) // (10, 6)
             a.operator_div_eq(2.0) //  (5, 3)
-            a.operator_mod_eq(4)   //  (1, 3)
+            a.operator_mod_eq(4) //  (1, 3)
             assertEquals(1.0, a.x)
             assertEquals(3.0, a.y)
         }

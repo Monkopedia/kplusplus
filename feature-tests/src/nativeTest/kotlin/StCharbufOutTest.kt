@@ -1,13 +1,13 @@
 import feature_tests.st_charbuf_out_fill
 import feature_tests.st_charbuf_out_payload_len
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.set
 import kotlinx.cinterop.toKString
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // char* buffer fill: caller allocates, C writes the payload NUL-terminated and
 // never exceeds n bytes. Tests the content / return-count / truncation contract.
@@ -35,9 +35,9 @@ class StCharbufOutTest {
             val n = 5uL
             val buf = allocArray<ByteVar>(n.toInt()) // exactly n bytes — any overrun corrupts
             val written = st_charbuf_out_fill(buf, n)
-            assertEquals(4uL, written)        // n-1 payload chars
+            assertEquals(4uL, written) // n-1 payload chars
             assertEquals("abcd", buf.toKString())
-            assertEquals(0, buf[4].toInt())   // NUL at the last byte
+            assertEquals(0, buf[4].toInt()) // NUL at the last byte
         }
     }
 

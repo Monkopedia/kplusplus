@@ -1,12 +1,12 @@
 import com.monkopedia.kplusplus.cppUniquePtr
+import kotlin.test.Test
+import kotlin.test.assertNull
 import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import std.Unique_ptr__Int
-import kotlin.test.Test
-import kotlin.test.assertNull
 
 // SP-unique: std::unique_ptr<int> via the transparent cppUniquePtr<T>() facade.
 //

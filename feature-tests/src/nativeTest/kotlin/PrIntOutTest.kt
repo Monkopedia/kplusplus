@@ -2,14 +2,14 @@ import feature_tests.pr_int_out_null_flagged
 import feature_tests.pr_int_out_produce
 import feature_tests.pr_int_out_produced_count
 import feature_tests.pr_int_out_reset
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.value
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 class PrIntOutTest {
     @BeforeTest fun reset() = pr_int_out_reset()

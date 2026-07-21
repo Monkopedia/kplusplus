@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.ConstRetHolder
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.ConstRetHolder
 
 // T-constholder: a by-value return whose type is top-level `const`-qualified
 // (`const Coord makeConst()`) is materialized into a scope-bound Holder via

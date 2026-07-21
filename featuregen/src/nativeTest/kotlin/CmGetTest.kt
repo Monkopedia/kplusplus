@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppMap
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CM-get: read mapped values back via subscript / at(). Both return a pointer to
 // the mapped value; deref to read.

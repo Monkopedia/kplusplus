@@ -1,8 +1,8 @@
-import root.Box
-import kotlinx.cinterop.MemScope
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.MemScope
+import kotlinx.cinterop.memScoped
+import root.Box
 
 // UT-box-abstract: the generated `interface Box<T>` now carries the template's
 // T-preserving method surface (`fun set(x: T)`, `fun get(): T`), so callers can

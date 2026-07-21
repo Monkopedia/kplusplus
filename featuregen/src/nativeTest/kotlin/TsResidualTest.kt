@@ -1,8 +1,8 @@
-import kotlinx.cinterop.memScoped
-import root.ImplicitAssignHolder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.memScoped
+import root.ImplicitAssignHolder
 
 // T-skip-residuals (skip-not-crash for IMPLICITLY-deleted special members): the existing
 // T-skip detection only fired when an EXPLICIT `= delete`d/non-public copy member was

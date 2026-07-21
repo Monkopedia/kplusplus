@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppVector
-import kotlinx.cinterop.memScoped
-import root.Point
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.cinterop.memScoped
+import root.Point
 
 // CV-elem-class: std::vector<Point> where Point is a user-defined wrapped struct.
 // The "user type inside a generated container" case — transitive instantiation

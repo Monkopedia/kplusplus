@@ -1,7 +1,7 @@
-import root.Box
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Box
 
 // UT-box: a user class template `Box<T>` instantiated from Kotlin as `Box<Int>()`
 // via the generated interface + same-named scoped factory (the kplusplus compiler

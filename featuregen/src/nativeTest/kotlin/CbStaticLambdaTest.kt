@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.staticCFunction
 import root.CbProbe
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CB-lambda-mode2: a context-free C callback param (`typedef int (*IntTransform)(int)`)
 // surfaces as the raw cinterop `CPointer<CFunction<(Int) -> Int>>?`, so a caller passes

@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.CbCtx
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.CbCtx
 
 // CB-lambda-mode1: a C callback that carries a `void*` context slot
 // (`typedef int (*IntCtxFn)(void* ctx, int n)` + a sibling `void* userData`) is

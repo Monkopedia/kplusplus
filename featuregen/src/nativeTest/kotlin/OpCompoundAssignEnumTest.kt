@@ -1,10 +1,10 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlinx.cinterop.memScoped
 import root.ByteFlags
 import root.Flag
 import root.FlagProbe
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 
 // OP-compound-assign-enum (#105 Family 2): a REFERENCE-return of a value-reduced type.
 //

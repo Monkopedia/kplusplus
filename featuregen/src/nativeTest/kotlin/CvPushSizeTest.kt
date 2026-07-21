@@ -1,8 +1,8 @@
 import com.monkopedia.kplusplus.cppVector
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.cinterop.memScoped
 
 // CV-push-size: push_back grows size().
 class CvPushSizeTest {

@@ -1,9 +1,9 @@
 import ensig.Bus
 import ensig.Signal
-import machine.State
-import root.Machine
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import machine.State
+import root.Machine
 
 // EN-nested (#10 broad-binding correctness): a nested enum (in a namespace `ensig::Signal`
 // or a class `Machine::State`) round-trips through a wrapped static method. The point of

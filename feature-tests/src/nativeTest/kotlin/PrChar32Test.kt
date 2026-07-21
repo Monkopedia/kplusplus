@@ -10,7 +10,8 @@ class PrChar32Test {
     @BeforeTest fun reset() = pr_char32_reset()
 
     @Test fun round_trips_ascii_and_astral() {
-        for (v in listOf(0x41u, 0u, 0x1F600u /* 😀 */)) {
+        // 0x41 = 'A', 0x0 = NUL, 0x1F600 = '😀' (astral plane)
+        for (v in listOf(0x41u, 0u, 0x1F600u)) {
             pr_char32_reset()
             assertEquals(v, pr_char32_echo(v))
             assertEquals(v, pr_char32_last_arg())

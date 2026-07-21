@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Widget
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Widget
 
 // UC-field-rw / UC-method-void / UC-method-ret / UC-const-method: public field
 // read+write, the void mutator `reset()`, the value-returning `compute(x)`, and
@@ -33,8 +33,8 @@ class UcFieldMethodTest {
     @Test fun compute_returns_count_plus_arg() = memScoped {
         val w = with(Widget) { Widget__int_double(10, 0.0) }
         assertEquals(15, w.compute(5))
-        assertEquals(10, w.compute(0))   // boundary: zero arg
-        assertEquals(9, w.compute(-1))   // boundary: negative arg
+        assertEquals(10, w.compute(0)) // boundary: zero arg
+        assertEquals(9, w.compute(-1)) // boundary: negative arg
     }
 
     // UC-const-method: scaled() = count * scale, and calling it does not mutate.

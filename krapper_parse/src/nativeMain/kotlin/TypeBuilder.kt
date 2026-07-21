@@ -56,8 +56,7 @@ internal fun QualType.typePtr(): Type? = getTypePtrOrNull()?.let { Type(it.ptr) 
 
 // Type::getAsCXXRecordDecl() likewise returns the Api interface; re-wrap so the
 // dyn-cast helpers + NamedDecl upcasts resolve.
-internal fun Type.asRecord(): CXXRecordDecl? =
-    getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr) }
+internal fun Type.asRecord(): CXXRecordDecl? = getAsCXXRecordDecl()?.let { CXXRecordDecl(it.ptr) }
 
 // BRIDGE: the generated down-cast helper `Type.asTypedefType()` is missing — TypedefType's
 // base list doesn't survive resolution (TypeBase.h: `class TypedefType final : public

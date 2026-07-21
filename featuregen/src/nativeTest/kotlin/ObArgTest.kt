@@ -1,9 +1,9 @@
-import kotlinx.cinterop.memScoped
-import root.PassObj
-import root.Point2
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import root.PassObj
+import root.Point2
 
 // OB-* argument-passing conventions: by-value (copy), const-ref, pointer
 // (mutating), non-const-ref (out-param). All free-function-style methods live on
@@ -13,8 +13,7 @@ import kotlin.test.assertTrue
 class ObArgTest {
 
     context(scope: kotlinx.cinterop.MemScope)
-    private fun pt(x: Int, y: Int): Point2 =
-        with(Point2) { Point2__int_int(x, y) }
+    private fun pt(x: Int, y: Int): Point2 = with(Point2) { Point2__int_int(x, y) }
 
     // OB-constref-arg: int sumCoords(const Point2&) → MemScope.sumCoords(p): Int
     @Test fun const_ref_arg_sums() = memScoped {

@@ -1,10 +1,10 @@
 import com.monkopedia.kplusplus.cppMap
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.pointed
-import kotlinx.cinterop.value
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.pointed
+import kotlinx.cinterop.value
 
 // CM-clear: clear() empties the map.
 class CmClearTest {

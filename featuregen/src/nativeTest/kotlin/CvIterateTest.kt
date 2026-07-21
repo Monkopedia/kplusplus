@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppVector
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CV-iterate: traverse by index using size() + subscript.
 class CvIterateTest {

@@ -1,9 +1,9 @@
-import kotlinx.cinterop.invoke
-import kotlinx.cinterop.memScoped
-import root.CbProbe
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.invoke
+import kotlinx.cinterop.memScoped
+import root.CbProbe
 
 // CB-cfnptr-ret / CB-cfnptr-arg (stage 1, C->Kotlin direction): a method whose
 // parameter or return type is a C function-pointer typedef (`typedef int (*IntTransform)(int)`)

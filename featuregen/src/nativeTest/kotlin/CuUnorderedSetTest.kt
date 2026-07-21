@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppUnorderedSet
-import kotlinx.cinterop.memScoped
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
 
 // CU-unordered-set: std::unordered_set<int> via the cppUnorderedSet<T> facade.
 //
@@ -29,8 +29,8 @@ class CuUnorderedSetTest {
 
     @Test fun insert_count_erase() = memScoped {
         val s = cppUnorderedSet<Int>()
-        assertTrue(s.insert(7))          // newly inserted
-        assertFalse(s.insert(7))         // already present
+        assertTrue(s.insert(7)) // newly inserted
+        assertFalse(s.insert(7)) // already present
         assertEquals(1uL, s.count(7))
         assertEquals(0uL, s.count(8))
         assertEquals(1uL, s.size())

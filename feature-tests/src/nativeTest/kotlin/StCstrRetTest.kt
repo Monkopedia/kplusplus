@@ -1,8 +1,8 @@
 import feature_tests.st_cstr_ret_name
-import kotlinx.cinterop.toKString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.cinterop.toKString
 
 // const char* return, borrowed from static storage: content decodes, the
 // pointer is stable across calls, and the caller never frees it.

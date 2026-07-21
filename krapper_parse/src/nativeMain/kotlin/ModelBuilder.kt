@@ -35,7 +35,6 @@ import clang.TemplateTypeParmDecl
 import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
-import kotlinx.cinterop.MemScope
 import com.monkopedia.krapper.generator.model.ClassMetadata
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
@@ -52,6 +51,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import kotlinx.cinterop.MemScope
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
 
@@ -626,7 +626,9 @@ private class ModelBuilder(private val memScope: MemScope) {
         if (method != null && decl.asCXXDestructorDecl() == null) {
             when (method.asNamedDecl().getNameAsString()) {
                 "operator new" -> metadata.hasHiddenNew = true
+
                 "operator delete" -> metadata.hasHiddenDelete = true
+
                 // ModelFactories' isCopyAssignmentOf (single non-move lvalue-ref param of
                 // the same class) is exactly CXXMethodDecl::isCopyAssignmentOperator().
                 "operator=" -> if (method.isCopyAssignmentOperator()) {

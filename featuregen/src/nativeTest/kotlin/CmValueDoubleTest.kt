@@ -1,9 +1,9 @@
 import com.monkopedia.kplusplus.cppMap
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CM-value-double: value-type generality — std::map<int,double>.
 class CmValueDoubleTest {

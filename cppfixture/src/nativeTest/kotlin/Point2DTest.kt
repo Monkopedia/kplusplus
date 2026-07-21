@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Point2D
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Point2D
 
 // #47 flip brick B2 generality demo: these tests run against bindings for cppfixture's OWN
 // header (point2d.h). Under `-Pkpp.frontend.cppfixture=cpp` those bindings are produced by

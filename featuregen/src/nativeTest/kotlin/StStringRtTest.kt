@@ -1,9 +1,9 @@
-import kotlinx.cinterop.memScoped
-import root.StringFeature
-import std.__cxx11.Basic_string__Char
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.cinterop.memScoped
+import root.StringFeature
+import std.__cxx11.Basic_string__Char
 
 // ST-string-rt: full std::string round-trip via echo(), read back through
 // c_str(). The generated basic_string binding has no size()/length() (filtered

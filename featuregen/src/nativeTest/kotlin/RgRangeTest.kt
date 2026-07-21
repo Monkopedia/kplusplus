@@ -1,8 +1,8 @@
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.memScoped
 import root.RangeHolder
 import root.Thing
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // RG-range (T1.3, generator-backed): a method returning `llvm::iterator_range<It>` is
 // materialized into a bound `std::vector<Thing*>` and surfaces on the Kotlin side as a

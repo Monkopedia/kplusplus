@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import clang.tooling.buildASTFromCode
-import kotlinx.cinterop.memScoped
 import kotlin.system.exitProcess
+import kotlinx.cinterop.memScoped
 
 // One walked top-level declaration, collected from the AST so the walk can be ASSERTED as a
 // whole rather than printed. methods is (name -> return-type-spelling); bases is the list of
@@ -26,7 +26,7 @@ private data class WalkedDecl(
     val name: String,
     val typeStr: String,
     val bases: List<String>,
-    val methods: List<Pair<String, String>>,
+    val methods: List<Pair<String, String>>
 )
 
 // Mirror of krapper_parse's self-check helper (KrapperParse.kt:check): record every assertion,
@@ -36,7 +36,9 @@ private var failures = 0
 
 private fun check(name: String, pass: Boolean, detail: String = "") {
     if (!pass) failures++
-    println("  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}")
+    println(
+        "  [${if (pass) "PASS" else "FAIL"}] $name${if (detail.isEmpty()) "" else " — $detail"}"
+    )
 }
 
 // Stage1 self-bootstrap: parse C++ into a real Clang AST and walk it — entirely on the
@@ -108,7 +110,7 @@ fun main(args: Array<String>) = memScoped {
         println(
             "  [$kind] $name${if (typeStr.isEmpty()) "" else " : $typeStr"}" +
                 bases.joinToString("") { "\n      <base> $it" } +
-                methods.joinToString("") { "\n      <method> ${it.first} : ${it.second}" },
+                methods.joinToString("") { "\n      <method> ${it.first} : ${it.second}" }
         )
     }
 
@@ -130,13 +132,13 @@ fun main(args: Array<String>) = memScoped {
         "CXXRecord" to "Shape",
         "CXXRecord" to "Circle",
         "Function" to "freeFunction",
-        "Var" to "globalVar",
+        "Var" to "globalVar"
     )
     check("walked exactly 10 top-level decls", walked.size == 10, "got ${walked.size}")
     check(
         "top-level (kind,name) sequence matches the parsed TU",
         walked.map { it.kind to it.name } == expectedKindNames,
-        walked.map { "${it.kind}:${it.name}" }.toString(),
+        walked.map { "${it.kind}:${it.name}" }.toString()
     )
 
     val byName = walked.associateBy { it.name }
@@ -158,7 +160,7 @@ fun main(args: Array<String>) = memScoped {
     check(
         "Shape methods == {area:int, name:const char *, scale:double}",
         shape.methods == listOf("area" to "int", "name" to "const char *", "scale" to "double"),
-        shape.methods.toString(),
+        shape.methods.toString()
     )
 
     // Circle: the inheritance edge — base spelled exactly `Shape` — plus its one method.
@@ -168,7 +170,7 @@ fun main(args: Array<String>) = memScoped {
     check(
         "Circle methods == {radius:double}",
         circle.methods == listOf("radius" to "double"),
-        circle.methods.toString(),
+        circle.methods.toString()
     )
 
     // freeFunction: a Function decl whose ValueDecl type is the full function-type spelling.
@@ -177,7 +179,7 @@ fun main(args: Array<String>) = memScoped {
     check(
         "freeFunction type spelling == `void (int)`",
         freeFunction.typeStr == "void (int)",
-        freeFunction.typeStr,
+        freeFunction.typeStr
     )
 
     // globalVar: a Var decl whose type spelling is the bare `int`.
@@ -189,5 +191,7 @@ fun main(args: Array<String>) = memScoped {
         println("clangwalk: $failures self-check(s) FAILED")
         exitProcess(1)
     }
-    println("clangwalk: all self-checks passed — walked ${walked.size} top-level decls via real libclang-cpp")
+    println(
+        "clangwalk: all self-checks passed — walked ${walked.size} top-level decls via real libclang-cpp"
+    )
 }

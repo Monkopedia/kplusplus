@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 // The GENERALITY DEMO. A minimal, std-free binding consumer that exercises the GENERIC
 // cpp-front-end path: under `-Pkpp.frontend.cppfixture=cpp` the kplusplus plugin drives THIS
 // module's own kplusplus { header(...) } config through krapper_parse -> ModelIo -> krapper_gen

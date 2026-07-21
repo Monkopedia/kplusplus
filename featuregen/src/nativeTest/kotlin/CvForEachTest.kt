@@ -1,12 +1,12 @@
 import com.monkopedia.kplusplus.cppVector
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.cinterop.CValuesRef
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.MemScope
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 // CV-foreach: the synthesized `operator fun iterator()` on Vector__Int makes
 // `for (x in v)` and the whole Iterable surface (map/toList/sumOf/…) work — it

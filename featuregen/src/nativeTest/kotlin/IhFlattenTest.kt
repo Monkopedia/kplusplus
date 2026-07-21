@@ -1,7 +1,7 @@
-import kotlinx.cinterop.memScoped
-import root.Derived
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.cinterop.memScoped
+import root.Derived
 
 // IH-base-method / IH-name-conflict / IH-virtual-override / IH-derived-method:
 // single (one base) public inheritance flattened onto the derived binding
@@ -42,7 +42,7 @@ class IhFlattenTest {
     // to derivedLabel() (= "derived"). Both reachable.
     @Test fun shadowed_label_splits_into_label_and_derivedLabel() = memScoped {
         val d = with(Derived) { Derived() }
-        assertEquals("base", d.label())          // inherited Base::label
+        assertEquals("base", d.label()) // inherited Base::label
         assertEquals("derived", d.derivedLabel()) // Derived's own shadow
     }
 

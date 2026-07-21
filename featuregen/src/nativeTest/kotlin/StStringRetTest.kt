@@ -1,9 +1,9 @@
-import kotlinx.cinterop.memScoped
-import root.StringFeature
-import std.__cxx11.Basic_string__Char
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.cinterop.memScoped
+import root.StringFeature
+import std.__cxx11.Basic_string__Char
 
 // ST-string-ret: std::string returned by value. The generated binding returns a
 // Holder-backed Basic_string__Char whose storage is bound to the enclosing

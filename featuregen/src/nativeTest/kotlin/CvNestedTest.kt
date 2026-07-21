@@ -1,11 +1,11 @@
 import com.monkopedia.kplusplus.cppVector
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.value
 import std.Vector__Int
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 
 // CV-nested: std::vector<std::vector<int>>. The inner type is the generated
 // Vector__Int binding (which cppVector<Int>() itself produces), pushed into an
@@ -17,7 +17,8 @@ class CvNestedTest {
         assertEquals(0uL, outer.size())
 
         val a = cppVector<Int>()
-        a.push_back(1); a.push_back(2)
+        a.push_back(1)
+        a.push_back(2)
         val b = cppVector<Int>()
         b.push_back(3)
 
@@ -34,7 +35,8 @@ class CvNestedTest {
     @Test fun read_inner_vectors_back() = memScoped {
         val outer = cppVector<Vector__Int>()
         val a = cppVector<Int>()
-        a.push_back(1); a.push_back(2)
+        a.push_back(1)
+        a.push_back(2)
         val b = cppVector<Int>()
         b.push_back(3)
         outer.push_back(a)

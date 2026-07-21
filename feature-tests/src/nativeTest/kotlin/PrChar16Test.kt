@@ -10,7 +10,8 @@ class PrChar16Test {
     @BeforeTest fun reset() = pr_char16_reset()
 
     @Test fun round_trips_ascii_and_bmp() {
-        for (v in listOf(0x41u.toUShort(), 0u.toUShort(), 0x20ACu.toUShort() /* € */)) {
+        // 0x41 = 'A', 0x0 = NUL, 0x20AC = '€'
+        for (v in listOf(0x41u.toUShort(), 0u.toUShort(), 0x20ACu.toUShort())) {
             pr_char16_reset()
             assertEquals(v, pr_char16_echo(v))
             assertEquals(v, pr_char16_last_arg())
