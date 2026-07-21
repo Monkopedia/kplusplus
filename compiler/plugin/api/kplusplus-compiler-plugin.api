@@ -1,0 +1,52 @@
+public final class com/monkopedia/kplusplus/compiler/CppVectorIrExtension : org/jetbrains/kotlin/backend/common/extensions/IrGenerationExtension {
+	public fun <init> ()V
+	public fun generate (Lorg/jetbrains/kotlin/ir/declarations/IrModuleFragment;Lorg/jetbrains/kotlin/backend/common/extensions/IrPluginContext;)V
+}
+
+public final class com/monkopedia/kplusplus/compiler/FirKPlusPlusRegistrar : org/jetbrains/kotlin/fir/extensions/FirExtensionRegistrar {
+	public fun <init> ()V
+}
+
+public final class com/monkopedia/kplusplus/compiler/KPlusPlusCommandLineProcessor : org/jetbrains/kotlin/compiler/plugin/CommandLineProcessor {
+	public static final field Companion Lcom/monkopedia/kplusplus/compiler/KPlusPlusCommandLineProcessor$Companion;
+	public static final field PLUGIN_ID Ljava/lang/String;
+	public fun <init> ()V
+	public fun getPluginId ()Ljava/lang/String;
+	public fun getPluginOptions ()Ljava/util/Collection;
+	public fun processOption (Lorg/jetbrains/kotlin/compiler/plugin/AbstractCliOption;Ljava/lang/String;Lorg/jetbrains/kotlin/config/CompilerConfiguration;)V
+}
+
+public final class com/monkopedia/kplusplus/compiler/KPlusPlusCommandLineProcessor$Companion {
+	public final fun getREQUEST_MANIFEST_PATH_KEY ()Lorg/jetbrains/kotlin/config/CompilerConfigurationKey;
+	public final fun getREQUEST_MANIFEST_PATH_OPTION ()Lorg/jetbrains/kotlin/compiler/plugin/CliOption;
+	public final fun getROOT_PACKAGE_KEY ()Lorg/jetbrains/kotlin/config/CompilerConfigurationKey;
+	public final fun getROOT_PACKAGE_OPTION ()Lorg/jetbrains/kotlin/compiler/plugin/CliOption;
+}
+
+public final class com/monkopedia/kplusplus/compiler/KPlusPlusComponentRegistrar : org/jetbrains/kotlin/compiler/plugin/CompilerPluginRegistrar {
+	public fun <init> ()V
+	public fun getPluginId ()Ljava/lang/String;
+	public fun getSupportsK2 ()Z
+	public fun registerExtensions (Lorg/jetbrains/kotlin/compiler/plugin/CompilerPluginRegistrar$ExtensionStorage;Lorg/jetbrains/kotlin/config/CompilerConfiguration;)V
+}
+
+public final class com/monkopedia/kplusplus/compiler/fir/CppVectorCallRefinement : org/jetbrains/kotlin/fir/extensions/FirFunctionCallRefinementExtension {
+	public fun <init> (Lorg/jetbrains/kotlin/fir/FirSession;)V
+	public fun anchorElement (Lorg/jetbrains/kotlin/fir/symbols/impl/FirRegularClassSymbol;)Lorg/jetbrains/kotlin/KtSourceElement;
+	public fun intercept (Lorg/jetbrains/kotlin/fir/resolve/calls/candidate/CallInfo;Lorg/jetbrains/kotlin/fir/symbols/impl/FirNamedFunctionSymbol;)Lorg/jetbrains/kotlin/fir/extensions/FirFunctionCallRefinementExtension$CallReturnType;
+	public fun ownsSymbol (Lorg/jetbrains/kotlin/fir/symbols/impl/FirRegularClassSymbol;)Z
+	public fun restoreSymbol (Lorg/jetbrains/kotlin/fir/expressions/FirFunctionCall;Lorg/jetbrains/kotlin/name/Name;)Lorg/jetbrains/kotlin/fir/symbols/impl/FirRegularClassSymbol;
+	public fun transform (Lorg/jetbrains/kotlin/fir/expressions/FirFunctionCall;Lorg/jetbrains/kotlin/fir/symbols/impl/FirNamedFunctionSymbol;)Lorg/jetbrains/kotlin/fir/expressions/FirFunctionCall;
+}
+
+public final class com/monkopedia/kplusplus/compiler/fir/KPlusPlusDiagnostics : org/jetbrains/kotlin/diagnostics/KtDiagnosticsContainer {
+	public static final field INSTANCE Lcom/monkopedia/kplusplus/compiler/fir/KPlusPlusDiagnostics;
+	public fun getRendererFactory ()Lorg/jetbrains/kotlin/diagnostics/rendering/BaseDiagnosticRendererFactory;
+	public final fun getSYNC_REQUIRED ()Lorg/jetbrains/kotlin/diagnostics/KtDiagnosticFactory1;
+}
+
+public final class com/monkopedia/kplusplus/compiler/fir/KPlusPlusFirCheckersComponent : org/jetbrains/kotlin/fir/analysis/extensions/FirAdditionalCheckersExtension {
+	public fun <init> (Lorg/jetbrains/kotlin/fir/FirSession;)V
+	public fun getExpressionCheckers ()Lorg/jetbrains/kotlin/fir/analysis/checkers/expression/ExpressionCheckers;
+}
+

@@ -10,6 +10,7 @@ ktlint-cli = "1.8.0"
 klinker = "0.2.0"
 gradle-plugin-publish = "2.1.0"
 vannik = "0.37.0"
+binary-compatibility-validator = "0.18.0"
 
 [libraries]
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -31,3 +32,4 @@ ksrpc = { id = "com.monkopedia.ksrpc.plugin", version.ref = "ksrpc" }
 klinker = { id = "com.monkopedia.klinker.plugin", version.ref = "klinker" }
 gradle-plugin-publish = { id = "com.gradle.plugin-publish", version.ref = "gradle-plugin-publish" }
 vannik-publish = { id = "com.vanniktech.maven.publish", version.ref = "vannik" }
+binary-compatibility-validator = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "binary-compatibility-validator" }

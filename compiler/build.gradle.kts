@@ -7,11 +7,32 @@ plugins {
     alias(libs.plugins.kotlin.jvm) apply false
     alias(libs.plugins.vannik.publish) apply false
     alias(libs.plugins.gradle.plugin.publish) apply false
+    // JetBrains binary-compatibility-validator: an ABI gate on the consumer-facing public
+    // surface of the two Central-published JVM modules (the Gradle plugin + its DSL, and the
+    // FIR kotlinc-plugin jar). Applied at the included-build root; it wires an `apiCheck` task
+    // (run as part of `check`) that diffs the current public API against the committed `.api`
+    // dumps. Regenerate the baseline with `apiDump` when the public API changes intentionally.
+    alias(libs.plugins.binary.compatibility.validator)
 }
 
 allprojects {
     group = "com.monkopedia.kplusplus"
     version = "0.3.3"
+}
+
+// Scope the ABI gate to the PUBLISHED modules only. The compiler build's published set is the
+// Gradle plugin (`:kplusplus-compiler-gradle`) and the FIR jar (`:kplusplus-compiler-plugin`)
+// — see docs/releasing.md. Everything else is not published, so it has no consumer ABI:
+//   * the included-build root project (no code, no artifact);
+//   * `:kplusplus-compiler-plugin-native` — an internal K/N compiler variant that shares the
+//     plugin's sources but is never published as a coordinate.
+apiValidation {
+    ignoredProjects.addAll(
+        listOf(
+            rootProject.name,
+            "kplusplus-compiler-plugin-native"
+        )
+    )
 }
 
 // Aggregate publish for the two consumer-facing JVM artifacts that live in this
