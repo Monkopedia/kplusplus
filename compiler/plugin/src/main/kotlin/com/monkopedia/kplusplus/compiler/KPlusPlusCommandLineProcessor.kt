@@ -58,7 +58,7 @@ class KPlusPlusCommandLineProcessor : CommandLineProcessor {
             valueDescription = "<package>",
             description = "Root Kotlin package the generated bindings are nested under " +
                 "(e.g. container bindings land in <rootPackage>.std). Must match the " +
-                "krapper_gen --root-package used to generate them. Omit for the historical " +
+                "krapper --root-package used to generate them. Omit for the historical " +
                 "layout (std containers in `std`).",
             required = false,
             allowMultipleOccurrences = false

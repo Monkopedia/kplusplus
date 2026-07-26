@@ -28,7 +28,7 @@ import org.gradle.api.Action
  *   2. Fixups — `fixup { removeMethod(...); stripConstFromReturnType(...); … }`
  *      Narrow escape hatch for the semantic corrections v2 can't derive
  *      from the call site. Each directive is a small declarative datum
- *      forwarded to krapper_gen via --fixup-file.
+ *      forwarded to krapper via --fixup-file.
  *   3. (future) Per-spec compiler options, package overrides, etc.
  *
  * This block intentionally does not re-introduce the v1 mapping DSL (the v1
@@ -45,7 +45,7 @@ open class KPlusPlusExtension {
     internal val instantiations: MutableList<String> = mutableListOf()
 
     /**
-     * Optional override for the C++ compiler krapper_gen uses to build the
+     * Optional override for the C++ compiler krapper uses to build the
      * generated wrapper library. Default: try the konan-bundled
      * x86_64-unknown-linux-gnu-g++ first (gcc 8.3 / glibcxx that the
      * generated wrapper code targets), then fall back to clang++ on PATH.
@@ -56,15 +56,15 @@ open class KPlusPlusExtension {
     var compiler: String? = null
 
     /**
-     * C++ standard krapper_gen parses headers under (e.g. "c++17", "c++20").
-     * Forwarded to krapper_gen as `--std`. Null leaves krapper_gen's default
+     * C++ standard krapper parses headers under (e.g. "c++17", "c++20").
+     * Forwarded to krapper as `--std`. Null leaves krapper's default
      * (c++14). Set to "c++17" for std::string_view, "c++20" for char8_t, etc.
      */
     var cppStandard: String? = null
 
     /**
      * The target C++ library is built `-fno-rtti` (e.g. v8's monolith) and exports no
-     * `typeinfo` symbols. Forwarded to krapper_gen as `--no-rtti`: the generated generic
+     * `typeinfo` symbols. Forwarded to krapper as `--no-rtti`: the generated generic
      * `dynamic_cast<D*>` down-cast helpers (`Base.asDerived()`) would reference a missing
      * `typeinfo for Derived` and fail to LINK, so they are skipped (only RTTI-free LLVM
      * `classof` down-casts survive). Default false (RTTI-on library keeps the generic
@@ -74,7 +74,7 @@ open class KPlusPlusExtension {
 
     /**
      * Root Kotlin package for the generated bindings (e.g. "com.acme.app").
-     * Forwarded to krapper_gen as `--root-package`; every binding's package
+     * Forwarded to krapper as `--root-package`; every binding's package
      * becomes `<rootPackage>.<C++ namespace path>` (so `std::vector<int>` lands
      * in `<rootPackage>.std`). Null leaves the historical layout (top-level
      * types in `root`, C++ namespaces in their bare path like `std`/`geo`).
@@ -82,7 +82,7 @@ open class KPlusPlusExtension {
     var rootPackage: String? = null
 
     /**
-     * Reference policy for types referenced-but-not-listed (forwarded to krapper_gen
+     * Reference policy for types referenced-but-not-listed (forwarded to krapper
      * as `-r`/`--referencePolicy`). One of `INCLUDE_MISSING` (default — recursively bind
      * referenced types), `IGNORE_MISSING` (drop them), `OPAQUE_MISSING` (bind as opaque
      * pointers), `THROW_MISSING`. For a SCOPED import of a large library (see [only]),
@@ -95,7 +95,7 @@ open class KPlusPlusExtension {
     /**
      * Path to the consumer's `llvm-config` (#124, #128 R4). The cpp front-end
      * (`kpp.frontend.<module>=cpp`) parses your headers with a bundled Clang. Clang's
-     * OWN builtin headers (stddef.h etc.) are located by krapper_parse via
+     * OWN builtin headers (stddef.h etc.) are located by krapper via
      * `clang++ -print-resource-dir` on `PATH`; but a library's headers under a
      * NON-default-path LLVM install (e.g. apt.llvm.org under `/usr/lib/llvm-22/include`,
      * where `<clang/AST/...>` lives) are only found if explicitly on the include path.
@@ -111,7 +111,7 @@ open class KPlusPlusExtension {
     internal var onlyFile: String? = null
 
     /**
-     * Scoped-import allowlist (forwarded to krapper_gen as `--only`): the
+     * Scoped-import allowlist (forwarded to krapper as `--only`): the
      * fully-qualified class names to bind, e.g. `only("clang::Decl", "clang::CXXRecordDecl")`.
      * Only listed classes are fully bound; types they reference but that aren't listed fall
      * to [referencePolicy]. When neither [only] nor [onlyFile] is set, every non-std class
@@ -166,7 +166,7 @@ open class KPlusPlusExtension {
 
 /**
  * Builder for the `kplusplus { fixup { ... } }` block. Methods correspond
- * one-to-one with the Fixup sealed subclasses in krapper_gen's commonMain.
+ * one-to-one with the Fixup sealed subclasses in krapper's commonMain.
  *
  * Currently supported (matches the v8 example's needs):
  *   * [removeMethod] — drop a method by its generated uniqueCName.
@@ -183,7 +183,7 @@ open class KPlusPlusExtension {
  *   * Operator overload renames.
  *   * Per-element-type compile-time predicates richer than "starts with".
  *
- * If you hit one of these, prefer extending [Fixup] (in krapper_gen's
+ * If you hit one of these, prefer extending [Fixup] (in krapper's
  * commonMain) and [FixupApplier] (nativeMain) with a new directive
  * rather than reintroducing arbitrary closures.
  */
@@ -209,13 +209,13 @@ class FixupSpec {
 }
 
 /**
- * Gradle-side mirror of krapper_gen's sealed [com.monkopedia.krapper.Fixup]
+ * Gradle-side mirror of krapper's sealed [com.monkopedia.krapper.Fixup]
  * type. Kept here as a separate sealed hierarchy so the gradle plugin
- * doesn't depend on krapper_gen's runtime classes (the plugin runs on the
- * JVM build classpath; krapper_gen is a Kotlin/Native binary).
+ * doesn't depend on krapper's runtime classes (the plugin runs on the
+ * JVM build classpath; krapper is a Kotlin/Native binary).
  *
  * [toJson] produces a JSON object that round-trips through kotlinx
- * serialization on the krapper_gen side using the polymorphic serializer
+ * serialization on the krapper side using the polymorphic serializer
  * for [com.monkopedia.krapper.Fixup]. The discriminator `"type"` and the
  * class shortnames match what kotlinx.serialization emits.
  */

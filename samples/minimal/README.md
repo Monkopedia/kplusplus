@@ -6,10 +6,9 @@ fastest first contact with kplusplus.
 
 This is a **true from-published consumer** (#128, R2): it declares the plugin by version and
 `mavenLocal()` — **no `includeBuild`**. The plugin marker and the FIR plugin are resolved by
-Maven coordinate from mavenLocal, and the `krapper_gen` / `krapper_parse` tool binaries ride
-**bundled inside the plugin jar** (the 0.4.0 distribution model, #139/#140) — the plugin
-extracts and runs them itself. This is the same standalone path k++ uses to self-host as its
-own first consumer.
+Maven coordinate from mavenLocal, and the `krapper` tool binary rides **bundled inside the
+plugin jar** (the 0.4.0 distribution model, #139/#140) — the plugin extracts and runs it
+itself. This is the same standalone path k++ uses to self-host as its own first consumer.
 
 ## What it binds
 
@@ -28,17 +27,15 @@ The generated Kotlin API and the `main` that drives it live in
 
 ## Run it
 
-First publish the kplusplus plugin (with the tool binaries bundled in) to your local Maven
-repo. From the repo root, once — build the two tool binaries, then publish the compiler
-plugin set with them bundled (this is the release "local dry run"; see
+First publish the kplusplus plugin (with the tool binary bundled in) to your local Maven
+repo. From the repo root, once — build the tool binary, then publish the compiler plugin set
+with it bundled (this is the release "local dry run"; see
 [docs/releasing.md](../../docs/releasing.md)):
 
 ```
-./gradlew :krapper_gen:linkReleaseExecutableNative \
-          :krapper_parse:linkReleaseExecutableKlinker
+./gradlew :krapper:linkReleaseExecutableKlinker
 ./gradlew -p compiler publishToMavenLocal \
-  -Pkpp.bundleTools.krapperGen="$PWD/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe" \
-  -Pkpp.bundleTools.krapperParse="$PWD/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
+  -Pkpp.bundleTools.krapper="$PWD/krapper/build/bin/klinker/krapperRelease/krapper"
 ```
 
 Then, from this directory:
@@ -49,8 +46,8 @@ Then, from this directory:
 
 No LLVM toolchain is needed to RUN this consumer: it is a from-published standalone project
 (no includeBuild of the kplusplus root), so it never evaluates the root build's LLVM-requiring
-settings, and the `krapper_parse` tool comes prebuilt inside the bundled plugin jar. (The
-repo-root publish step above does need LLVM 22 — that's where `:krapper_parse` is built.)
+settings, and the `krapper` tool comes prebuilt inside the bundled plugin jar. (The
+repo-root publish step above does need LLVM 22 — that's where `:krapper` is built.)
 
 Expected output:
 
@@ -63,7 +60,7 @@ center: (1.0, 1.5)
 ## Requirements
 
 kplusplus's front-end is **self-hosted on Clang** (it parses your headers on
-generated Clang-AST bindings). The published `krapper_parse` tool binary is LLVM-linked, so a
+generated Clang-AST bindings). The published `krapper` tool binary is LLVM-linked, so a
 **LLVM/Clang toolchain must be present at runtime**; `clang++` must be on `PATH` — it both
 parses the header and compiles `cpp/geometry.cc`. JDK 21 is required to run the build.
 

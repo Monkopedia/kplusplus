@@ -21,7 +21,7 @@ import kotlinx.serialization.Transient
 data class WrappedField(val name: String, val type: WrappedType) : WrappedElement() {
     // A per-instance identity token: WrappedField is a data class (equals by value), so
     // the NameHandler uses this as a second, distinct map key when one field needs two
-    // unique C names (getter + setter). Public because the namer lives in :krapper_gen.
+    // unique C names (getter + setter). Public because the namer lives in :krapper.
     @Transient
     val other = Any()
 

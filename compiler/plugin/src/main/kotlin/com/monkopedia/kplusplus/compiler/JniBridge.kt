@@ -16,7 +16,7 @@ import kotlinx.coroutines.runBlocking
  *
  * Best-effort + idempotent: runs at most once per compiler-daemon lifetime; all
  * errors are caught + logged so failure here cannot break an otherwise-good
- * compile. The compiler plugin's own classpath does NOT include krapper_gen, so
+ * compile. The compiler plugin's own classpath does NOT include krapper, so
  * this probe only opens the connection (no service calls); a follow-up uses
  * connection.defaultChannel().call(...) (raw ksrpc) or pulls KrapperService onto
  * the plugin's classpath.
@@ -54,5 +54,5 @@ internal object JniBridge {
 
     private const val LIB_PROPERTY = "kplusplus.krapper.lib"
     private const val DEFAULT_LIB_PATH =
-        "/home/jmonk/git/kplusplus/krapper_gen/build/bin/native/krapperDebugShared/libkrapper.so"
+        "/home/jmonk/git/kplusplus/krapper/build/bin/native/krapperDebugShared/libkrapper.so"
 }

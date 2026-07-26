@@ -42,37 +42,23 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * `<projectDir>/krapped/requested.txt` (which the FIR checker writes) and
      * generates exactly the requested instantiations, deduping against
      * `<projectDir>/krapped/generated.txt`.
-     *
-     * v0: assumes `:krapper_gen` is a sibling project producing the kexe at the
-     * conventional path. Productionization will resolve the kexe from a published
-     * artifact or a SubpluginOption.
      */
     private fun registerSyncTask(target: Project) {
         target.tasks.register("kplusplusSync") {
             it.group = "kplusplus"
             it.description =
                 "Generate C++ template instantiations requested by the compiler plugin."
-            // Two layouts: krapper_gen lives either as a sibling project in
-            // the same Gradle build (canonical dev/slice usage) or in an
-            // included build under one of the standard names (example/
-            // consumer usage). Resolve the linkDebugExecutableNative task
-            // and the kexe artifact through whichever path is wired up.
-            val (linkTask, kexe) = resolveKrapperGen(target)
+            // ONE tool (#184): `krapper` parses the headers AND generates the bindings. It
+            // lives either as a sibling project in the same Gradle build (canonical dev usage),
+            // in an included build (example/consumer usage), or bundled in this plugin's jar.
+            // Resolve the link task and the binary through whichever path is wired up.
+            val (linkTask, kexe) = resolveKrapper(target)
             // Seed mode: a module sources its bindings from a COMMITTED seed instead of
-            // (re)parsing its headers. krapper_gen is neither built nor run, so don't depend on
-            // its link task and don't declare its kexe an input — the committed seed is the only
+            // (re)parsing its headers. The tool is neither built nor run, so don't depend on its
+            // link task and don't declare its binary an input — the committed seed is the only
             // input.
             val seedMode = target.findProperty("kpp.frontend.${target.name}") == "seed"
             if (!seedMode) linkTask?.let { lt -> it.dependsOn(lt) }
-            // In cpp-front-end mode this sync drives the module's own config through the
-            // :krapper_parse binary, so build it first. resolveKrapperParse covers BOTH the
-            // sibling layout (featuregen/cppfixture, where :krapper_parse is always include()d —
-            // LLVM is a hard requirement) and the included-build/published layout (the standalone
-            // v8 example, where the parser comes from the bundled plugin jar and
-            // resolveKrapperParse returns a null task, so dependsOn is simply skipped).
-            if (target.findProperty("kpp.frontend.${target.name}") == "cpp") {
-                resolveKrapperParse(target).first?.let { ct -> it.dependsOn(ct) }
-            }
             val krappedDir = krappedDirFor(target)
             val manifestFile = File(krappedDir, "requested.txt")
             val moduleName = target.name
@@ -81,7 +67,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // wireGeneratedBindings), and (b) skip the regeneration when nothing
             // that feeds it has changed. Inputs: the generator kexe, the
             // compiler-written manifest, the configured headers, and the
-            // extension config that becomes krapper_gen CLI args. Output: the
+            // extension config that becomes krapper CLI args. Output: the
             // whole krapped/ dir (the kexe regenerates it wholesale each run).
             //
             // The header-driven path intentionally has no per-method change
@@ -100,7 +86,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 // entry, lets the task run, and the doLast re-stages it via resolveKrapperGen
                 // (idempotent) or fails fast on a genuinely-missing tool. When the file is
                 // present it still drives the up-to-date check identically.
-                it.inputs.files(kexe).withPropertyName("krapperGenKexe")
+                it.inputs.files(kexe).withPropertyName("krapperBinary")
                     .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
             }
             it.inputs.files(manifestFile).withPropertyName("requestedManifest")
@@ -128,10 +114,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             it.doLast {
                 // Every binding-generating module must declare HOW it produces bindings via
                 // `kpp.frontend.<module>`:
-                //   = seed -> recompile the module's COMMITTED stage-0 seed (no krapper_gen,
-                //             no parse — see runSeedSync); or
-                //   = cpp  -> the LLVM krapper_parse parses the header into ModelIo JSON and
-                //             krapper_gen consumes it (--parsedModel — see runKrapperParseSync).
+                //   = seed -> recompile the module's COMMITTED stage-0 seed (no tool run, no
+                //             parse — see runSeedSync); or
+                //   = cpp  -> the LLVM-linked krapper tool parses the header and generates the
+                //             bindings from it (see runCppSync).
                 // A module with NEITHER set has no parse path, so fail clearly instead of
                 // silently doing nothing.
                 if (seedMode) {
@@ -142,24 +128,26 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     // Re-resolve at execution time: for the published path this re-stages
                     // the tool from mavenLocal if build/ was wiped by a same-invocation
                     // `clean` after configuration staged it (resolvePublishedTool is
-                    // idempotent). For the in-tree paths this returns the same kexe.
-                    val execKexe = resolveKrapperGen(target).second
+                    // idempotent). For the in-tree paths this returns the same binary.
+                    val execKexe = resolveKrapper(target).second
                     if (!execKexe.exists()) {
                         throw GradleException(
-                            "kplusplusSync: krapper_gen kexe not found at $execKexe. Either " +
-                                "run :krapper_gen:linkDebugExecutableNative in the kplusplus " +
+                            "kplusplusSync: the krapper tool was not found at $execKexe. The " +
+                                "cpp front-end needs the LLVM-linked krapper — either run " +
+                                ":krapper:linkReleaseExecutableKlinker in the kplusplus " +
                                 "included build, check the includeBuild(\"...\") path in your " +
                                 "settings.gradle.kts, or (for a from-published consumer) " +
                                 "declare mavenLocal() so " +
-                                "com.monkopedia.kplusplus:krapper_gen:$PLUGIN_VERSION resolves."
+                                "com.monkopedia.kplusplus:krapper:$PLUGIN_VERSION resolves. " +
+                                "An LLVM/Clang toolchain must be present at runtime either way."
                         )
                     }
-                    runKrapperParseSync(target, ext, moduleName, krappedDir, execKexe)
+                    runCppSync(target, ext, moduleName, krappedDir, execKexe)
                     return@doLast
                 }
                 throw GradleException(
                     "kplusplusSync[$moduleName]: no front-end selected. " +
-                        "Set kpp.frontend.$moduleName=cpp (generate via the LLVM krapper_parse) " +
+                        "Set kpp.frontend.$moduleName=cpp (generate with the LLVM krapper tool) " +
                         "or kpp.frontend.$moduleName=seed (recompile the committed stage-0 seed)."
                 )
             }
@@ -171,7 +159,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      *
      * Builds a module's bindings from its COMMITTED seed instead of (re)parsing its headers —
      * the mechanism by which modules that are NOT cpp-parseable (e.g. clangwalk) still produce
-     * bindings without krapper_parse.
+     * bindings without running the tool.
      *
      * The committed seed is a DETERMINISTIC TEXT output living under `<module>/krapped/`: the
      * Kotlin bindings (`src/`), the C++ wrapper (`<module>.cc`/`<module>.h`) and the forcing
@@ -180,8 +168,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      *  - the cinterop `.def` (deterministic from the module name + this checkout's krapped dir,
      *    so no absolute path is ever committed to git); and
      *  - the compiled wrapper object `lib<module>.a`, via the SAME plain C++ compile
-     *    krapper_gen's CppCompiler runs (`<compiler> -std=<std> -c -fPIE -I<krapped>
-     *    -DV8_COMPRESS_POINTERS <module>.cc`) — a compile with NO header parsing. krapper_gen is
+     *    krapper's CppCompiler runs (`<compiler> -std=<std> -c -fPIE -I<krapped>
+     *    -DV8_COMPRESS_POINTERS <module>.cc`) — a compile with NO header parsing. krapper is
      *    never invoked.
      */
     private fun runSeedSync(
@@ -235,7 +223,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         cmd += cppWrapper.absolutePath
         println(
             "kplusplusSync[$moduleName]: stage-0 seed — ${bindingSources.size} committed " +
-                "binding source(s); recompiling lib$moduleName.a (no krapper_gen)."
+                "binding source(s); recompiling lib$moduleName.a (no krapper run)."
         )
         val proc = ProcessBuilder(cmd).inheritIO().start()
         val exit = proc.waitFor()
@@ -250,44 +238,26 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     /**
      * GENERIC cpp-front-end binding generation (`-Pkpp.frontend.<module>=cpp`).
      *
-     * Drives the consuming module's OWN `kplusplus { header(...) ; instantiate(...) }`
-     * config through the two-artifact cpp pipeline:
-     *  1. the `:krapper_parse` binary parses the module's header (the base model) and each
-     *     forced instantiation (the forcing models) into :krapper_model ModelIo JSON (one
-     *     binary invocation per payload — a parse crash on one spec is isolated and named,
-     *     failing THIS module rather than corrupting the rest);
-     *  2. krapper_gen loads those models (--parsedModel) and runs resolve+codegen with the
-     *     module's CLI (module name, reference policy, package, output, --instantiate /
-     *     --only / --header / fixups / --std / --root-package).
+     * Drives the consuming module's OWN `kplusplus { header(...) ; instantiate(...) }` config
+     * through ONE invocation of the krapper tool (#184): it parses the module's header with the
+     * Clang C++ AST, parses each requested instantiation's synthesized forcing header, resolves
+     * the lot and generates the Kotlin bindings + C++ wrapper. Parse and codegen used to be two
+     * binaries chained through ModelIo JSON files; the handoff is in-process now.
      *
      * Any module flipped to `-Pkpp.frontend.<module>=cpp` generates from its own config, no
      * per-module wiring.
      *
-     * Fail-fast: if the cpp front-end yields an EMPTY krapped-cpp (no Kotlin bindings / no
-     * .def — e.g. krapper_parse couldn't parse the module's headers), throw naming the module
-     * instead of silently compiling against nothing.
+     * Fail-fast: if the run yields an EMPTY krapped-cpp (no Kotlin bindings / no .def — e.g.
+     * the headers didn't parse into anything), throw naming the module instead of silently
+     * compiling against nothing.
      */
-    private fun runKrapperParseSync(
+    private fun runCppSync(
         target: Project,
         ext: KPlusPlusExtension?,
         moduleName: String,
         krappedDir: File,
         kexe: File
     ) {
-        // Resolve the krapper_parse binary across BOTH layouts (sibling project / included
-        // build) — see resolveKrapperParse. A non-existent binary means the parser could not
-        // be built or extracted (it links against LLVM, which must be present).
-        val cppBinary = resolveKrapperParse(target).second
-        if (!cppBinary.exists()) {
-            throw GradleException(
-                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp but the krapper_parse " +
-                    "binary was not found at $cppBinary. The cpp front-end needs the LLVM " +
-                    "krapper_parse — ensure an LLVM/Clang toolchain is installed (llvm-config + " +
-                    "clang++ on PATH, or -PllvmConfig=<path-to-llvm-config>); in a standalone " +
-                    "consumer the parser comes from the bundled plugin jar and still needs LLVM " +
-                    "present at runtime."
-            )
-        }
         val headers = ext?.headers.orEmpty()
         if (headers.isEmpty()) {
             throw GradleException(
@@ -296,17 +266,20 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     "its model, but $moduleName declares none."
             )
         }
-        // krapper_parse's --parity-emit parses ONE root header (the forcing models #include it
-        // by the same absolute path krapper_gen receives via --header). Multi-header cpp
-        // parsing is a later extension; the cpp-ready modules (featuregen, fixtures) are
-        // single-header, so the primary header is the parse root.
-        val headerPath = target.file(headers.first()).absolutePath
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
         // The module's `kplusplus { headerDirectory(...) }` roots, resolved to absolute paths.
-        // These must reach BOTH the cpp parse (so the front-end's clang sees them) AND the
-        // krapper_gen wrapper compile (so its quote-includes resolve) — a header dropped on
-        // either side aborts the wrapper compile (exit 134) on cross-directory includes.
-        val includeDirs = ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
+        // These reach BOTH the parse (so the front-end's clang sees them) AND the wrapper
+        // compile (so its quote-includes resolve) — a header dropped on either side aborts the
+        // wrapper compile (exit 134) on cross-directory includes.
+        //
+        // The consumer's LLVM include dir rides along (#124, #128 R4): a from-published consumer
+        // whose LLVM-22 headers are NOT on the default include path (e.g. apt.llvm.org under
+        // /usr/lib/llvm-22/include) would otherwise fail to resolve <clang/AST/...>-style
+        // headers, because the tool's bundled Clang only searches its resource-dir + the
+        // driver's default paths. Discovered via `llvm-config --includedir` (or the
+        // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
+        val includeDirs = resolveLlvmIncludeDirs(target, ext) +
+            ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
         // The worklist: the compiler-written manifest (ALWAYS at
         // <projectDir>/krapped/requested.txt — the FIR checker hardcodes that path, see
@@ -319,55 +292,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             emptyList()
         }
         val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
-
-        val modelsDir = File(krappedDir, "cpp-models").apply { mkdirs() }
-        // The include dirs ride the trailing args as -I tokens; krapper_parse partitions them
-        // from the type specs (which never start with -I) — see --parity-emit / parityEmit.
-        // Prepend the consumer's LLVM include dir (#124, #128 R4): a from-published consumer
-        // whose LLVM-22 headers are NOT on the default include path (e.g. apt.llvm.org under
-        // /usr/lib/llvm-22/include) would otherwise fail to resolve <clang/AST/...>-style
-        // headers, because krapper_parse's bundled Clang only searches its resource-dir +
-        // the driver's default paths. Discovered via `llvm-config --includedir` (or the
-        // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
-        val llvmIncludeDirs = resolveLlvmIncludeDirs(target, ext)
-        val includeFlags = (llvmIncludeDirs + includeDirs).map { "-I$it" }
-        fun emit(specs: List<String>): String {
-            val proc = ProcessBuilder(
-                listOf(cppBinary.absolutePath, "--parity-emit", modelsDir.absolutePath, headerPath, std) +
-                    includeFlags + specs
-            ).redirectErrorStream(true).start()
-            val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
-            val exit = proc.waitFor()
-            print(out)
-            if (exit != 0) {
-                throw GradleException(
-                    "kplusplusSync[$moduleName]: krapper_parse --parity-emit failed (exit $exit) " +
-                        "for ${if (specs.isEmpty()) "the base model" else specs.joinToString()} " +
-                        "— see the output above."
-                )
-            }
-            return out
-        }
-
-        emit(emptyList())
-        val baseModel = File(modelsDir, "base_model.json")
-        if (!baseModel.exists()) {
-            throw GradleException(
-                "kplusplusSync[$moduleName]: krapper_parse emitted no base model at $baseModel."
-            )
-        }
-        val forcingArgs = mutableListOf<String>()
-        for (spec in requested) {
-            val out = emit(listOf(spec))
-            val path = out.lineSequence()
-                .firstOrNull { it.startsWith("PARITY_MODEL $spec=") }
-                ?.substringAfter('=')
-                ?: throw GradleException(
-                    "kplusplusSync[$moduleName]: krapper_parse emitted no forcing model for '$spec'."
-                )
-            forcingArgs += "--forcingModel"
-            forcingArgs += "$spec=$path"
-        }
 
         krappedDir.mkdirs()
         // The wrapper is compiled with clang++ (matching what the cpp front-end PARSED the
@@ -408,7 +332,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 args += "--header"
                 args += target.file(h).absolutePath
             }
-            // headerDirectory(...) roots -> krapper_gen's wrapper-compile -I set.
+            // headerDirectory(...) roots -> the parse's AND the wrapper compile's -I set.
             for (dir in includeDirs) {
                 args += "--include-dir"
                 args += dir
@@ -424,16 +348,18 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 args += fixupFile.absolutePath
             }
         }
-        // krapper_gen consumes the krapper_parse-produced ModelIo model via --parsedModel.
-        args += "--parsedModel"
-        args += baseModel.absolutePath
-        args += forcingArgs
+        // Debug aid (`-Pkpp.dumpModel`): keep the ModelIo JSON of every tree the run parsed.
+        // Off by default — the parse -> resolve handoff is in-process.
+        if (target.findProperty("kpp.dumpModel") != null) {
+            args += "--dump-model"
+            args += File(krappedDir, "cpp-models").apply { mkdirs() }.absolutePath
+        }
         println(
-            "kplusplusSync[$moduleName]: krapper_gen (cpp model) over ${requested.size} " +
-                "instantiation(s) from $headerPath -> $krappedDir"
+            "kplusplusSync[$moduleName]: krapper over ${requested.size} instantiation(s) from " +
+                "${target.file(headers.first()).absolutePath} -> $krappedDir"
         )
         // Experimental / diagnostic flag passthrough: `-Pkpp.x=diag.timing` (comma-separated
-        // for several) is forwarded verbatim to krapper_gen via its KRAPPER_X env var, so an
+        // for several) is forwarded verbatim to the tool via its KRAPPER_X env var, so an
         // experiment can be driven through the build without touching source. Off by default.
         val procBuilder = ProcessBuilder(args).inheritIO()
         (target.findProperty("kpp.x") as? String)?.takeIf { it.isNotBlank() }?.let {
@@ -441,16 +367,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
         val exit = procBuilder.start().waitFor()
         if (exit != 0) {
-            throw GradleException(
-                "kplusplusSync[$moduleName]: krapper_gen (--parsedModel) failed: exit $exit"
-            )
+            throw GradleException("kplusplusSync[$moduleName]: krapper failed: exit $exit")
         }
 
         // Fail-fast: refuse to leave the module compiling against nothing.
-        // A successful krapper_gen ALWAYS emits the CppBinding.kt boilerplate + the .def, so
-        // "no kt files at all" never happens after a 0-exit run — the real empty-output mode
-        // is krapper_parse parsing the header into ZERO classes (e.g. it couldn't parse it),
-        // leaving only that boilerplate. So require at least one ACTUAL binding source.
+        // A successful run ALWAYS emits the CppBinding.kt boilerplate + the .def, so "no kt
+        // files at all" never happens after a 0-exit run — the real empty-output mode is the
+        // header parsing into ZERO classes, leaving only that boilerplate. So require at least
+        // one ACTUAL binding source.
         val srcDir = File(krappedDir, "src")
         val bindingKt = if (srcDir.isDirectory) {
             srcDir.walkTopDown()
@@ -464,10 +388,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             throw GradleException(
                 "kplusplusSync[$moduleName]: the cpp front-end produced an EMPTY binding set " +
                     "in $krappedDir (binding kotlin files=${bindingKt.size}, $moduleName.def " +
-                    "present=${defFile.exists()}). krapper_parse could not turn $moduleName's " +
-                    "header ($headerPath) into usable bindings — refusing to compile " +
-                    "$moduleName against nothing. Inspect the models under $modelsDir and the " +
-                    "krapper_gen output above."
+                    "present=${defFile.exists()}). krapper could not turn $moduleName's header " +
+                    "(${target.file(headers.first()).absolutePath}) into usable bindings — " +
+                    "refusing to compile $moduleName against nothing. Re-run with " +
+                    "-Pkpp.dumpModel to inspect the parsed model, and see the output above."
             )
         }
         val ktCount = bindingKt.size + 1 // + the CppBinding.kt boilerplate
@@ -479,7 +403,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     /**
      * Resolve the consumer's LLVM/Clang include dir(s) to thread into the cpp-parse as `-I`
      * (#124, #128 R4). The cpp front-end's bundled Clang finds Clang's OWN builtin headers via
-     * its resource-dir (`clang++ -print-resource-dir`, resolved inside krapper_parse) and system
+     * its resource-dir (`clang++ -print-resource-dir`, resolved inside krapper) and system
      * C++ headers via the driver's default GCC detection, but a library's OWN headers under a
      * NON-default-path LLVM install (e.g. apt.llvm.org's /usr/lib/llvm-22/include, where
      * <clang/AST/...> lives) are found ONLY if explicitly on the include path. In-tree this box
@@ -493,7 +417,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      *   3. `llvm-config` on PATH.
      * When an override is set but unusable, fail fast with an actionable message. When NOTHING is
      * configured and `llvm-config` is not on PATH, return empty (the header may still be on the
-     * default path, as in-tree) rather than hard-failing — if it is not, krapper_parse's own
+     * default path, as in-tree) rather than hard-failing — if it is not, krapper's own
      * parse error surfaces. Idempotent + additive: absent config on a default-path box adds no -I.
      */
     private fun resolveLlvmIncludeDirs(target: Project, ext: KPlusPlusExtension?): List<String> {
@@ -565,7 +489,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Pick a C++ compiler for krapper_gen's wrapper-library step. krapper_gen
+     * Pick a C++ compiler for the wrapper-library step. krapper
      * generates C++ code that references some libstdc++ internals (matching
      * what v8's own headers expose); newer host gcc / clang reject those.
      * The konan-bundled toolchain (gcc 8.3 / glibcxx 7) accepts them. Try
@@ -587,31 +511,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Find the krapper_gen kexe and its linking task. Two layouts:
-     *
-     *   1. Sibling project: krapper_gen is part of the same Gradle build as
-     *      the consumer (canonical dev / slice case). `rootProject.findProject`
-     *      resolves it directly; the kexe sits under `<root>/krapper_gen/build/…`.
-     *   2. Included build: the consumer's build pulls the kplusplus repo in
-     *      via `includeBuild("../../")` (canonical example / external
-     *      consumer case). `gradle.includedBuilds` lists each included
-     *      build; we ask each one for its `:krapper_gen:linkDebugExecutableNative`
-     *      task and pick the first hit, then resolve the kexe relative to
-     *      that included build's projectDir.
-     *
-     * Returns the task (or null if not found — kexe must already exist on
-     * disk in that case) plus the kexe File. The caller is expected to fail
-     * fast at execution time if the kexe doesn't exist.
-     */
-    /**
      * Extract the tool binary BUNDLED in the plugin jar — the 0.4.0 distribution model. The
-     * released plugin carries its own `krapper_gen`/`krapper_parse` binaries on its classpath at
+     * released plugin carries its own `krapper` binary on its classpath at
      * `/com/monkopedia/kplusplus/tools/linuxX64/<tool>`, so a consumer NEVER resolves a separate
      * tool Maven coordinate (that coordinate resolution is what collided with an in-build
-     * `:krapper_parse` project). Copy the binary to a per-plugin-version cache under the Gradle
-     * user home, chmod +x (jar entries carry no exec bit), and return it. Returns null when the
-     * jar carries no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through
-     * to the sibling/includedBuild/published paths.
+     * `:krapper` project). Copy the binary to a per-plugin-version cache under the Gradle user
+     * home, chmod +x (jar entries carry no exec bit), and return it. Returns null when the jar
+     * carries no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through to
+     * the sibling/includedBuild/published paths.
      */
     private fun extractBundledTool(target: Project, tool: String): File? {
         val cache = File(
@@ -644,49 +551,70 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
     }
 
-    private fun resolveKrapperGen(target: Project): Pair<Any?, File> {
-        val direct = target.rootProject.findProject(":krapper_gen")
+    /**
+     * Find the `krapper` binary and its link task. Four layouts, in order:
+     *
+     *   1. SELF-HOST (`:krapper` itself): the tool module's own bindings must be generated by
+     *      the PREVIOUS release's tool, never by itself — resolving to its own link task would
+     *      be a Gradle dependency cycle. `-Pkpp.stageZeroKrapper=<abs-path>` names an external
+     *      stage-0 binary; otherwise the binary bundled in the applied (published) plugin jar is
+     *      used. Both declare a NULL link task, so no self-edge is wired. Present only when the
+     *      applied plugin is a bundled RELEASE; a dev-composite unbundled plugin returns null
+     *      and falls through (use `=seed` or the override there).
+     *   2. Sibling project: `:krapper` is part of the same Gradle build as the consumer (the
+     *      canonical dev case). The binary sits under `<root>/krapper/build/…`.
+     *   3. Included build: the consumer pulls the kplusplus repo in via `includeBuild("../../")`
+     *      (the samples/v8 case). `gradle.includedBuilds` is asked for the link task, and the
+     *      binary is resolved relative to that build's projectDir. Only the build that actually
+     *      HOSTS the module is a candidate: `IncludedBuild.task(...)` returns a LAZY reference
+     *      that does NOT validate the project exists, so an unrelated included build (e.g.
+     *      `compiler`) would otherwise falsely match and wire a dependsOn to a project that
+     *      isn't there — breaking even IDE sync. Filter on the module dir.
+     *   4. TRUE external consumer (plugin declared, no includeBuild): the binary bundled in the
+     *      plugin jar, else the published Maven coordinate (for an unbundled/0.3.x jar).
+     *
+     * Returns the link task (null on every path where nothing in THIS build builds the tool)
+     * plus the binary File; the caller fails fast at execution time if it doesn't exist.
+     */
+    private fun resolveKrapper(target: Project): Pair<Any?, File> {
+        val relBinary = "krapper/build/bin/klinker/krapperRelease/krapper"
+        if (target.name == TOOL_NAME) {
+            (target.findProperty("kpp.stageZeroKrapper") as? String)?.takeIf { it.isNotBlank() }
+                ?.let { return null to File(it) }
+            extractBundledTool(target, TOOL_NAME)?.let { return null to it }
+        }
+        val direct = target.rootProject.findProject(":$TOOL_NAME")
         if (direct != null) {
-            return direct.tasks.findByName("linkDebugExecutableNative") to target.rootProject.file(
-                "krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe"
-            )
+            return direct.tasks.findByName("linkReleaseExecutableKlinker") to
+                direct.layout.buildDirectory
+                    .file("bin/klinker/krapperRelease/krapper").get().asFile
         }
         for (included in target.gradle.includedBuilds) {
+            if (!File(included.projectDir, TOOL_NAME).isDirectory) continue
             val taskRef = try {
-                included.task(":krapper_gen:linkDebugExecutableNative")
+                included.task(":$TOOL_NAME:linkReleaseExecutableKlinker")
             } catch (_: Throwable) {
                 null
             }
-            val kexe = File(
-                included.projectDir,
-                "krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe"
-            )
-            if (taskRef != null || kexe.exists()) {
-                return taskRef to kexe
+            val binary = File(included.projectDir, relBinary)
+            if (taskRef != null || binary.exists()) {
+                return taskRef to binary
             }
         }
-        // Consumer path (no in-tree source): a TRUE external consumer that declares the plugin
-        // but no includeBuild. Prefer the binary BUNDLED in the plugin jar (0.4.0 model — the
-        // released plugin carries its tools). The published-coordinate resolution stays as a
-        // fallback for a plugin whose jar has no bundled binary (e.g. a 0.3.0 consumer).
-        extractBundledTool(target, "krapper_gen")?.let { return null to it }
-        resolvePublishedTool(target, "krapper_gen")?.let { return null to it }
-
-        // Final fallback: the legacy hardcoded path. The doLast will throw a
-        // helpful error if it doesn't exist.
-        return null to target.rootProject.file(
-            "krapper_gen/build/bin/native/debugExecutable/krapper_gen.kexe"
-        )
+        extractBundledTool(target, TOOL_NAME)?.let { return null to it }
+        resolvePublishedTool(target, TOOL_NAME)?.let { return null to it }
+        // Final fallback: the conventional in-tree path. The doLast throws a helpful error if
+        // it doesn't exist.
+        return null to target.rootProject.file(relBinary)
     }
 
     /**
-     * Published-artifact fallback (R2, #128) — resolve a tool binary
-     * (`krapper_gen` / `krapper_parse`) from its published Maven coordinate for a
+     * Published-artifact fallback (R2, #128) — resolve the `krapper` tool binary
+     * from its published Maven coordinate for a
      * TRUE external consumer that declares the plugin + a repository but NO
      * `includeBuild` (neither sibling project nor included build is present).
      *
-     * Models the #126 stage-0 consume seam (`resolveStage0Path` in
-     * krapper_parse/build.gradle.kts): a resolvable [Configuration] with a single
+     * Models the #126 stage-0 consume seam: a resolvable [Configuration] with a single
      * dependency on `com.monkopedia.kplusplus:<tool>:<PLUGIN_VERSION>` selecting the
      * `linuxX64` classifier + `.kexe` extension (the publications are artifact-only, no
      * `.jar`), `isTransitive=false`. The resolved artifact comes back mode 0644 (a
@@ -716,8 +644,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                                     // Real `.kexe` extension — the published release binary
                                     // uses it (an empty extension makes a trailing-dot filename
                                     // the Central Portal rejects). Must match the `extension`
-                                    // on the releaseBinary publications in krapper_gen/
-                                    // krapper_parse build.gradle.kts.
+                                    // on any releaseBinary publication of the tool.
                                     art.extension = "kexe"
                                 }
                             }
@@ -746,95 +673,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Find the :krapper_parse release binary and its link task — the SAME two layouts
-     * resolveKrapperGen handles, because a cpp-front-end module can equally be a sibling
-     * project (featuregen/cppfixture in the kplusplus build) or a consumer that pulls
-     * kplusplus in via `includeBuild("../../")` (the standalone v8 example). In the included
-     * case `rootProject.findProject(":krapper_parse")` is null — krapper_parse lives in the OTHER
-     * build — so we resolve its task + binary through `gradle.includedBuilds`.
-     *
-     * krapper_parse links against LLVM (a hard requirement); in the sibling layout it is always
-     * include()d. Returns the link task (or null — e.g. the bundled/published consumer path) plus
-     * the binary File; the caller fails fast at execution time if the binary doesn't exist.
-     */
-    private fun resolveKrapperParse(target: Project): Pair<Any?, File> {
-        val relBinary = "krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse"
-        // Bootstrap override (#122, step 1.1): when an EXTERNAL stage-0 krapper_parse binary is
-        // supplied via -Pkpp.stageZeroKrapperParse=<abs-path>, use it and declare NO task
-        // dependency (null link task). This is what breaks the self-hosting cycle: building
-        // :krapper_parse via -Pkpp.frontend.krapper_parse=cpp would otherwise resolve the parser
-        // to :krapper_parse's own link task -> a Gradle dependency cycle. With a null task the
-        // caller (dependsOn only when non-null) wires no self-edge, and runKrapperParseSync
-        // uses this .second path as the parser. Additive + gated: absent property = today's
-        // behavior exactly.
-        //
-        // SCOPE (#122 capstone): the override applies ONLY when resolving the front-end for
-        // :krapper_parse ITSELF — that is the sole module whose self-cycle the stage-0 breaks.
-        // A DOWNSTREAM consumer (featuregen/cppfixture) on the cpp path must resolve the LIVE
-        // :krapper_parse link task/binary so that, when :krapper_parse is simultaneously =cpp, the
-        // consumer is fed :krapper_parse's SELF-GENERATED binary — not the stage-0 seed directly.
-        // Without this scope the global property would short-circuit every consumer to the
-        // stage-0 seed, and the "krapper_parse=cpp feeding featuregen=cpp" composition could never
-        // exercise the self-generated parser. Absent property = today's behavior exactly.
-        if (target.name == "krapper_parse") {
-            // (1) Explicit path override — offline / a locally-built stage-0.
-            (target.findProperty("kpp.stageZeroKrapperParse") as? String)?.takeIf { it.isNotBlank() }
-                ?.let { return null to File(it) }
-            // (2) SELF-HOST: krapper_parse builds its own bindings by parsing them with the
-            // krapper_parse binary BUNDLED in the applied (published) plugin — the same last-release
-            // tool any consumer gets. This is a resource read from the plugin's own jar (no Gradle
-            // coordinate), so it never self-references the in-build :krapper_parse project (the
-            // circular sibling below). Present only when the applied plugin is a bundled RELEASE; a
-            // dev-composite unbundled plugin returns null and falls through (use =seed or an
-            // override there).
-            extractBundledTool(target, "krapper_parse")?.let { return null to it }
-        }
-        val direct = target.rootProject.findProject(":krapper_parse")
-        if (direct != null) {
-            return direct.tasks.findByName("linkReleaseExecutableKlinker") to
-                direct.layout.buildDirectory
-                    .file("bin/klinker/krapper_parseRelease/krapper_parse").get().asFile
-        }
-        for (included in target.gradle.includedBuilds) {
-            // Only the build that actually HOSTS the krapper_parse module is a candidate.
-            // The root kplusplus build ALWAYS pulls in the `compiler` build via
-            // includeBuild("compiler"), and IncludedBuild.task(":krapper_parse:...") returns
-            // a LAZY reference that does NOT validate the project exists — so without this
-            // guard the `compiler` build (which has no :krapper_parse) falsely matches in a
-            // consumer layout where :krapper_parse lives in neither build, and we wire a
-            // dependsOn to a project that doesn't exist → "Project with path ':krapper_parse'
-            // not found in build ':compiler'" at graph-resolution time (breaking even IDE
-            // sync). Filter on the module dir.
-            if (!File(included.projectDir, "krapper_parse").isDirectory) continue
-            val taskRef = try {
-                included.task(":krapper_parse:linkReleaseExecutableKlinker")
-            } catch (_: Throwable) {
-                null
-            }
-            val binary = File(included.projectDir, relBinary)
-            if (taskRef != null || binary.exists()) {
-                return taskRef to binary
-            }
-        }
-        // Published-artifact fallback (R2, #128): a TRUE external consumer has neither
-        // a sibling :krapper_parse project nor an includeBuild that hosts it. Resolve
-        // the LLVM parser tool from its published Maven coordinate (needs mavenLocal()).
-        // The published krapper_parse binary is LLVM-linked and needs LLVM present at
-        // RUNTIME — the standalone consumer gets it from the bundled plugin jar (no in-tree
-        // clang modules to build).
-        // Consumer path: prefer the binary bundled in the plugin jar (0.4.0 model), then the
-        // published Maven coordinate (fallback for an unbundled/0.3.0 plugin jar).
-        extractBundledTool(target, "krapper_parse")?.let { return null to it }
-        resolvePublishedTool(target, "krapper_parse")?.let { return null to it }
-        return null to target.rootProject.file(relBinary)
-    }
-
-    /**
      * The directory the generated cinterop .def + Kotlin sources live in (and that
      * kplusplusSync writes). Defaults to `<projectDir>/krapped` — the committed, standard
      * location. Under `-Pkpp.frontend.<module>=cpp` the cpp-front-end bindings live under
-     * `<buildDir>/krapped-cpp` instead, generated by `runKrapperParseSync` (the :krapper_parse
-     * binary over the module's own config → krapper_gen), generically, no per-module task.
+     * `<buildDir>/krapped-cpp` instead, generated by `runCppSync` (the krapper binary over the
+     * module's own config), generically, no per-module task.
      *
      * Used by BOTH the sync task (where it writes) and wireGeneratedBindings (where the
      * cinterop/srcDir are pointed), so the on-disk wiring stays consistent.
@@ -975,10 +818,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         const val PLUGIN_GROUP = "com.monkopedia.kplusplus"
         const val PLUGIN_NAME = "kplusplus-compiler-plugin"
         const val PLUGIN_VERSION = "0.3.3"
+
+        // The ONE tool binary (#184) — also the Gradle project name, the bundled-resource name
+        // under /com/monkopedia/kplusplus/tools/linuxX64/, and the published coordinate.
+        const val TOOL_NAME = "krapper"
         const val MIN_KOTLIN_VERSION = "2.3.20"
 
-        // The C++ standard the cpp front-end parses (and krapper_gen compiles the wrapper)
-        // under when a module sets no kplusplus { cppStandard = ... }. Matches krapper_gen's
+        // The C++ standard the cpp front-end parses (and compiles the wrapper)
+        // under when a module sets no kplusplus { cppStandard = ... }. Matches krapper's
         // own default and the former featuregen-hardcoded cpp path.
         const val DEFAULT_CPP_STANDARD = "c++14"
 

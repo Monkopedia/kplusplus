@@ -23,7 +23,7 @@ import org.jetbrains.kotlin.name.Name
  * ClassId. Shared by the FIR call refinement, the SYNC_REQUIRED call checker,
  * and (indirectly) IR lowering.
  *
- * Binding-name mangling mirrors what krapper_gen's KotlinWriter emits:
+ * Binding-name mangling mirrors what krapper's KotlinWriter emits:
  *   std::vector<int>      -> std.Vector__Int
  *   std::map<int, int>    -> std.Map__Int__Int
  *
@@ -242,7 +242,7 @@ internal object CppVectorMapping {
     /**
      * Generated Kotlin binding ClassId, e.g. std.Vector__Int / std.Map__Int__Int /
      * std.Vector__Vector_int_ (for std::vector<std::vector<int>>). Mirrors the
-     * mangling krapper_gen's WrappedKotlinType applies to each template arg:
+     * mangling krapper's WrappedKotlinType applies to each template arg:
      * split on "::" take last, capitalize first char, replace ` `<`,`>`*` with `_`.
      */
     fun bindingClassId(container: Container, args: List<String>): ClassId = ClassId(

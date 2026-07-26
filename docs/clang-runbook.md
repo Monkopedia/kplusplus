@@ -1,7 +1,7 @@
 # Clang self-bootstrap runbook
 
 Operational setup for building and running the clang self-bootstrap modules (`:clangwalk`,
-`:krapper_parse`). These are the stage1 consumers that bind Clang's own C++ AST
+`:krapper`). These are the stage1 consumers that bind Clang's own C++ AST
 (`libclang-cpp`) and run on kplusplus-generated bindings. An LLVM/Clang toolchain is a
 **hard requirement** to build kplusplus at all — the build fails fast if it's absent. The
 campaign strategy/log lives in [`campaigns/self-hosting.md`](campaigns/self-hosting.md); this
@@ -26,7 +26,7 @@ What must be present (LLVM is always required):
 ### The modules are always included (LLVM required)
 
 LLVM is a **hard requirement**. `settings.gradle.kts` always includes `:clangwalk`,
-`:krapper_parse`, and `:cppfixture`, and probes the toolchain **unconditionally** — there is
+`:krapper`, and `:cppfixture`, and probes the toolchain **unconditionally** — there is
 no opt-in flag and no LLVM-free partial build. Full project, or a clear error.
 
 - **`-PllvmConfig=<path>`** is a **location override only**: it points the probe at a specific
@@ -53,8 +53,7 @@ headers **must** be compiled with `clang++`, not the Kotlin/Native-bundled GCC 8
 ## 3. Release builds, not debug
 
 The gated verification tasks all build and run the **release** binaries
-(`krapper_parseRelease`, `krapper_gen` `releaseExecutable`, `linkReleaseExecutableKlinker`,
-`runReleaseExecutableKlinker`).
+(`krapperRelease`, `linkReleaseExecutableKlinker`, `runReleaseExecutableKlinker`).
 
 Background: klinker links the executable with the **system `clang++`** (needed for modern
 `libclang-cpp`'s glibc/libstdc++ symbol versions, absent from K/N's old bundled sysroot).
@@ -70,7 +69,7 @@ strips the unreferenced functions via `-opt`, so it linked from day one.
 
 ## 4. JDK matrix
 
-- **JDK 17** — the modules the campaign runs on JDK 17: `:krapper_gen`, `:krapper_model`
+- **JDK 17** — the modules the campaign runs on JDK 17: `:krapper`, `:krapper_model`
   (both target JVM 11 bytecode but build/run fine on 17) and `:featuregen` (native-only —
   no JVM bytecode target; it drives the generated K/N bindings). The included `compiler/`
   build targets JVM 1.8 bytecode and builds fine on 17 as well.
@@ -80,24 +79,27 @@ or `JAVA_HOME` at it for the task you're running).
 
 ## 5. The single front-end and the gated tasks
 
-`krapper_gen` has a **single** front-end since the self-hosting flip (B5, #88): the in-tree
-libclang-C reducer was deleted. It loads the `WrappedTU` from `--parsedModel` (the ModelIo
-JSON emitted by the `krapper_parse` binary, which is built on kplusplus-generated
-`libclang-cpp` bindings); `--header` now only supplies the `#include` list for the generated
-C++ wrapper, it is not parsed in-process. There is no `--frontend` flag and no `--dumpModels`
-/`--dumpParsedModel` flag any more.
+`krapper` has a **single** front-end since the self-hosting flip (B5, #88): the in-tree
+libclang-C reducer was deleted, and the Clang C++ AST front-end it was replaced with now lives
+IN THE SAME BINARY (#184) — it parses `--header` in-process and hands the `WrappedTU` straight
+to resolution. There is no `--frontend` flag, no `--dumpModels`/`--dumpParsedModel`, and no
+`--parsedModel`/`--forcingModel` model-file handoff; `--dump-model <dir>` writes the same
+ModelIo JSON purely as a debug aid (`-Pkpp.dumpModel` from a Gradle build).
 
 Because there is no second front-end, the historical libclang-vs-cpp parity/oracle tasks
 (`goldenCompare`, `handoffInstDiff`'s byte-oracle, `featuregenParity` + `parity-expectations.txt`)
-were removed in #92. The standing cpp-side gates are the end-to-end generate-and-compile
-tasks below plus `:featuregen:nativeTest` (the self-hosted feature suite).
+were removed in #92, and the two-process handoff gates (`handoffGenerate` /
+`handoffInstGenerate`, which existed to prove the JSON handoff carried everything) went with
+the merge in #184. The standing cpp-side gates are the end-to-end tasks below plus
+`:featuregen:nativeTest` (the self-hosted feature suite).
 
 The verification tasks (all need the LLVM toolchain, which is always required):
 
 | Task | What it proves |
 | --- | --- |
-| `:krapper_parse:handoffGenerate` | `krapper_gen` loads the krapper_parse model via `--parsedModel`, runs resolution + codegen, and **compiles** the emitted wrapper — proving the handed-off model carries everything the real pipeline consumes. |
-| `:krapper_parse:handoffInstGenerate` | The cpp **instantiation-forcing** path end-to-end (`--instantiate std::vector<Item*>` over `--parsedModel` + `--forcingModel`): generates + **compiles** the wrapper, then functionally asserts pass-3 forcing recovered `Bag::items()` and the vector specialization materialized its core container surface. |
+| `:featuregen:nativeTest` | The self-hosted feature suite: `krapper` parses + generates featuregen's whole C++ surface (including instantiation forcing), and the tests exercise the generated bindings. |
+| `:cppfixture:nativeTest` | The same generic path on a second module's own config, std-free. |
+| `:krapper:noncopyableDeterminismCheck` | #101: the front-end's special-member set for a NonCopyable type is byte-identical and complete across repeated parses. |
 | `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
 
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the
@@ -117,7 +119,7 @@ normal build picks up the generated bindings.
   org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError
   ```
 
-  6g reliably builds the krapper_gen gate and the cpp/clang front-end modules — no manual
+  6g reliably builds the `:krapper` gate and the cpp/clang modules — no manual
   per-build heap bump needed. If a *heavier* release link (the cpp/clang modules) still
   OOMs, raise the heap — edit that
   line, or add the same key to `~/.gradle/gradle.properties` (a per-user override that keeps

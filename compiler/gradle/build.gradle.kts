@@ -108,29 +108,27 @@ tasks.withType<KotlinCompile> {
     }
 }
 
-// 0.4.0 distribution: BUNDLE the native tool binaries INTO the plugin jar so a consumer never
-// resolves a separate krapper_gen/krapper_parse Maven coordinate — the released plugin carries its
-// own tools (extractBundledTool in KPlusPlusCompilerGradlePlugin reads them back out at
-// /com/monkopedia/kplusplus/tools/linuxX64/<tool>). The compiler build is a SEPARATE included build
-// from the tool modules, so it can't depend on their link tasks; the release orchestration builds
-// the binaries in the root build and passes their absolute paths in via
-// -Pkpp.bundleTools.<tool>=<path>. Absent (the dev/in-tree build) => an unbundled jar: dev
-// consumers resolve the sibling :krapper_gen/:krapper_parse link output instead, so no bundling is
-// needed there. Only the released jar carries binaries.
-listOf("krapperGen" to "krapper_gen", "krapperParse" to "krapper_parse").forEach { (prop, tool) ->
-    providers.gradleProperty("kpp.bundleTools.$prop").orNull?.let { path ->
-        val bin = file(path)
-        tasks.named<ProcessResources>("processResources") {
-            doFirst {
-                check(bin.exists()) {
-                    "kpp.bundleTools.$prop=$path but no file exists there — build the $tool " +
-                        "release binary before bundling it into the plugin jar."
-                }
+// 0.4.0 distribution: BUNDLE the native tool binary INTO the plugin jar so a consumer never
+// resolves a separate Maven coordinate — the released plugin carries its own tool
+// (extractBundledTool in KPlusPlusCompilerGradlePlugin reads it back out at
+// /com/monkopedia/kplusplus/tools/linuxX64/krapper). The compiler build is a SEPARATE included
+// build from the tool module, so it can't depend on its link task; the release orchestration
+// builds the binary in the root build and passes its absolute path in via
+// -Pkpp.bundleTools.krapper=<path>. Absent (the dev/in-tree build) => an unbundled jar: dev
+// consumers resolve the sibling :krapper link output instead, so no bundling is needed there.
+// Only the released jar carries the binary.
+providers.gradleProperty("kpp.bundleTools.krapper").orNull?.let { path ->
+    val bin = file(path)
+    tasks.named<ProcessResources>("processResources") {
+        doFirst {
+            check(bin.exists()) {
+                "kpp.bundleTools.krapper=$path but no file exists there — build the krapper " +
+                    "release binary before bundling it into the plugin jar."
             }
-            from(bin) {
-                into("com/monkopedia/kplusplus/tools/linuxX64")
-                rename { tool }
-            }
+        }
+        from(bin) {
+            into("com/monkopedia/kplusplus/tools/linuxX64")
+            rename { "krapper" }
         }
     }
 }

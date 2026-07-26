@@ -19,9 +19,9 @@ pluginManagement {
         // A TRUE from-published consumer (R2, #128): NO includeBuild. The kplusplus
         // compiler subplugin is resolved from its published mavenLocal plugin marker
         // (com.monkopedia.kplusplus.compiler → kplusplus-compiler-gradle 0.3.0), and
-        // the tool binaries (krapper_gen / krapper_parse) are resolved by coordinate
-        // from mavenLocal by the plugin itself. This is the same standalone path k++
-        // uses to self-host as its own first consumer.
+        // the `krapper` tool binary rides inside that plugin jar (or, for an older
+        // plugin, is resolved by coordinate from mavenLocal). This is the same standalone
+        // path k++ uses to self-host as its own first consumer.
         mavenLocal()
         gradlePluginPortal()
         mavenCentral()
