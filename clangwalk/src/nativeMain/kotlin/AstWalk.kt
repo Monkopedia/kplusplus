@@ -29,7 +29,7 @@ private data class WalkedDecl(
     val methods: List<Pair<String, String>>
 )
 
-// Mirror of krapper_parse's self-check helper (KrapperParse.kt:check): record every assertion,
+// Mirror of krapper's parser self-check helper (CppParser.kt:check): record every assertion,
 // print PASS/FAIL with a message, and let main() exit non-zero if ANY failed — so
 // `:clangwalk:runReleaseExecutableKlinker` is self-verifying instead of a println demo.
 private var failures = 0

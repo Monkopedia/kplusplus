@@ -90,13 +90,13 @@ package root, and `compiler` to override the C++ compiler.
 
 ## How it works
 
-K++ runs a three-stage pipeline:
+K++ runs a three-stage pipeline, all inside one tool (`krapper`):
 
-1. **Parse** — the C++ front-end (`krapper_parse`) reads the headers and produces a structural model
-   of the declarations and types. This front-end is itself built from K++-generated bindings of
-   Clang's C++ AST (the self-hosting part).
-2. **Resolve** — `krapper_gen` takes that model, makes sure every referenced type is materialized,
-   forces the requested template instantiations, and applies your `fixup { }` directives.
+1. **Parse** — the C++ front-end reads the headers and produces a structural model of the
+   declarations and types. This front-end is itself built from K++-generated bindings of Clang's
+   C++ AST (the self-hosting part).
+2. **Resolve** — that model is walked to make sure every referenced type is materialized, the
+   requested template instantiations are forced, and your `fixup { }` directives are applied.
 3. **Generate** — it emits a C/C++ wrapper, compiles it into a static library, and generates the
    Kotlin/Native cinterop bindings that call into it.
 
@@ -108,9 +108,8 @@ build so it runs as part of normal compilation. K++ is frequently paired with
 
 | Module | What it is |
 |--------|------------|
-| `krapper_gen/` | The core generator: resolve + codegen, driven by the parsed model. |
-| `krapper_model/` | The shared parse-output model (the data both stages speak). |
-| `krapper_parse/` | The self-hosted C++ front-end (parses headers → model), built on generated Clang-AST bindings. |
+| `krapper/` | The tool: the self-hosted C++ front-end (parses headers → model, on generated Clang-AST bindings) plus resolve + codegen. |
+| `krapper_model/` | The shared parse-output model (the data the stages speak). |
 | `compiler/` | The v2 Kotlin/Gradle compiler plugin (`com.monkopedia.kplusplus.compiler`). |
 | `featuregen/`, `feature-tests/` | Test harnesses: the generated-binding feature suite, and the raw-cinterop baseline. |
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module. |

@@ -16,8 +16,8 @@
 
 // The GENERALITY DEMO. A minimal, std-free binding consumer that exercises the GENERIC
 // cpp-front-end path: under `-Pkpp.frontend.cppfixture=cpp` the kplusplus plugin drives THIS
-// module's own kplusplus { header(...) } config through krapper_parse -> ModelIo -> krapper_gen
-// into build/krapped-cpp, then compiles + runs the tests against those bindings — the same
+// module's own kplusplus { header(...) } config through the krapper tool into
+// build/krapped-cpp, then compiles + runs the tests against those bindings — the same
 // generic machinery featuregen uses, on a different module's own config.
 // `kpp.frontend.cppfixture=cpp` is the committed default.
 //
@@ -52,26 +52,76 @@ kotlin {
     }
 }
 
+// Single, std-free header — the cpp front-end parses it without any libstdc++ weight, so this
+// module is "cpp-ready" today (unlike v8/clang-slice consumers). Declared out here so the
+// transitional sync bridge below can reuse it without duplicating the value.
+val fixtureHeader = "include/point2d.h"
+
 kplusplus {
-    // Single, std-free header — the cpp front-end parses it without any libstdc++ weight,
-    // so this module is "cpp-ready" today (unlike v8/clang-slice consumers).
-    header("include/point2d.h")
+    header(fixtureHeader)
 }
 
-// TRANSITIONAL BRIDGE (remove once the consumed plugin is 0.3.4+): this module applies the
-// PUBLISHED kplusplus plugin pinned in settings.gradle.kts (currently 0.3.3), whose
-// kplusplusSync still gates the ":krapper_parse:linkReleaseExecutableKlinker" dependsOn on the
-// -PenableClang flag — a flag PR #173 REMOVED. So under the committed default
-// -Pkpp.frontend.cppfixture=cpp, without that flag the in-tree parser is never auto-built and
-// kplusplusSync fails ("krapper_parse binary was not found at …") — which breaks IntelliJ sync
-// (the IDE model-fetch doesn't pre-build the parser the way a manual :krapper_parse:link would).
-// The in-tree plugin (compiler/gradle/.../KPlusPlusCompilerGradlePlugin.kt) already wires this
-// unconditionally post-#173; this bridge restores that wiring against the CONSUMED 0.3.3 plugin.
-// tasks.matching{}.configureEach is used (not tasks.named) so it resolves cleanly even while the
-// IDE is modeling the task graph and regardless of plugin-apply ordering. Delete when 0.3.4
-// (with the require-LLVM plugin that always-wires) is the pinned version.
+// ---- TRANSITIONAL SINGLE-BINARY SYNC BRIDGE (#184) ----
+// DELETE once the plugin version pinned in settings.gradle.kts is 0.3.4+. See the same block in
+// featuregen/build.gradle.kts for the full rationale: the CONSUMED 0.3.3 plugin's kplusplusSync
+// drives two tool binaries (`krapper_parse --parity-emit` -> `krapper_gen --parsedModel`) whose
+// CLIs no longer exist now that #184 merged them into ONE `:krapper` binary with an in-process
+// handoff, so the task's ACTION is swapped for that single invocation. The rest of the plugin's
+// wiring (build/krapped-cpp cinterop + .def + generated sources, compile ordering) is
+// path-based and still correct.
 if (providers.gradleProperty("kpp.frontend.cppfixture").orNull == "cpp") {
-    tasks.matching { it.name == "kplusplusSync" }.configureEach {
-        dependsOn(":krapper_parse:linkReleaseExecutableKlinker")
+    val krappedDir =
+        layout.buildDirectory
+            .dir("krapped-cpp")
+            .get()
+            .asFile
+    val krapper =
+        rootProject.layout.projectDirectory
+            .file("krapper/build/bin/klinker/krapperRelease/krapper")
+            .asFile
+    val manifest = File(projectDir, "krapped/requested.txt")
+    val headerPath = file(fixtureHeader).absolutePath
+    // Realize the task EAGERLY (`.get()`) so the plugin's own configuration action — the one
+    // that installs its two-binary doLast — has already run by the time we clear the actions.
+    afterEvaluate {
+        val sync = tasks.named("kplusplusSync").get()
+        sync.dependsOn(":krapper:linkReleaseExecutableKlinker")
+        sync.actions.clear()
+        sync.doLast {
+            val requested =
+                if (manifest.exists()) {
+                    manifest
+                        .readLines()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .sorted()
+                } else {
+                    emptyList()
+                }
+            krappedDir.mkdirs()
+            val args =
+                listOf(
+                    krapper.absolutePath,
+                    "cppfixture",
+                    "-r",
+                    "INCLUDE_MISSING",
+                    "-p",
+                    "krapper.cppfixture",
+                    "-c",
+                    "clang++",
+                    "-o",
+                    krappedDir.absolutePath,
+                    "--std",
+                    "c++14",
+                ) + requested.flatMap { listOf("--instantiate", it) } +
+                    listOf("--header", headerPath)
+            println("kplusplusSync[cppfixture]: krapper over ${requested.size} instantiation(s)")
+            val exit = ProcessBuilder(args).inheritIO().start().waitFor()
+            if (exit != 0) {
+                throw GradleException("kplusplusSync[cppfixture]: krapper failed: exit $exit")
+            }
+            File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
+        }
     }
 }

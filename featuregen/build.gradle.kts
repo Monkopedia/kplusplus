@@ -35,55 +35,106 @@ kotlin {
     }
 }
 
+// Header-only C++ surface under test (inline functions, so the generated wrapper compiles
+// them in — no separate impl library). Declared out here so the transitional sync bridge
+// below can reuse it without duplicating the value.
+val featureHeader = "src/cppMain/include/strings_feature.h"
+
+// Build-seeded template instantiations. Their Kotlin facades are themselves generated, so the
+// compiler can't request them via SYNC_REQUIRED (see the instantiate() KDoc).
+val featureInstantiations =
+    listOf(
+        "Box<int>", // UT-box: primitive arg
+        "Box<Point>", // UT-box-point: user-type arg -> Box__Point
+        "Box<Box<int>>", // UT-box-nested: nested -> Box<Box__Int>()
+        "Pair2<int, double>", // UT-pair2: 2-type-param user template -> Pair2__Int__Double
+        "std::unique_ptr<int>", // SP-unique: get/release/operator-> via pointer typedef
+        // RG-range (T1.3): RangeHolder::items() is materialized into std::vector<Thing*>. Like the
+        // Box facade, this vector instantiation is generated on demand by the range rewrite (not
+        // via a Kotlin call site), so it can't be discovered through SYNC_REQUIRED — seed it here
+        // so the container binding exists.
+        "std::vector<Thing*>",
+    )
+
 kplusplus {
-    // Header-only C++ surface under test (inline functions, so krapper_gen's
-    // generated wrapper compiles them in — no separate impl library).
-    header("src/cppMain/include/strings_feature.h")
+    header(featureHeader)
     // Stays on the c++14 default: bumping to c++17 (to reach std::string_view)
     // both fails to wrap the view type AND drops std::string's const char*
     // constructor — see ST-stringview-in / Known issues. The cppStandard knob
     // exists and works; it's just not a clean win for these rows yet.
-    //
-    // Seed the user template `Box<T>` instantiations: their Kotlin facade is itself
-    // generated, so the compiler can't request them via SYNC_REQUIRED (see the
-    // instantiate() KDoc). One per featuregen Box test.
-    instantiate("Box<int>") // UT-box: primitive arg
-    instantiate("Box<Point>") // UT-box-point: user-type arg -> Box__Point
-    instantiate("Box<Box<int>>") // UT-box-nested: nested -> Box<Box__Int>()
-    instantiate("Pair2<int, double>") // UT-pair2: 2-type-param user template -> Pair2__Int__Double
-    instantiate("std::unique_ptr<int>") // SP-unique: get/release/operator-> via pointer typedef
-    // RG-range (T1.3): RangeHolder::items() is materialized into std::vector<Thing*>.
-    // Like the Box facade, this vector instantiation is generated on demand by the
-    // range rewrite (not via a Kotlin call site), so it can't be discovered through
-    // SYNC_REQUIRED — seed it here so the container binding exists.
-    instantiate("std::vector<Thing*>")
+    featureInstantiations.forEach { instantiate(it) }
 }
 
-// ---- cpp-front-end run link (under -Pkpp.frontend.featuregen=cpp) ----
-// Under that property the kplusplus plugin points this module's cinterop + generated sources
-// at build/krapped-cpp and GENERATES them from THIS module's own kplusplus{} config inside
-// kplusplusSync (krapper_parse parse -> ModelIo -> krapper_gen), auto-wiring
-// :krapper_parse:linkReleaseExecutableKlinker. What remains module-specific (below) is purely
-// the RUN link, not the generation:
+// ---- TRANSITIONAL SINGLE-BINARY SYNC BRIDGE (#184) ----
+// DELETE once the plugin version pinned in settings.gradle.kts is 0.3.4+.
 //
-// TRANSITIONAL BRIDGE (remove once the consumed plugin is 0.3.4+): this module applies the
-// PUBLISHED kplusplus plugin pinned in settings.gradle.kts (currently 0.3.3), whose
-// kplusplusSync still gates the ":krapper_parse:linkReleaseExecutableKlinker" dependsOn on the
-// -PenableClang flag — a flag PR #173 REMOVED. So under the committed default
-// -Pkpp.frontend.featuregen=cpp, without that flag the in-tree parser is never auto-built and
-// kplusplusSync fails ("krapper_parse binary was not found at …") — which breaks IntelliJ sync
-// (the IDE model-fetch doesn't pre-build the parser the way a manual :krapper_parse:link would).
-// The in-tree plugin (compiler/gradle/.../KPlusPlusCompilerGradlePlugin.kt) already wires this
-// unconditionally post-#173; this bridge restores that wiring against the CONSUMED 0.3.3 plugin.
-// tasks.matching{}.configureEach is used (not tasks.named) so it resolves cleanly even while the
-// IDE is modeling the task graph and regardless of plugin-apply ordering. Delete when 0.3.4
-// (with the require-LLVM plugin that always-wires) is the pinned version.
+// This module applies the PUBLISHED kplusplus plugin (currently 0.3.3), whose kplusplusSync
+// drives TWO tool binaries — `krapper_parse --parity-emit` writing ModelIo JSON, then
+// `krapper_gen --parsedModel` reading it back. #184 merged those into ONE `:krapper` binary
+// with an in-process handoff, and neither of those CLIs exists any more, so we swap the task's
+// ACTION for the single invocation the in-tree plugin now performs (runCppSync). Everything
+// else the consumed plugin wires — the build/krapped-cpp cinterop + .def + generated-source
+// dir and the compile ordering — is path-based and still correct.
+//
+// (The extension's collected values are `internal` to the plugin and unreadable from a build
+// script, which is why the header + instantiation list live in the vals above.)
 if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
-    tasks.matching { it.name == "kplusplusSync" }.configureEach {
-        dependsOn(":krapper_parse:linkReleaseExecutableKlinker")
+    val krappedDir =
+        layout.buildDirectory
+            .dir("krapped-cpp")
+            .get()
+            .asFile
+    val krapper =
+        rootProject.layout.projectDirectory
+            .file("krapper/build/bin/klinker/krapperRelease/krapper")
+            .asFile
+    // The compiler-written worklist, merged with the build-seeded specs the same way
+    // kplusplusSync does: deduped + sorted (the deterministic instantiation order).
+    val manifest = File(projectDir, "krapped/requested.txt")
+    val headerPath = file(featureHeader).absolutePath
+    // Realize the task EAGERLY (`.get()`) so the plugin's own configuration action — the one
+    // that installs its two-binary doLast — has already run by the time we clear the actions.
+    // A lazy `configureEach`/`named { }` would race it and could be overwritten.
+    afterEvaluate {
+        val sync = tasks.named("kplusplusSync").get()
+        sync.dependsOn(":krapper:linkReleaseExecutableKlinker")
+        sync.actions.clear()
+        sync.doLast {
+            val manifestSpecs =
+                if (manifest.exists()) {
+                    manifest.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+                } else {
+                    emptyList()
+                }
+            val requested = (manifestSpecs + featureInstantiations).distinct().sorted()
+            krappedDir.mkdirs()
+            val args =
+                listOf(
+                    krapper.absolutePath,
+                    "featuregen",
+                    "-r",
+                    "INCLUDE_MISSING",
+                    "-p",
+                    "krapper.featuregen",
+                    "-c",
+                    "clang++",
+                    "-o",
+                    krappedDir.absolutePath,
+                    "--std",
+                    "c++14",
+                ) + requested.flatMap { listOf("--instantiate", it) } +
+                    listOf("--header", headerPath)
+            println("kplusplusSync[featuregen]: krapper over ${requested.size} instantiation(s)")
+            val exit = ProcessBuilder(args).inheritIO().start().waitFor()
+            if (exit != 0) {
+                throw GradleException("kplusplusSync[featuregen]: krapper failed: exit $exit")
+            }
+            File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
+        }
     }
 }
 
+// ---- cpp-front-end run link (under -Pkpp.frontend.featuregen=cpp) ----
 if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
     // MAKE THE TESTS LINK + RUN. The cpp front-end parses featuregen's surface against the
     // SYSTEM libstdc++ (gcc-16 here), so the

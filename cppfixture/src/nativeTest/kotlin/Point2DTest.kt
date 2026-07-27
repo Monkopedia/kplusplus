@@ -5,7 +5,7 @@ import root.Point2D
 
 // #47 flip brick B2 generality demo: these tests run against bindings for cppfixture's OWN
 // header (point2d.h). Under `-Pkpp.frontend.cppfixture=cpp` those bindings are produced by
-// the cpp front-end through the GENERIC plugin path (krapper_parse -> ModelIo -> krapper_gen
+// the cpp front-end through the GENERIC plugin path (krapper parses + generates
 // --frontend=cpp), driven by this module's own kplusplus{} config — proving the path
 // generalizes beyond featuregen.
 class Point2DTest {

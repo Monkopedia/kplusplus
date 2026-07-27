@@ -21,12 +21,10 @@ package com.monkopedia.krapper.generator.model
  * requested specialization, `#include`-ing the std headers the target names plus the
  * consumer's own headers. Resolving the struct's member materializes the specialization.
  *
- * SHARED between the two front-ends (#45 brick 3): the libclang path
- * (IndexedServiceImpl.requestInstantiation) re-parses this header through libclang; the
- * cpp front-end (the krapper_parse binary) parses the SAME bytes through the Clang C++ AST
- * and hands the resulting model off as ModelIo JSON (`--forcingModel`). One definition
- * guarantees both front-ends force the same specialization from the same translation unit
- * — and that the `forceName` the generated wrapper #includes by matches on both paths.
+ * One definition of these bytes (used by IndexedServiceImpl.requestInstantiation, which
+ * parses this header as its own translation unit) guarantees the specialization is always
+ * forced from the same translation unit — and that the `forceName` the generated wrapper
+ * #includes by always matches.
  */
 object ForcingHeader {
 

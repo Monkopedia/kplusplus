@@ -9,29 +9,28 @@ pluginManagement {
     // FLAT build (no composite): the repo consumes the PUBLISHED kplusplus plugin rather than
     // includeBuild("compiler"). A composite substitutes any com.monkopedia.kplusplus:* module
     // dependency with the matching in-build project, which would shadow our own coordinates and
-    // block krapper_parse from resolving a published tool; flat has no such substitution. The
-    // tool modules (krapper_gen/krapper_parse/krapper_model) stay siblings here, so their dev
-    // loop is still immediate; PLUGIN development happens in an example (samples/*) that
-    // includeBuilds compiler. Bump this version on each release.
+    // block :krapper from resolving a published tool; flat has no such substitution. The tool
+    // modules (krapper/krapper_model) stay siblings here, so their dev loop is still immediate;
+    // PLUGIN development happens in an example (samples/*) that includeBuilds compiler. Bump
+    // this version on each release.
     plugins {
         id("com.monkopedia.kplusplus.compiler") version "0.3.3"
     }
 }
 
-include(":krapper_gen")
 include(":krapper_model")
 include(":feature-tests")
 include(":featuregen")
 
 // :clangwalk binds Clang's own C++ AST (libclang-cpp) and walks a real AST on the generated
-// bindings. :krapper_parse is the LLVM front-end that PARSES headers into bindings; :cppfixture
-// is the generic cpp-path demo. All three link against the box's LLVM toolchain (system
-// clang++, libclang-cpp, libLLVM).
+// bindings. :krapper is THE TOOL — it parses headers with the Clang C++ AST and generates the
+// bindings in one binary (#184); :cppfixture is the generic cpp-path demo. All three link
+// against the box's LLVM toolchain (system clang++, libclang-cpp, libLLVM).
 //
-// LLVM IS A HARD REQUIREMENT: krapper_parse (-Pkpp.frontend.<module>=cpp) is the only way to
-// PARSE a header into bindings, so these modules are ALWAYS included and the LLVM toolchain is
-// probed UNCONDITIONALLY — an absent/mis-pointed toolchain fails right here at settings-eval
-// with an actionable message. Full project, or a clear error; never a silent partial build.
+// LLVM IS A HARD REQUIREMENT: :krapper (-Pkpp.frontend.<module>=cpp) is the only way to PARSE a
+// header into bindings, so these modules are ALWAYS included and the LLVM toolchain is probed
+// UNCONDITIONALLY — an absent/mis-pointed toolchain fails right here at settings-eval with an
+// actionable message. Full project, or a clear error; never a silent partial build.
 //
 // `-PllvmConfig=<path-to-llvm-config>` is ONLY a LOCATION OVERRIDE (point the probe at a
 // specific/side-by-side install); its ABSENCE means "use `llvm-config` on PATH".
@@ -121,9 +120,9 @@ if (!File(llvmLibDir, "libLLVM-$llvmMajor.so").exists() &&
 }
 
 include(":clangwalk")
-// :krapper_parse is the LLVM front-end: it constructs :krapper_model's parse-output model
-// from the libclang-cpp bindings.
-include(":krapper_parse")
+// :krapper is the LLVM-linked tool: it constructs :krapper_model's parse-output model from the
+// libclang-cpp bindings and resolves + generates the Kotlin bindings from it, in one process.
+include(":krapper")
 // :cppfixture is the generality demo: a minimal, std-free binding consumer that proves the
 // GENERIC `-Pkpp.frontend.<module>=cpp` path drives a module's own config (not just
 // featuregen's).

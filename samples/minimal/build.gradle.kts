@@ -68,7 +68,7 @@ val compileGeometryLib = tasks.register<Exec>("compileGeometryLib") {
 // PATH (NOT -lstdc++ — konan's bundled-sysroot -L is searched first and would shadow to
 // the OLD lib). The .so is DISCOVERED at configure time from `clang++ -print-file-name`
 // (a GNU-ld linker script/symlink), canonicalized to the real shared object — host-
-// portable, not hardcoded. Same mechanism clangwalk/krapper_parse/featuregen/v8 all use.
+// portable, not hardcoded. Same mechanism clangwalk/krapper/featuregen/v8 all use.
 val systemStdcxxSo: File = run {
     val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
         .redirectErrorStream(true).start()

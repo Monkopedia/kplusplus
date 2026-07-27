@@ -15,8 +15,8 @@
  */
 
 // The pure parse-output model: the WrappedElement/WrappedType hierarchy the front-end
-// (:krapper_parse) produces and the resolver (:krapper_gen) consumes. No cinterop, no
-// codegen. Targets mirror :krapper_gen (host native + jvm, the jvm side carrying the
+// the parse front-end produces and the resolver consumes (both in :krapper). No cinterop, no
+// codegen. Targets are host native + jvm (the jvm side carrying the
 // commonMain enums shared with the resolved schema).
 plugins {
     kotlin("multiplatform")
@@ -29,7 +29,7 @@ repositories {
 }
 
 kotlin {
-    // Determine host preset, matching :krapper_gen.
+    // Determine host preset.
     val hostOs = System.getProperty("os.name")
     when {
         hostOs == "Mac OS X" -> macosX64("native")

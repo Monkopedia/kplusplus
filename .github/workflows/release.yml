@@ -2,8 +2,8 @@
 #
 #   * The Gradle plugin (com.monkopedia.kplusplus.compiler) -> the Gradle Plugin Portal
 #     AND the Central Portal (so both `gradlePluginPortal()` and `mavenCentral()` consumers
-#     resolve `id("...") version "..."`). The krapper_gen + krapper_parse native tool binaries
-#     are BUNDLED INSIDE this plugin jar (0.4.0 model), not shipped as separate coordinates.
+#     resolve `id("...") version "..."`). The `krapper` native tool binary is BUNDLED INSIDE
+#     this plugin jar (0.4.0 model), not shipped as a separate coordinate.
 #   * The FIR kotlinc-plugin jar -> the Central Portal.
 #
 # Everything is GPG-signed (vanniktech in-memory key) and uploaded to the Central Portal, which
@@ -30,14 +30,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # krapper_parse is built FROM SEED (a plain C++ recompile of its committed krapped/
-      # wrapper). That wrapper #includes <clang/AST/...> and was GENERATED against LLVM 22 —
-      # it only compiles against LLVM 22 (the cross-major C++ API drift proven in the
+      # :krapper regenerates its own Clang-AST bindings with the tool bundled in the last
+      # released plugin. The generated wrapper #includes <clang/AST/...> and is built against
+      # LLVM 22 — it only compiles against LLVM 22 (the cross-major C++ API drift proven in the
       # portability probe), and apt.llvm.org puts those headers under /usr/lib/llvm-22/include,
       # NOT the distro default path. So install LLVM 22 from apt.llvm.org (not the distro's
-      # clang) and surface its include/lib dirs via CPATH/LD_LIBRARY_PATH so the seed compile,
-      # the klinker link, and runtime all resolve. LLVM is a hard requirement — the settings
-      # probe reads the LLVM major + libdir from llvm-config and fails fast if it's absent.
+      # clang) and surface its include/lib dirs via CPATH/LD_LIBRARY_PATH so the wrapper
+      # compile, the klinker link, and runtime all resolve. LLVM is a hard requirement — the
+      # settings probe reads the LLVM major + libdir from llvm-config and fails fast if absent.
       - name: Install LLVM/Clang 22 (apt.llvm.org)
         run: |
           set -euxo pipefail
@@ -53,22 +53,19 @@ jobs:
           echo "CPATH=$(llvm-config --includedir)" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
-      # Build the two native tool binaries so the publish steps can BUNDLE them into the plugin
-      # jar (the 0.4.0 distribution model — the released plugin carries its own tools; consumers
-      # no longer resolve separate krapper_gen/krapper_parse coordinates). :krapper_parse is
-      # always in the build (LLVM is a hard requirement) and links against the LLVM installed above.
-      - name: Build the tool binaries (to bundle into the plugin)
+      # Build the native tool binary so the publish steps can BUNDLE it into the plugin jar
+      # (the 0.4.0 distribution model — the released plugin carries its own tool; consumers no
+      # longer resolve a separate coordinate). :krapper is always in the build (LLVM is a hard
+      # requirement) and links against the LLVM installed above.
+      - name: Build the tool binary (to bundle into the plugin)
         run: >-
-          ./gradlew
-          :krapper_gen:linkReleaseExecutableNative
-          :krapper_parse:linkReleaseExecutableKlinker
-          --no-configuration-cache
+          ./gradlew :krapper:linkReleaseExecutableKlinker --no-configuration-cache
 
       # --- Publish the Gradle plugin (tools bundled) to the Gradle Plugin Portal ---
       # publishPlugins uses gradle.publish.key / gradle.publish.secret. Runs ONLY on an actual
       # release event: the Plugin Portal rejects re-publishing an existing version, so a manual
       # workflow_dispatch re-run (e.g. to retry a failed Central upload) skips this step and does
-      # Central only. -Pkpp.bundleTools.<tool>=<abs-path> packs the just-built binaries into the
+      # Central only. -Pkpp.bundleTools.krapper=<abs-path> packs the just-built binary into the
       # plugin jar (see compiler/gradle/build.gradle.kts + extractBundledTool in the plugin).
       - name: Publish Gradle plugin to the Plugin Portal
         if: github.event_name == 'release'
@@ -76,16 +73,15 @@ jobs:
           ./gradlew -p compiler :kplusplus-compiler-gradle:publishPlugins
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}
           -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }}
-          -Pkpp.bundleTools.krapperGen=$GITHUB_WORKSPACE/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe
-          -Pkpp.bundleTools.krapperParse=$GITHUB_WORKSPACE/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse
+          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
 
       # --- Publish the plugin set (tools bundled) to the Central Portal (auto-released) ---
       # `-p compiler publishToMavenCentral` uploads ONLY the compiler build's coordinates — the
       # Gradle plugin (+ marker) and the FIR plugin jar — as one signed bundle. The native tool
-      # binaries ride INSIDE the plugin jar (bundleTools), so there are NO standalone
-      # krapper_gen/krapper_parse Central artifacts anymore (that whole classified-binary path is
-      # gone — it was the source of the 0.3.0 firefight). vanniktech reads the Portal token + the
-      # in-memory GPG key from the ORG_GRADLE_PROJECT_* env vars below.
+      # binary rides INSIDE the plugin jar (bundleTools), so there are NO standalone tool
+      # Central artifacts anymore (that whole classified-binary path is gone — it was the source
+      # of the 0.3.0 firefight). vanniktech reads the Portal token + the in-memory GPG key from
+      # the ORG_GRADLE_PROJECT_* env vars below.
       - name: Publish to the Central Portal (auto-release on validation)
         env:
           # Reuse the EXISTING repo secrets (from the v1 pipeline). The Central Portal user token
@@ -97,11 +93,10 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
         run: >-
           ./gradlew -p compiler publishToMavenCentral --no-configuration-cache
-          -Pkpp.bundleTools.krapperGen=$GITHUB_WORKSPACE/krapper_gen/build/bin/native/releaseExecutable/krapper_gen.kexe
-          -Pkpp.bundleTools.krapperParse=$GITHUB_WORKSPACE/krapper_parse/build/bin/klinker/krapper_parseRelease/krapper_parse
+          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
 
       - name: Release notes
         run: |
-          echo "Published the kplusplus plugin set (native tools bundled in the plugin jar) to"
+          echo "Published the kplusplus plugin set (native tool bundled in the plugin jar) to"
           echo "the Central Portal (auto-released on validation) and the Gradle Plugin Portal."
           echo "Check status at https://central.sonatype.com (Deployments)."
