@@ -50,6 +50,11 @@ dependencies {
     implementation(libs.ksrpc.sockets) { excludeJetbrainsAnnotations() }
     implementation(libs.serialization.json) { excludeJetbrainsAnnotations() }
     implementation(libs.coroutines.core) { excludeJetbrainsAnnotations() }
+
+    // The subprocess-lifecycle tests fault-inject a stand-in `krapper` (see
+    // KrapperSessionFailureTest); `java-gradle-plugin` already puts gradleApi() on the
+    // classpath, which is where the Logger they need comes from.
+    testImplementation(kotlin("test-junit"))
 }
 
 fun ExternalModuleDependency.excludeJetbrainsAnnotations() =

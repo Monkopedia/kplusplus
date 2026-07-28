@@ -33,8 +33,13 @@ import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.toStub
 import java.io.File
+import java.io.IOException
 import java.util.Collections
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.gradle.api.logging.Logger
 
@@ -137,9 +142,9 @@ internal object KrapperSession {
         // written from a different thread than the one that reads it after the run.
         val diagnostics = Collections.synchronizedList(mutableListOf<Diagnostic>())
         val sink = GradleLogSink(logger, job.moduleName, diagnostics)
-        val connection = connect(binary, environment, logger)
+        val session = start(binary, environment, logger, diagnostics)
         try {
-            val krapper = connection.defaultChannel().toStub<KrapperService, String>()
+            val krapper = session.connection.defaultChannel().toStub<KrapperService, String>()
             krapper.setLogger(sink)
             krapper.setConfig(job.config)
             val indexed = krapper.index(job.request)
@@ -149,19 +154,61 @@ internal object KrapperSession {
                 runCatching { indexed.close() }
             }
         } catch (t: Throwable) {
+            // The channel alone cannot say WHY it died — a crashed tool and a garbage protocol
+            // stream both surface as ksrpc's bare "Closing MultiChannel". Settle the process
+            // first and let its exit status name the failure.
             throw KrapperRunException(
-                t.message ?: t::class.simpleName.orEmpty(),
+                session.describeFailure(t),
                 KrapperRunReport(diagnostics.toList()),
                 t
             )
         } finally {
-            // Closing the connection closes the tool's stdio, which is how its service mode
-            // is told to exit (App.runService's `connection.onClose { exitProcess(0) }`).
-            // `quit` would exit the process mid-call and leave this side awaiting a response
-            // that can never arrive.
-            runCatching { connection.close() }
+            session.shutdown()
         }
         KrapperRunReport(diagnostics.toList())
+    }
+
+    /**
+     * Start the tool in service mode and wrap it in a [KrapperProcess].
+     *
+     * The `Process` is started HERE rather than through ksrpc's `ProcessBuilder.asConnection`
+     * convenience: that overload creates and destroys the process entirely inside ksrpc and
+     * never hands it back, so the caller has nothing to inspect when the channel dies and
+     * every early failure collapses to the same contentless message. Owning the process is
+     * what lets [KrapperProcess.describeFailure] report the exit code the pre-#185 subprocess
+     * path always had.
+     */
+    private suspend fun start(
+        binary: File,
+        environment: Map<String, String>,
+        logger: Logger,
+        diagnostics: List<Diagnostic>
+    ): KrapperProcess {
+        val env = ksrpcEnvironment(Json { serializersModule = resolvedSerializerModule }) {
+            // Channel-level failures (a torn-down pipe during teardown, a serialization
+            // mismatch) are already surfaced to the caller as a thrown RPC exception; this
+            // listener only keeps the detail available under --info.
+            errorListener = ErrorListener { logger.info("krapper channel error: $it") }
+        }
+        val process = try {
+            ProcessBuilder(binary.absolutePath, "-s")
+                // stdin/stdout ARE the protocol; stderr stays the tool's (and Clang's) own
+                // channel and is inherited so a parse abort is still visible verbatim.
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .also { it.environment().putAll(environment) }
+                .start()
+        } catch (t: IOException) {
+            throw KrapperRunException(
+                "krapper could not be started from $binary (${t.message}). The tool is either " +
+                    "missing, not executable, or not a binary this host can run.",
+                KrapperRunReport(diagnostics.toList()),
+                t
+            )
+        }
+        return KrapperProcess(
+            process,
+            (process.inputStream to process.outputStream).asConnection(env)
+        )
     }
 
     /** The generation flow — the same sequence the CLI's `run()` performs in-process. */
@@ -178,23 +225,91 @@ internal object KrapperSession {
         writeTo(job.outputDir.absolutePath)
     }
 
-    private suspend fun connect(
-        binary: File,
-        environment: Map<String, String>,
-        logger: Logger
-    ): Connection<String> {
-        val env = ksrpcEnvironment(Json { serializersModule = resolvedSerializerModule }) {
-            // Channel-level failures (a torn-down pipe during teardown, a serialization
-            // mismatch) are already surfaced to the caller as a thrown RPC exception; this
-            // listener only keeps the detail available under --info.
-            errorListener = ErrorListener { logger.info("krapper channel error: $it") }
+}
+
+/**
+ * The krapper subprocess and the channel to it, owned together so a dead channel can be
+ * explained by the process's exit status (#185 review follow-up).
+ *
+ * ksrpc's `MultiChannel` reports ANY teardown with no application-level exception in flight as
+ * a bare `CancellationException("Closing MultiChannel")`. That is indistinguishable between a
+ * tool that segfaulted on startup, a tool that wrote garbage down the pipe, and an ABI
+ * mismatch — and it is strictly less than the pre-#185 subprocess path reported, which always
+ * had `exit N`. The process's own outcome is the missing signal, so this keeps it.
+ */
+private class KrapperProcess(private val process: Process, val connection: Connection<String>) {
+
+    private var outcome: Outcome? = null
+
+    /**
+     * How the tool ended. `Exited` carries its status; `Killed` means it was still running
+     * after being told (by the pipe closing) to exit, and had to be terminated.
+     */
+    private sealed interface Outcome {
+        data class Exited(val code: Int) : Outcome
+        data object Killed : Outcome
+    }
+
+    /**
+     * Close the channel and settle the process. Closing our end of the pipes is how the tool's
+     * service mode is told to exit (`App.runService`'s `connection.onClose { exitProcess(0) }`)
+     * — `quit` would exit it mid-call and leave this side awaiting a response that can never
+     * arrive. Idempotent: the outcome is observed once and reused.
+     */
+    suspend fun shutdown() {
+        settle()
+    }
+
+    private suspend fun settle(): Outcome = outcome ?: run {
+        runCatching { connection.close() }
+        val exited = withContext(Dispatchers.IO) {
+            process.waitFor(SHUTDOWN_GRACE_SECONDS, TimeUnit.SECONDS)
         }
-        return ProcessBuilder(binary.absolutePath, "-s")
-            // stdin/stdout ARE the protocol; stderr stays the tool's (and Clang's) own
-            // channel and is inherited so a parse abort is still visible verbatim.
-            .redirectError(ProcessBuilder.Redirect.INHERIT)
-            .also { it.environment().putAll(environment) }
-            .asConnection(env)
+        val settled = if (exited) {
+            Outcome.Exited(process.exitValue())
+        } else {
+            process.destroyForcibly()
+            Outcome.Killed
+        }
+        outcome = settled
+        settled
+    }
+
+    /**
+     * Why the run failed, in as much detail as is actually known. Distinguishes the three
+     * failure modes the channel alone conflates:
+     *  - krapper died (non-zero exit, or had to be killed) — the pre-#185 `exit N` case;
+     *  - krapper exited cleanly but the session never completed — a truncated or malformed
+     *    protocol stream;
+     *  - krapper REPORTED an error — its own message, which is the useful one.
+     */
+    suspend fun describeFailure(cause: Throwable): String {
+        val settled = settle()
+        // ksrpc raises a CancellationException for a channel teardown with nothing else in
+        // flight; anything else came FROM krapper and already says what went wrong.
+        val reported = cause.message?.takeIf { it.isNotBlank() && cause !is CancellationException }
+        val channelDetail = cause.message?.let { " (channel: $it)" }.orEmpty()
+        return when {
+            settled is Outcome.Exited && settled.code != 0 ->
+                "krapper exited with code ${settled.code} before the session completed" +
+                    channelDetail
+
+            settled is Outcome.Killed ->
+                "krapper did not exit within ${SHUTDOWN_GRACE_SECONDS}s of the session failing " +
+                    "and was terminated" + channelDetail
+
+            reported != null -> reported
+
+            else ->
+                "krapper exited cleanly (code 0) but the session did not complete — its " +
+                    "protocol stream ended unexpectedly" + channelDetail
+        }
+    }
+
+    private companion object {
+        // Long enough for the tool to notice EOF on stdin and exit, short enough that a wedged
+        // tool doesn't stall the build. The happy path exits well inside it.
+        const val SHUTDOWN_GRACE_SECONDS = 10L
     }
 }
 
