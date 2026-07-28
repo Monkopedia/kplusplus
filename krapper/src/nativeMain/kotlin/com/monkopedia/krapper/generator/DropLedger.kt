@@ -77,12 +77,7 @@ object DropLedger {
         get() = records
 
     /** Record a skip-not-crash drop of [symbol] for [reason] in [phase]. */
-    fun record(
-        symbol: String,
-        reason: String,
-        phase: DropPhase,
-        location: SourceLocation? = null
-    ) {
+    fun record(symbol: String, reason: String, phase: DropPhase, location: SourceLocation? = null) {
         records.add(DropRecord(symbol, reason, phase, location))
     }
 

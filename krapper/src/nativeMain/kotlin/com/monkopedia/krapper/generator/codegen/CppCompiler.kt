@@ -87,8 +87,10 @@ class CppCompiler(
                     message = line.substringAfter(marker),
                     location = location,
                     phase = DiagnosticPhase.COMPILE,
-                    hint = "the generated C++ wrapper does not compile; the binding it " +
-                        "belongs to cannot be produced"
+                    // Only the errors carry the "so what" — a warning or a `note:` here is
+                    // context for one of them, not an independent problem.
+                    hint = "the generated wrapper for this declaration cannot be compiled"
+                        .takeIf { severity.value == Severity.ERROR }
                 )
             }.toList()
     }

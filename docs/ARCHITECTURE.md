@@ -34,13 +34,36 @@ between two binaries as `ModelIo` JSON; that serialization survives only as the 
 The `com.monkopedia.kplusplus.compiler` Gradle plugin (`compiler/`) wires all of this into the
 Kotlin/Native build so it runs as part of normal compilation.
 
+## How the build talks to krapper
+
+The plugin does not spawn krapper with a wall of flags and read its exit code. It starts the tool
+in **service mode** (`krapper -s`) and drives it over a **ksrpc service channel carried on the
+subprocess's stdin/stdout** — a typed session, one call per pipeline step:
+
+```
+setLogger -> setConfig -> index -> filterAndResolve / requestInstantiation -> applyFixups -> writeTo
+```
+
+Because the channel is bidirectional, krapper reports back on it while it works. Progress
+narration lands at Gradle's `info` level, and anything actionable comes back as a structured
+`Diagnostic` — severity, message, the declaration it concerns, the C++ `file:line:col` Clang
+recorded for it, the pipeline phase, and a Kotlin-side hint. That is how the drop ledger (every
+symbol the generator skipped and why) and the generated wrapper's own compile errors reach the
+build as real, positioned messages instead of interleaved subprocess output.
+
+The service interfaces and their payloads live once, in `krapper/src/commonMain/kotlin` and
+`krapper_model/src/commonMain/kotlin`; the Gradle plugin compiles the same source (see
+`compiler/gradle/build.gradle.kts`), so both ends of the channel come from one definition. The
+tool ships bundled inside the plugin jar, so the plugin only ever talks to the exact binary it
+carries and the interface can change freely.
+
 ## Modules
 
 | Module | Role |
 |--------|------|
 | `krapper/` | The tool — one binary. `parser/` is the self-hosted C++ front-end (walks a real Clang AST, on generated Clang-AST bindings, into a `krapper_model` tree); the rest resolves references + template forcings, applies fixups, and generates the C++ wrapper + Kotlin bindings (`generator/codegen/`). |
 | `krapper_model/` | The shared data model the stages speak: the `Wrapped*` element/type tree and its `ModelIo` (de)serialization. Pure data, no parsing or codegen. |
-| `compiler/` | The v2 Kotlin/Gradle compiler plugin (`com.monkopedia.kplusplus.compiler`): the `kplusplus { }` DSL, the FIR integration, and the orchestration that runs krapper during a build. |
+| `compiler/` | The v2 Kotlin/Gradle compiler plugin (`com.monkopedia.kplusplus.compiler`): the `kplusplus { }` DSL, the FIR integration, and the ksrpc session that drives krapper during a build (`KrapperSession.kt`). |
 | `featuregen/` | The primary correctness harness: generates bindings for a broad surface of C++ features and runs behavioral tests against them (the self-hosted suite, ~188 tests). |
 | `feature-tests/` | The raw-cinterop baseline: hand-written `.def` files compiled directly, no generator. Proves the C++ interop works before the generator is in the picture. Its `matrixReport` task drives [features.md](features.md). |
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module (a regression guard for the generation orchestration). |

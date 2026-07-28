@@ -71,12 +71,14 @@ internal class KrapperRunReport(val diagnostics: List<Diagnostic>) {
 
     /**
      * The diagnostics, rendered, for a failure message — errors first (they explain the
-     * failure) and capped, because a broad import can drop hundreds of symbols and an
-     * unreadable exception helps nobody. The full set was already logged.
+     * failure), `INFO` context dropped, and capped, because a broad import can drop hundreds
+     * of symbols and an unreadable exception helps nobody. The full set was already logged.
      */
     fun detail(): String {
-        if (diagnostics.isEmpty()) return ""
-        val ordered = diagnostics.sortedBy { it.severity.ordinal * -1 }
+        val ordered = diagnostics
+            .filter { it.severity != Severity.INFO }
+            .sortedByDescending { it.severity.ordinal }
+        if (ordered.isEmpty()) return ""
         return ordered.take(MAX_DETAIL).joinToString(
             prefix = "\n\nkrapper reported ${summary().removeSuffix(".")}:\n  ",
             separator = "\n  ",
