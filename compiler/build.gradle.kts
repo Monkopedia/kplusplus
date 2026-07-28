@@ -17,7 +17,7 @@ plugins {
 
 allprojects {
     group = "com.monkopedia.kplusplus"
-    version = "0.3.3"
+    version = "0.3.4"
 }
 
 // Scope the ABI gate to the PUBLISHED modules only. The compiler build's published set is the

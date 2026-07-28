@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.monkopedia.kplusplus"
-version = "0.3.3"
+version = "0.3.4"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
