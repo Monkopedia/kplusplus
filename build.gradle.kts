@@ -13,18 +13,39 @@ subprojects {
     configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
         version.set(rootProject.libs.versions.ktlint.cli)
         android.set(true)
-        // Exclude generated binding output from ktlint.  The kplusplus compiler plugin
-        // places generated Kotlin bindings in two possible directories:
-        //   • <module>/krapped/src/   — the committed seed (default / libclang path)
-        //   • build/krapped-cpp/src/  — the cpp front-end output (kpp.frontend.<mod>=cpp)
-        // Linting machine-generated code produces thousands of spurious violations that
-        // drown real hand-written source findings, so we skip both trees here.
+        // Exclude generated Kotlin from ktlint.  Three generators put output on a source
+        // set of a module we DO lint:
+        //   • <module>/krapped/src/          — kplusplus bindings, committed seed (default
+        //                                      / libclang path)
+        //   • build/krapped-cpp/src/         — kplusplus bindings, cpp front-end output
+        //                                      (kpp.frontend.<mod>=cpp)
+        //   • build/gen/klinker/*/kotlin/    — klinker's `klinker_main.kt` entry-point
+        //                                      shim, added to the default source set of
+        //                                      every klinked module (:krapper, :clangwalk,
+        //                                      samples).  It is upstream-owned and would
+        //                                      regenerate, so it must be skipped, not fixed.
+        // Linting machine-generated code produces spurious violations that drown real
+        // hand-written source findings, so we skip all three trees here.
         filter {
             exclude { element ->
                 val path = element.file.absolutePath
-                path.contains("/krapped/") || path.contains("/krapped-cpp/")
+                path.contains("/krapped/") ||
+                    path.contains("/krapped-cpp/") ||
+                    path.contains("/build/gen/klinker/")
             }
         }
+    }
+
+    // klinker registers its generated directory ON the module's default source set, so the
+    // ktlint source-set tasks read another task's OUTPUT.  Gradle rejects that as an
+    // undeclared implicit dependency and fails the ktlint task whenever codegen is in the
+    // same build (e.g. `check`).  Filtering the files out (above) does not help: the
+    // *directory* is still an input of the task.  ktlint must not DEPEND on codegen — that
+    // would make linting drag the generator in — so declare ordering only.  klinker's task
+    // is matched by name (`generateKotlinSource<binary>`) since its plugin is not on the
+    // root build's classpath; matching a task that is not klinker's would only order it.
+    tasks.withType<org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask>().configureEach {
+        mustRunAfter(provider { tasks.matching { it.name.startsWith("generateKotlinSource") } })
     }
 }
 
