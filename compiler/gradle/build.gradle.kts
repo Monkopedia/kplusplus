@@ -38,11 +38,22 @@ dependencies {
     // #185: the typed channel to krapper. ksrpc-sockets supplies the JVM
     // `ProcessBuilder.asConnection` that speaks the protocol over the subprocess's stdio
     // pipe; ksrpc-core + serialization + coroutines are what the generated stubs run on.
-    implementation(libs.ksrpc.core)
-    implementation(libs.ksrpc.sockets)
-    implementation(libs.serialization.json)
-    implementation(libs.coroutines.core)
+    //
+    // Each one EXCLUDES org.jetbrains:annotations: a Gradle buildscript classpath pins that
+    // module to `strictly 13.0` (Gradle's embedded Kotlin), while coroutines asks for 23.0.0
+    // — an unsatisfiable constraint that fails the consumer's build at configuration time.
+    // The excludes are declared per-dependency (not on the configuration) so they are carried
+    // in the published POM and protect a from-published consumer too. Dropping the module is
+    // safe: its contents are CLASS-retention annotations, and Gradle's own kotlin-stdlib
+    // supplies the 13.0 set anyway.
+    implementation(libs.ksrpc.core) { excludeJetbrainsAnnotations() }
+    implementation(libs.ksrpc.sockets) { excludeJetbrainsAnnotations() }
+    implementation(libs.serialization.json) { excludeJetbrainsAnnotations() }
+    implementation(libs.coroutines.core) { excludeJetbrainsAnnotations() }
 }
+
+fun ExternalModuleDependency.excludeJetbrainsAnnotations() =
+    exclude(group = "org.jetbrains", module = "annotations")
 
 // #185: ONE definition of the krapper service protocol, compiled for BOTH sides.
 //
