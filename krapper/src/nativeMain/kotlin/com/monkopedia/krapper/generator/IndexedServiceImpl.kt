@@ -19,6 +19,7 @@ import com.monkopedia.krapper.AddToChild
 import com.monkopedia.krapper.AddToParent
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.FilterDefinition
+import com.monkopedia.krapper.Fixup
 import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.IndexedService
 import com.monkopedia.krapper.InstantiationRequest
@@ -136,6 +137,12 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun addMapping(mappingService: MappingService) {
         mappings.add(mappingService)
+    }
+
+    override suspend fun applyFixups(fixups: List<Fixup>) {
+        if (fixups.isEmpty()) return
+        Log.i("Applying ${fixups.size} fixup(s)")
+        FixupApplier.apply(this, fixups)
     }
 
     override suspend fun requestInstantiation(req: InstantiationRequest) {
@@ -337,6 +344,9 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     private suspend fun reportDrops() {
         val bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
         Log.i(DropLedger.report(requested, bound))
+        // #185: the same ledger, structured — so a remote driver gets each drop as
+        // {severity, symbol, file:line:col, reason} instead of having to scrape the report.
+        Log.diagnostics(DropLedger.diagnostics())
         if (config.failOnDrop && DropLedger.hasDrops()) {
             error(
                 "--fail-on-drop: ${DropLedger.drops.size} symbol(s) were dropped " +

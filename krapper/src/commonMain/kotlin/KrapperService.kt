@@ -26,7 +26,19 @@ data class IndexRequest(
     val libraries: List<String>,
     val headerDirectories: List<String> = headers.map { f ->
         f.split("/").let { it.subList(0, it.size - 1).joinToString("/") }
-    }.distinct()
+    }.distinct(),
+    /**
+     * Extra `-I` roots for the PARSE (the module's `headerDirectory(...)` plus the
+     * consumer's LLVM include dir). Distinct from [headerDirectories], which additionally
+     * carries each header's own parent dir and drives the WRAPPER COMPILE's `-I` set — the
+     * parse must not silently gain those, so the two stay separate.
+     *
+     * Carried on the request rather than set as a CLI-scoped global, so a caller driving
+     * krapper over the service channel configures the parse the same way the CLI does.
+     */
+    val includeDirs: List<String> = emptyList(),
+    /** Debug aid: write each parsed tree to this dir as ModelIo JSON (`--dump-model`). */
+    val dumpModelDir: String? = null
 )
 
 @Serializable
@@ -70,6 +82,18 @@ interface IndexedService : RpcBidiService {
 
     @KsMethod("/instantiate")
     suspend fun requestInstantiation(request: InstantiationRequest)
+
+    /**
+     * Register the declarative [Fixup] directives for this run (#185).
+     *
+     * [addMapping] can express the same thing, but only by hosting the mapper on the CALLER's
+     * side of the channel — and krapper then calls back per matching element, which for a
+     * remote (Gradle-plugin) caller means a round trip and a full element tree on the wire for
+     * every method in the model. Fixups are DATA, so they travel as data and are applied
+     * in-process; [addMapping] remains for a caller that genuinely needs to run its own code.
+     */
+    @KsMethod("/fixups")
+    suspend fun applyFixups(fixups: List<Fixup>)
 
     @KsMethod("/output")
     suspend fun writeTo(output: String)

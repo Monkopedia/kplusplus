@@ -15,6 +15,13 @@
  */
 package com.monkopedia.kplusplus.compiler.gradle
 
+import com.monkopedia.krapper.AddUniquePtrGet
+import com.monkopedia.krapper.Fixup
+import com.monkopedia.krapper.RemoveMethodByCName
+import com.monkopedia.krapper.ScriptOriginOptionsFix
+import com.monkopedia.krapper.StripConstFromReturnType
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import org.gradle.api.Action
 
 /**
@@ -41,7 +48,7 @@ open class KPlusPlusExtension {
     internal val headers: MutableList<String> = mutableListOf()
     internal val headerDirectories: MutableList<String> = mutableListOf()
     internal val libraries: MutableList<String> = mutableListOf()
-    internal val fixups: MutableList<FixupDirective> = mutableListOf()
+    internal val fixups: MutableList<Fixup> = mutableListOf()
     internal val instantiations: MutableList<String> = mutableListOf()
 
     /**
@@ -189,72 +196,32 @@ open class KPlusPlusExtension {
  */
 class FixupSpec {
 
-    internal val collected: MutableList<FixupDirective> = mutableListOf()
+    internal val collected: MutableList<Fixup> = mutableListOf()
 
     fun removeMethod(uniqueCName: String) {
-        collected += FixupDirective.RemoveMethodByCName(uniqueCName)
+        collected += RemoveMethodByCName(uniqueCName)
     }
 
     fun stripConstFromReturnType(matchPrefix: String) {
-        collected += FixupDirective.StripConstFromReturnType(matchPrefix)
+        collected += StripConstFromReturnType(matchPrefix)
     }
 
     fun scriptOriginOptionsFix() {
-        collected += FixupDirective.ScriptOriginOptionsFix
+        collected += ScriptOriginOptionsFix
     }
 
     fun addUniquePtrGet() {
-        collected += FixupDirective.AddUniquePtrGet
+        collected += AddUniquePtrGet
     }
 }
 
 /**
- * Gradle-side mirror of krapper's sealed [com.monkopedia.krapper.Fixup]
- * type. Kept here as a separate sealed hierarchy so the gradle plugin
- * doesn't depend on krapper's runtime classes (the plugin runs on the
- * JVM build classpath; krapper is a Kotlin/Native binary).
+ * The fixup list as JSON — the sync task's up-to-date key.
  *
- * [toJson] produces a JSON object that round-trips through kotlinx
- * serialization on the krapper side using the polymorphic serializer
- * for [com.monkopedia.krapper.Fixup]. The discriminator `"type"` and the
- * class shortnames match what kotlinx.serialization emits.
+ * #185 removed a hand-written `FixupDirective` mirror of krapper's sealed [Fixup] (and its
+ * hand-rolled JSON emitter) that existed only because the plugin could not reference
+ * krapper's classes. It now compiles them from the same source krapper does, so this is the
+ * real serializer rather than a mirror that could silently drift from it.
  */
-internal sealed class FixupDirective {
-
-    abstract fun toJson(): String
-
-    data class RemoveMethodByCName(val uniqueCName: String) : FixupDirective() {
-        override fun toJson(): String =
-            """{"type":"com.monkopedia.krapper.RemoveMethodByCName",""" +
-                """"uniqueCName":${quote(uniqueCName)}}"""
-    }
-
-    data class StripConstFromReturnType(val matchPrefix: String) : FixupDirective() {
-        override fun toJson(): String =
-            """{"type":"com.monkopedia.krapper.StripConstFromReturnType",""" +
-                """"matchPrefix":${quote(matchPrefix)}}"""
-    }
-
-    object ScriptOriginOptionsFix : FixupDirective() {
-        override fun toJson(): String =
-            """{"type":"com.monkopedia.krapper.ScriptOriginOptionsFix"}"""
-    }
-
-    object AddUniquePtrGet : FixupDirective() {
-        override fun toJson(): String =
-            """{"type":"com.monkopedia.krapper.AddUniquePtrGet"}"""
-    }
-
-    companion object {
-        // Minimal JSON string escape — fine for the inputs we accept here
-        // (C++ identifier-shaped names with `<`, `>`, `:`, `_`). Quotes
-        // and backslashes still get escaped defensively.
-        private fun quote(s: String): String {
-            val escaped = s.replace("\\", "\\\\").replace("\"", "\\\"")
-            return "\"$escaped\""
-        }
-    }
-}
-
-internal fun List<FixupDirective>.toJsonArray(): String =
-    joinToString(prefix = "[", postfix = "]", separator = ",") { it.toJson() }
+internal fun List<Fixup>.toJsonArray(): String =
+    Json.encodeToString(ListSerializer(Fixup.serializer()), this)

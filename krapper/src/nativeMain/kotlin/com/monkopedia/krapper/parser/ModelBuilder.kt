@@ -37,6 +37,7 @@ import clang.TemplateTypeParmDecl
 import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
+import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.ClassMetadata
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
@@ -54,6 +55,7 @@ import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlinx.cinterop.MemScope
+import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
 
@@ -211,7 +213,7 @@ private class ModelBuilder(private val memScope: MemScope) {
             // produce nothing — exactly libclang's skipped LinkageSpec->child edge.
             val typedef = decl.asTypedefDeclOrNull()
             if (typedef != null) {
-                if (attach) buildTypedef(typedef)?.let { parent.addChild(it) }
+                if (attach) buildTypedef(typedef)?.let { parent.addChild(it.locatedAt(decl)) }
                 continue
             }
             val function = decl.asFunctionDecl()
@@ -223,7 +225,7 @@ private class ModelBuilder(private val memScope: MemScope) {
                 if (function.asNamedDecl().getNameAsString() in NEW_DELETE_OPERATORS) continue
                 // A free function is a STATIC WrappedMethod (ModelFactories.WrappedMethod:
                 // STATIC when the semantic parent is not a class).
-                parent.addChild(buildFunction(function))
+                parent.addChild(buildFunction(function).locatedAt(decl))
             }
             // An EnumDecl deliberately produces NO element: ModelFactories.map has no
             // CXCursor_EnumDecl branch (`else -> return null`); the enum's payload —
@@ -264,6 +266,7 @@ private class ModelBuilder(private val memScope: MemScope) {
             ?.let { CXXRecordDecl(it.ptr) } ?: return
         val name = record.asNamedDecl().getNameAsString() ?: return
         val template = templates.getOrPut(decl.cppUsr()) { WrappedTemplate(name) }
+            .locatedAt(decl)
         attachIfNew(template, parent, attach)
         template.templateArgCounter = 0
         // getTemplateParameters() lives on TemplateDecl — ClassTemplateDecl's
@@ -318,6 +321,7 @@ private class ModelBuilder(private val memScope: MemScope) {
         // (ModelFactories.map's CXCursor_Namespace branch).
         if (name.isEmpty()) return
         val namespace = namespaces.getOrPut(decl.asDecl().cppUsr()) { WrappedNamespace(name) }
+            .locatedAt(decl.asDecl())
         // Attach at the first sighting outside a linkage spec — including an element
         // created DETACHED inside one earlier (libclang's lazy `parent.addChild` on the
         // first edge whose parent cursor maps).
@@ -329,6 +333,16 @@ private class ModelBuilder(private val memScope: MemScope) {
 
     private fun attachIfNew(element: WrappedElement, parent: WrappedElement, attach: Boolean) {
         if (attach && element.parent == null) parent.addChild(element)
+    }
+
+    // #185: stamp the element with the C++ position of the decl it was built from, so a
+    // later drop can be reported at `file:line:col` instead of by bare symbol name. Only
+    // provenance — no codegen path reads it. First stamp wins (a redeclaration-collapsed
+    // element keeps the position it was first seen at, matching how the memo works).
+    private fun <T : WrappedElement> T.locatedAt(decl: Decl): T = also {
+        if (it.sourceLocation == null) {
+            it.sourceLocation = declLocation(decl)?.let(SourceLocation::parse)
+        }
     }
 
     private fun addClass(
@@ -354,7 +368,7 @@ private class ModelBuilder(private val memScope: MemScope) {
         // to one element via the memo; members attach from the defining redecl only.
         val cls = classes.getOrPut(decl.cppUsr()) {
             WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
-        }
+        }.locatedAt(decl)
         attachIfNew(cls, parent, attach)
         if (record.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, cls, cls.metadata)
@@ -563,23 +577,23 @@ private class ModelBuilder(private val memScope: MemScope) {
         }
         val constructor = decl.asCXXConstructorDecl()
         if (constructor != null) {
-            parent.addChild(buildConstructor(constructor))
+            parent.addChild(buildConstructor(constructor).locatedAt(decl))
             return
         }
         val destructor = decl.asCXXDestructorDecl()
         if (destructor != null) {
-            parent.addChild(buildDestructor(destructor))
+            parent.addChild(buildDestructor(destructor).locatedAt(decl))
             return
         }
         val method = decl.asCXXMethodDecl()
         if (method != null) {
             if (method.asNamedDecl().getNameAsString() in NEW_DELETE_OPERATORS) return
-            parent.addChild(buildMethod(method))
+            parent.addChild(buildMethod(method).locatedAt(decl))
             return
         }
         val field = decl.asFieldDecl()
         if (field != null) {
-            addField(field, parent, metadata)
+            addField(field, parent, metadata, decl)
             return
         }
         // Brick 5: a member `typedef` (incl. an in-template `typedef T value_type`) is a
@@ -587,7 +601,7 @@ private class ModelBuilder(private val memScope: MemScope) {
         // member EnumDecls produce no element (see addContextDecls).
         val typedef = decl.asTypedefDeclOrNull()
         if (typedef != null) {
-            buildTypedef(typedef)?.let { parent.addChild(it) }
+            buildTypedef(typedef)?.let { parent.addChild(it.locatedAt(decl)) }
             return
         }
         // NESTED record (#46 Phase D): a class nested in a PLAIN class binds as a
@@ -649,7 +663,12 @@ private class ModelBuilder(private val memScope: MemScope) {
         }
     }
 
-    private fun addField(field: FieldDecl, parent: WrappedElement, metadata: ClassMetadata) {
+    private fun addField(
+        field: FieldDecl,
+        parent: WrappedElement,
+        metadata: ClassMetadata,
+        decl: Decl
+    ) {
         // Anonymous data members (bitfield padding `int :3;`, anon union/struct members)
         // have a blank spelling and are dropped (ModelFactories' FieldDecl branch).
         val name = field.asNamedDecl().getNameAsString()?.takeIf { it.isNotBlank() } ?: return
@@ -664,7 +683,7 @@ private class ModelBuilder(private val memScope: MemScope) {
         if (type.isReference) {
             metadata.hasDeletedDefaultConstructor = true
         }
-        parent.addChild(WrappedField(name, type))
+        parent.addChild(WrappedField(name, type).locatedAt(decl))
     }
 
     // ModelFactories.map's CXCursor_Constructor branch: name from the spelling (the class

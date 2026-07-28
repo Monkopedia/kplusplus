@@ -15,12 +15,24 @@
  */
 package com.monkopedia.krapper.generator.model
 
+import com.monkopedia.krapper.SourceLocation
+
 abstract class WrappedElement(
     private val mutableChildren: MutableList<WrappedElement> = mutableListOf()
 ) {
     val children: List<WrappedElement>
         get() = mutableChildren
     var parent: WrappedElement? = null
+
+    /**
+     * Where the declaration this element was built from lives in C++ (#185).
+     *
+     * Set by the parse front-end from `kppbridge::declLocation`; null for anything the
+     * generator SYNTHESIZED (a forcing struct, a materialized template specialization) and
+     * for elements built by tests. Carried purely so a drop/failure can be reported against
+     * a real `file:line:col` instead of a bare symbol spelling — nothing in codegen reads it.
+     */
+    var sourceLocation: SourceLocation? = null
 
     fun clearChildren() {
         mutableChildren.clear()
@@ -79,6 +91,9 @@ fun WrappedElement.filterRecursive(
 }
 
 fun <T : WrappedElement> T.cloneRecursive(): T = clone().also {
+    // Each subclass's clone() rebuilds its own declared state; sourceLocation is base-class
+    // provenance, so carry it here rather than editing every clone() override.
+    it.sourceLocation = sourceLocation
     val newChildren = it.children.map { it.cloneRecursive() }
     it.clearChildren()
     it.addAllChildren(newChildren)

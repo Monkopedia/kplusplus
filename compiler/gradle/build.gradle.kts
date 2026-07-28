@@ -9,6 +9,11 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("java-gradle-plugin")
     kotlin("jvm")
+    // #185: the plugin speaks ksrpc to the krapper tool, so it compiles the SAME @KsService
+    // interfaces krapper does (see the shared source sets below) and needs both the
+    // serialization and the ksrpc compiler plugins to generate their stubs on this side.
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksrpc)
     // Publish the Gradle plugin. Two cooperating plugins (the de-facto standard combo):
     //   * com.vanniktech.maven.publish — POM metadata, sources+javadoc jars, GPG signing,
     //     and the Central Portal upload for BOTH the plugin jar AND its marker publication,
@@ -30,6 +35,27 @@ dependencies {
     // For KotlinNativeCompilation (MPP-specific). compileOnly because the consumer's
     // build always has kotlin-gradle-plugin on the classpath.
     compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    // #185: the typed channel to krapper. ksrpc-sockets supplies the JVM
+    // `ProcessBuilder.asConnection` that speaks the protocol over the subprocess's stdio
+    // pipe; ksrpc-core + serialization + coroutines are what the generated stubs run on.
+    implementation(libs.ksrpc.core)
+    implementation(libs.ksrpc.sockets)
+    implementation(libs.serialization.json)
+    implementation(libs.coroutines.core)
+}
+
+// #185: ONE definition of the krapper service protocol, compiled for BOTH sides.
+//
+// The interfaces, the config/filter/fixup payloads and the resolved schema live in
+// :krapper / :krapper_model `commonMain` in the ROOT build; this is a separate included
+// build, so it cannot depend on those projects (and they are Kotlin/Native — there is no
+// JVM artifact to resolve). Compiling the same source here keeps client and server on one
+// definition instead of a hand-maintained mirror, which is what the old FixupDirective JSON
+// mirror was. Both directories are pure common Kotlin — kotlinx.serialization + ksrpc
+// annotations only, no cinterop, no codegen — so they compile unchanged on the JVM.
+kotlin.sourceSets.named("main") {
+    kotlin.srcDir("../../krapper/src/commonMain/kotlin")
+    kotlin.srcDir("../../krapper_model/src/commonMain/kotlin")
 }
 
 java {

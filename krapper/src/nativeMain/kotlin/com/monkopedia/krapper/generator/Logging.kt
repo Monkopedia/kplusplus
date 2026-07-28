@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.Diagnostic
 import com.monkopedia.krapper.RemoteLogger
 
 object StdOutLogger : RemoteLogger {
@@ -28,6 +29,12 @@ object StdOutLogger : RemoteLogger {
 
     override suspend fun w(message: String) {
         println(message)
+    }
+
+    // The CLI has no structured consumer, so render each diagnostic as the compiler-shaped
+    // one-liner. Over ksrpc the same batch arrives at the build as data instead.
+    override suspend fun diagnostics(batch: List<Diagnostic>) {
+        batch.forEach { println(it.render()) }
     }
 }
 
@@ -45,4 +52,11 @@ object Log {
     suspend fun i(str: String) {
         loggerImpl.i(str)
     }
+
+    /** Report a batch of structured diagnostics; a no-op when there is nothing to report. */
+    suspend fun diagnostics(batch: List<Diagnostic>) {
+        if (batch.isNotEmpty()) loggerImpl.diagnostics(batch)
+    }
+
+    suspend fun diagnostic(diagnostic: Diagnostic) = loggerImpl.diagnostics(listOf(diagnostic))
 }

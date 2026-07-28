@@ -100,7 +100,6 @@ kotlin {
         api(kotlin("reflect"))
         api(libs.ksrpc.core)
         implementation(libs.ksrpc.sockets)
-        api(libs.ksrpc.jni)
     }
 }
 
@@ -277,6 +276,9 @@ kplusplus {
         "kppbridge::defaultArgType",
         // Inline-namespace-preserving qualified names (std::__cxx11::basic_string).
         "kppbridge::qualifiedName",
+        // #185: a decl's presumed `file:line:col`, so a dropped binding can be reported
+        // against real C++ source (SourceManager/PresumedLoc are not a bindable surface).
+        "kppbridge::declLocation",
         // The forcing-parse entry point — buildASTFromCode with REAL driver args ('\n'-joined;
         // -resource-dir + -std), the smallest bridge until std::vector<std::string> params are
         // bindable (see clang_slice.h).

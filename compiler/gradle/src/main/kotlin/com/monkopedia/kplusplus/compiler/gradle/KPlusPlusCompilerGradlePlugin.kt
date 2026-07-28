@@ -1,5 +1,9 @@
 package com.monkopedia.kplusplus.compiler.gradle
 
+import com.monkopedia.krapper.ErrorPolicy
+import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.KrapperConfig
+import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -239,10 +243,15 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * GENERIC cpp-front-end binding generation (`-Pkpp.frontend.<module>=cpp`).
      *
      * Drives the consuming module's OWN `kplusplus { header(...) ; instantiate(...) }` config
-     * through ONE invocation of the krapper tool (#184): it parses the module's header with the
-     * Clang C++ AST, parses each requested instantiation's synthesized forcing header, resolves
-     * the lot and generates the Kotlin bindings + C++ wrapper. Parse and codegen used to be two
-     * binaries chained through ModelIo JSON files; the handoff is in-process now.
+     * through ONE krapper run (#184): it parses the module's header with the Clang C++ AST,
+     * parses each requested instantiation's synthesized forcing header, resolves the lot and
+     * generates the Kotlin bindings + C++ wrapper.
+     *
+     * Since #185 that run is a TYPED SESSION, not a subprocess with flags: krapper hosts its
+     * ksrpc service on its stdio pipe and this drives it call by call (see [KrapperSession]),
+     * so the config travels as data and krapper reports back structured [Diagnostic]s — each
+     * drop with its C++ `file:line:col` and the reason the drop ledger recorded — instead of
+     * an exit code plus interleaved stdout.
      *
      * Any module flipped to `-Pkpp.frontend.<module>=cpp` generates from its own config, no
      * per-module wiring.
@@ -294,87 +303,73 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
 
         krappedDir.mkdirs()
-        // The wrapper is compiled with clang++ (matching what the cpp front-end PARSED the
-        // header against — system libstdc++), NOT the konan-bundled gcc: a model parsed against
-        // system libstdc++ and a wrapper compiled against it agree. Override via
-        // kplusplus { compiler = "..." }.
-        val compilerPath = ext?.compiler ?: "clang++"
-        val args = mutableListOf(
-            kexe.absolutePath,
-            moduleName,
-            "-r", (ext?.referencePolicy ?: "INCLUDE_MISSING"),
-            "-p", "krapper.$moduleName",
-            "-c", compilerPath,
-            "-o", krappedDir.absolutePath,
-            "--std", std
+        val headerPaths = headers.map { target.file(it).absolutePath }
+        val request = IndexRequest(
+            headers = headerPaths,
+            libraries = ext?.libraries.orEmpty().map { target.file(it).absolutePath }
+        ).let {
+            it.copy(
+                headerDirectories = (it.headerDirectories + includeDirs).distinct(),
+                includeDirs = includeDirs,
+                // Debug aid (`-Pkpp.dumpModel`): keep the ModelIo JSON of every tree the run
+                // parsed. Off by default — the parse -> resolve handoff is in-process.
+                dumpModelDir = target.findProperty("kpp.dumpModel")
+                    ?.let { _ -> File(krappedDir, "cpp-models").apply { mkdirs() }.absolutePath }
+            )
+        }
+        val job = KrapperJob(
+            moduleName = moduleName,
+            config = KrapperConfig(
+                pkg = "krapper.$moduleName",
+                // The wrapper is compiled with clang++ (matching what the cpp front-end
+                // PARSED the header against — system libstdc++), NOT the konan-bundled gcc:
+                // a model parsed against system libstdc++ and a wrapper compiled against it
+                // agree. Override via kplusplus { compiler = "..." }.
+                compiler = ext?.compiler ?: "clang++",
+                moduleName = moduleName,
+                errorPolicy = ErrorPolicy.LOG,
+                referencePolicy = ReferencePolicy.valueOf(
+                    ext?.referencePolicy ?: ReferencePolicy.INCLUDE_MISSING.name
+                ),
+                debug = false,
+                cppStandard = std,
+                rootPackage = ext?.rootPackage,
+                noRtti = ext?.noRtti == true
+            ),
+            request = request,
+            allowList = resolveAllowList(target, ext),
+            instantiations = requested,
+            fixups = ext?.fixups.orEmpty(),
+            outputDir = krappedDir
         )
-        ext?.rootPackage?.let {
-            args += "--root-package"
-            args += it
-        }
-        if (ext?.noRtti == true) {
-            args += "--no-rtti"
-        }
-        for (spec in requested) {
-            args += "--instantiate"
-            args += spec
-        }
-        if (ext != null) {
-            for (entry in ext.only) {
-                args += "--only"
-                args += entry
-            }
-            ext.onlyFile?.let {
-                args += "--only-file"
-                args += target.file(it).absolutePath
-            }
-            for (h in ext.headers) {
-                args += "--header"
-                args += target.file(h).absolutePath
-            }
-            // headerDirectory(...) roots -> the parse's AND the wrapper compile's -I set.
-            for (dir in includeDirs) {
-                args += "--include-dir"
-                args += dir
-            }
-            for (lib in ext.libraries) {
-                args += "-l"
-                args += target.file(lib).absolutePath
-            }
-            if (ext.fixups.isNotEmpty()) {
-                val fixupFile = File(krappedDir, "fixups.json")
-                fixupFile.writeText(ext.fixups.toJsonArray())
-                args += "--fixup-file"
-                args += fixupFile.absolutePath
-            }
-        }
-        // Debug aid (`-Pkpp.dumpModel`): keep the ModelIo JSON of every tree the run parsed.
-        // Off by default — the parse -> resolve handoff is in-process.
-        if (target.findProperty("kpp.dumpModel") != null) {
-            args += "--dump-model"
-            args += File(krappedDir, "cpp-models").apply { mkdirs() }.absolutePath
-        }
-        println(
+        target.logger.lifecycle(
             "kplusplusSync[$moduleName]: krapper over ${requested.size} instantiation(s) from " +
-                "${target.file(headers.first()).absolutePath} -> $krappedDir"
+                "${headerPaths.first()} -> $krappedDir"
         )
         // Experimental / diagnostic flag passthrough: `-Pkpp.x=diag.timing` (comma-separated
         // for several) is forwarded verbatim to the tool via its KRAPPER_X env var, so an
         // experiment can be driven through the build without touching source. Off by default.
-        val procBuilder = ProcessBuilder(args).inheritIO()
-        (target.findProperty("kpp.x") as? String)?.takeIf { it.isNotBlank() }?.let {
-            procBuilder.environment()["KRAPPER_X"] = it
-        }
-        val exit = procBuilder.start().waitFor()
-        if (exit != 0) {
-            throw GradleException("kplusplusSync[$moduleName]: krapper failed: exit $exit")
+        val toolEnv = (target.findProperty("kpp.x") as? String)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { mapOf("KRAPPER_X" to it) }
+            .orEmpty()
+        // krapper's own exception text is the headline; the diagnostics it streamed before
+        // dying (the wrapper compile's `file:line:col` errors, the drops that led there) are
+        // appended — the whole difference from the exit-code era.
+        val report = try {
+            KrapperSession.run(kexe, job, target.logger, toolEnv)
+        } catch (t: KrapperRunException) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: krapper failed: ${t.message}" + t.report.detail(),
+                t.cause
+            )
         }
 
         // Fail-fast: refuse to leave the module compiling against nothing.
         // A successful run ALWAYS emits the CppBinding.kt boilerplate + the .def, so "no kt
-        // files at all" never happens after a 0-exit run — the real empty-output mode is the
-        // header parsing into ZERO classes, leaving only that boilerplate. So require at least
-        // one ACTUAL binding source.
+        // files at all" never happens after a successful run — the real empty-output mode is
+        // the header parsing into ZERO classes, leaving only that boilerplate. So require at
+        // least one ACTUAL binding source.
         val srcDir = File(krappedDir, "src")
         val bindingKt = if (srcDir.isDirectory) {
             srcDir.walkTopDown()
@@ -389,16 +384,40 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 "kplusplusSync[$moduleName]: the cpp front-end produced an EMPTY binding set " +
                     "in $krappedDir (binding kotlin files=${bindingKt.size}, $moduleName.def " +
                     "present=${defFile.exists()}). krapper could not turn $moduleName's header " +
-                    "(${target.file(headers.first()).absolutePath}) into usable bindings — " +
-                    "refusing to compile $moduleName against nothing. Re-run with " +
-                    "-Pkpp.dumpModel to inspect the parsed model, and see the output above."
+                    "(${headerPaths.first()}) into usable bindings — refusing to compile " +
+                    "$moduleName against nothing. Re-run with -Pkpp.dumpModel to inspect the " +
+                    "parsed model." + report.detail()
             )
         }
         val ktCount = bindingKt.size + 1 // + the CppBinding.kt boilerplate
         // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
         File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
-        println("kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s).")
+        target.logger.lifecycle(
+            "kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s); " +
+                report.summary()
+        )
     }
+
+    /**
+     * The scoped-import allowlist: `only(...)` entries merged with `onlyFile`'s lines (one
+     * fully-qualified name per line; blank / `#` lines ignored). Read here rather than handed
+     * to krapper as a path, so the filter travels over the channel as the data it is.
+     */
+    private fun resolveAllowList(target: Project, ext: KPlusPlusExtension?): List<String> {
+        val fromFile = ext?.onlyFile?.let { path ->
+            val file = target.file(path)
+            if (!file.exists()) {
+                target.logger.warn("kplusplus: --only-file $file does not exist; ignoring.")
+                emptyList()
+            } else {
+                file.readLines()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+            }
+        }.orEmpty()
+        return (ext?.only.orEmpty() + fromFile).distinct()
+    }
+
 
     /**
      * Resolve the consumer's LLVM/Clang include dir(s) to thread into the cpp-parse as `-I`
@@ -718,17 +737,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         kotlinCompilation: KotlinCompilation<*>
     ): Provider<List<SubpluginOption>> {
         val project = kotlinCompilation.target.project
-        // Auto-add ksrpc-jni to this compilation's compiler-plugin classpath with
-        // isTransitive=true so the in-compiler JNI bridge resolves at runtime.
-        val configName = "kotlinCompilerPluginClasspath" +
-            kotlinCompilation.target.targetName.replaceFirstChar { it.uppercase() } +
-            kotlinCompilation.name.replaceFirstChar { it.uppercase() }
-        project.afterEvaluate {
-            project.configurations.findByName(configName)?.let { cfg ->
-                cfg.isTransitive = true
-                project.dependencies.add(configName, "com.monkopedia.ksrpc:ksrpc-jni:1.1.0")
-            }
-        }
         // Auto-wire the generated cinterop .def + Kotlin source dir for native
         // main compilations, conditional on existence at configure time. After a
         // kplusplusSync run, the next Gradle invocation re-evaluates configuration

@@ -38,8 +38,14 @@ class KrapperServiceImpl : KrapperService {
     override suspend fun getConfig(u: Unit): KrapperConfig =
         config ?: error("Config has not been set")
 
-    override suspend fun index(request: IndexRequest): IndexedService =
-        IndexedServiceImpl(getConfig(Unit), request)
+    override suspend fun index(request: IndexRequest): IndexedService {
+        // Arm the in-process cpp front-end from the REQUEST (#185): the parse's extra -I
+        // roots and the optional ModelIo dump used to be CLI-scoped globals set before the
+        // run, which a caller on the service channel had no way to reach.
+        cppParseIncludeDirs = request.includeDirs
+        cppModelDumpDir = request.dumpModelDir
+        return IndexedServiceImpl(getConfig(Unit), request)
+    }
 
     override suspend fun quit(u: Unit) {
         exit(0)

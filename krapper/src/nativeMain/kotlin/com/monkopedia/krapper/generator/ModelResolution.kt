@@ -249,7 +249,8 @@ private fun WrappedClass.dropConstOverloadDuplicates() {
         DropLedger.record(
             "$name::${nonConst.name}",
             "Non-const overload duplicates a const overload (kept the const half)",
-            DropPhase.DEDUP
+            DropPhase.DEDUP,
+            nonConst.sourceLocation
         )
         removeChild(nonConst)
     }

@@ -15,6 +15,11 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.Diagnostic
+import com.monkopedia.krapper.DiagnosticPhase
+import com.monkopedia.krapper.Severity
+import com.monkopedia.krapper.SourceLocation
+import com.monkopedia.krapper.generator.Log
 import platform.posix.remove
 import platform.posix.system
 
@@ -24,7 +29,7 @@ class CppCompiler(
     private val cppStandard: String = "c++14"
 ) {
 
-    fun compile(
+    suspend fun compile(
         cppFile: File,
         header: List<String>,
         library: List<String>,
@@ -50,8 +55,41 @@ class CppCompiler(
             ""
         }
         remove(logFile)
-        require(result == 0) {
-            "Compilation failed (exit $result):\n$command\n\n$output"
-        }
+        if (result == 0) return
+        // #185: the wrapper compile is where a binding gap actually BITES, and the compiler
+        // already told us exactly where — hand the build the parsed positions instead of one
+        // exit code plus a wall of text. The text is still in the exception for the CLI.
+        Log.diagnostics(parseCompilerOutput(output))
+        error("Compilation failed (exit $result):\n$command\n\n$output")
+    }
+
+    private companion object {
+        // `<file>:<line>:<col>: <severity>: <message>` — the shape clang/gcc use for every
+        // positioned diagnostic. Anything else in the log (the caret art, "N errors
+        // generated") is not a diagnostic and is left to the exception text.
+        val SEVERITIES = mapOf(
+            "error" to Severity.ERROR,
+            "fatal error" to Severity.ERROR,
+            "warning" to Severity.WARNING,
+            "note" to Severity.INFO
+        )
+
+        fun parseCompilerOutput(output: String): List<Diagnostic> = output.lineSequence()
+            .mapNotNull { line ->
+                val severity = SEVERITIES.entries.firstOrNull { (name, _) ->
+                    ": $name: " in line
+                } ?: return@mapNotNull null
+                val marker = ": ${severity.key}: "
+                val location = SourceLocation.parse(line.substringBefore(marker))
+                    ?: return@mapNotNull null
+                Diagnostic(
+                    severity = severity.value,
+                    message = line.substringAfter(marker),
+                    location = location,
+                    phase = DiagnosticPhase.COMPILE,
+                    hint = "the generated C++ wrapper does not compile; the binding it " +
+                        "belongs to cannot be produced"
+                )
+            }.toList()
     }
 }

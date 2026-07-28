@@ -159,6 +159,23 @@ inline std::string defaultArgText(clang::ParmVarDecl *parm) {
                ctx.getSourceManager(), ctx.getLangOpts())
         .str();
 }
+
+// #185 BRIDGE: the presumed `file:line:col` of a declaration, as one string.
+//
+// SourceLocation / PresumedLoc are value types with no bindable surface here (and binding
+// SourceManager wholesale would drag in most of Basic/), so the whole lookup is done C++-side
+// and the position comes back already spelled. An empty string means "no usable location"
+// (an invalid loc, or a decl synthesized by the compiler) and the caller leaves the element
+// unlocated. This is what lets a dropped binding be reported against real C++ source instead
+// of a bare symbol name.
+inline std::string declLocation(const clang::Decl *decl) {
+    if (!decl) return std::string();
+    const clang::SourceManager &sm = decl->getASTContext().getSourceManager();
+    clang::PresumedLoc loc = sm.getPresumedLoc(decl->getLocation());
+    if (loc.isInvalid() || !loc.getFilename()) return std::string();
+    return std::string(loc.getFilename()) + ":" + std::to_string(loc.getLine()) + ":" +
+           std::to_string(loc.getColumn());
+}
 } // namespace kppbridge
 
 #endif // KPLUSPLUS_KRAPPER_PARSE_CLANG_SLICE_H_
