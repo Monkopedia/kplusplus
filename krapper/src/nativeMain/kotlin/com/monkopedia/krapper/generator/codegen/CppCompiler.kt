@@ -57,10 +57,17 @@ class CppCompiler(
         remove(logFile)
         if (result == 0) return
         // #185: the wrapper compile is where a binding gap actually BITES, and the compiler
-        // already told us exactly where — hand the build the parsed positions instead of one
-        // exit code plus a wall of text. The text is still in the exception for the CLI.
-        Log.diagnostics(parseCompilerOutput(output))
-        error("Compilation failed (exit $result):\n$command\n\n$output")
+        // already told us exactly where. Report the parsed positions as diagnostics and keep
+        // the failure ITSELF short — the raw log drops to info, where it is still one `--info`
+        // away (and still printed outright on the CLI, whose logger is stdout).
+        val diagnostics = parseCompilerOutput(output)
+        Log.i("Wrapper compile failed. Command:\n$command\n\nOutput:\n$output")
+        Log.diagnostics(diagnostics)
+        val errors = diagnostics.count { it.severity == Severity.ERROR }
+        error(
+            "the generated C++ wrapper failed to compile (exit $result, $errors error(s)); " +
+                "the full compiler output is logged at info level"
+        )
     }
 
     internal companion object {
