@@ -418,7 +418,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         return (ext?.only.orEmpty() + fromFile).distinct()
     }
 
-
     /**
      * Resolve the consumer's LLVM/Clang include dir(s) to thread into the cpp-parse as `-I`
      * (#124, #128 R4). The cpp front-end's bundled Clang finds Clang's OWN builtin headers via

@@ -63,34 +63,31 @@ class CppCompiler(
         error("Compilation failed (exit $result):\n$command\n\n$output")
     }
 
-    private companion object {
-        // `<file>:<line>:<col>: <severity>: <message>` — the shape clang/gcc use for every
-        // positioned diagnostic. Anything else in the log (the caret art, "N errors
-        // generated") is not a diagnostic and is left to the exception text.
-        val SEVERITIES = mapOf(
-            "error" to Severity.ERROR,
-            "fatal error" to Severity.ERROR,
-            "warning" to Severity.WARNING,
-            "note" to Severity.INFO
-        )
+    internal companion object {
+        // The `<file>:<line>:<col>: <severity>: <message>` line every C++ compiler emits for a
+        // positioned diagnostic. Everything else in the log (caret art, "N errors generated")
+        // is not a diagnostic and stays in the exception text.
+        val DIAGNOSTIC_LINE =
+            Regex("""^(.+?):(\d+):(\d+): (fatal error|error|warning|note): (.*)$""")
 
         fun parseCompilerOutput(output: String): List<Diagnostic> = output.lineSequence()
-            .mapNotNull { line ->
-                val severity = SEVERITIES.entries.firstOrNull { (name, _) ->
-                    ": $name: " in line
-                } ?: return@mapNotNull null
-                val marker = ": ${severity.key}: "
-                val location = SourceLocation.parse(line.substringBefore(marker))
-                    ?: return@mapNotNull null
+            .mapNotNull { DIAGNOSTIC_LINE.matchEntire(it) }
+            .map { match ->
+                val (file, line, column, severity, message) = match.destructured
+                val isError = severity.endsWith("error")
                 Diagnostic(
-                    severity = severity.value,
-                    message = line.substringAfter(marker),
-                    location = location,
+                    severity = when {
+                        isError -> Severity.ERROR
+                        severity == "warning" -> Severity.WARNING
+                        else -> Severity.INFO
+                    },
+                    message = message,
+                    location = SourceLocation(file, line.toInt(), column.toInt()),
                     phase = DiagnosticPhase.COMPILE,
-                    // Only the errors carry the "so what" — a warning or a `note:` here is
+                    // Only an error carries the "so what" — a warning or a `note:` here is
                     // context for one of them, not an independent problem.
                     hint = "the generated wrapper for this declaration cannot be compiled"
-                        .takeIf { severity.value == Severity.ERROR }
+                        .takeIf { isError }
                 )
             }.toList()
     }
