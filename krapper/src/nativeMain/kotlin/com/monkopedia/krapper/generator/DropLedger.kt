@@ -15,6 +15,11 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.Diagnostic
+import com.monkopedia.krapper.DiagnosticPhase
+import com.monkopedia.krapper.Severity
+import com.monkopedia.krapper.SourceLocation
+
 /**
  * The phase of the generation pipeline a drop happened in. PARSE drops are the
  * cursor-level skip-not-crash decisions made while building the [WrappedElement]
@@ -25,7 +30,15 @@ package com.monkopedia.krapper.generator
 enum class DropPhase {
     PARSE,
     RESOLVE,
-    DEDUP
+    DEDUP;
+
+    /** The protocol-level phase this drop is reported as over the service channel. */
+    val diagnosticPhase: DiagnosticPhase
+        get() = when (this) {
+            PARSE -> DiagnosticPhase.PARSE
+            RESOLVE -> DiagnosticPhase.RESOLVE
+            DEDUP -> DiagnosticPhase.DEDUP
+        }
 }
 
 /**
@@ -34,7 +47,13 @@ enum class DropPhase {
  * (an element's `toString()`, a type spelling, a cursor name); [reason] is the
  * human-readable cause; [phase] is which pass dropped it.
  */
-data class DropRecord(val symbol: String, val reason: String, val phase: DropPhase)
+data class DropRecord(
+    val symbol: String,
+    val reason: String,
+    val phase: DropPhase,
+    /** Where the dropped declaration lives in C++, when the model carried a location. */
+    val location: SourceLocation? = null
+)
 
 /**
  * Process-scoped collector for skip-not-crash binding drops.
@@ -58,8 +77,26 @@ object DropLedger {
         get() = records
 
     /** Record a skip-not-crash drop of [symbol] for [reason] in [phase]. */
-    fun record(symbol: String, reason: String, phase: DropPhase) {
-        records.add(DropRecord(symbol, reason, phase))
+    fun record(symbol: String, reason: String, phase: DropPhase, location: SourceLocation? = null) {
+        records.add(DropRecord(symbol, reason, phase, location))
+    }
+
+    /**
+     * The ledger as structured [Diagnostic]s for the service channel (#185).
+     *
+     * Every drop is a WARNING: generation completed, but a binding the consumer might have
+     * expected is not there. The reason is the ledger's verbatim text; the hint translates it
+     * into what the CONSUMER sees in Kotlin.
+     */
+    fun diagnostics(): List<Diagnostic> = records.map { record ->
+        Diagnostic(
+            severity = Severity.WARNING,
+            message = record.reason,
+            symbol = record.symbol,
+            location = record.location,
+            phase = record.phase.diagnosticPhase,
+            hint = "no Kotlin binding is generated for this symbol"
+        )
     }
 
     /** Clear all recorded drops. Call before each fresh generation run. */
@@ -84,7 +121,8 @@ object DropLedger {
         if (records.isNotEmpty()) {
             appendLine("  Dropped (${records.size}):")
             for (record in records) {
-                appendLine("    [${record.phase}] ${record.symbol} — ${record.reason}")
+                val at = record.location?.let { " ($it)" } ?: ""
+                appendLine("    [${record.phase}] ${record.symbol}$at — ${record.reason}")
             }
         }
         if (requested.isNotEmpty()) {

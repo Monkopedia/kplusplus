@@ -33,6 +33,17 @@ apiValidation {
             "kplusplus-compiler-plugin-native"
         )
     )
+    // #185: the Gradle plugin compiles krapper's service protocol from shared source (see
+    // compiler/gradle/build.gradle.kts) so both ends of the ksrpc channel come from one
+    // definition. Those classes are an INTERNAL wire contract between the plugin and the
+    // tool it bundles — never a consumer-facing surface — and their shape is owned by
+    // :krapper, so gating them here would just duplicate the churn.
+    ignoredPackages.addAll(
+        listOf(
+            "com.monkopedia.krapper",
+            "com.monkopedia.krapper.generator.resolvedmodel"
+        )
+    )
 }
 
 // Aggregate publish for the two consumer-facing JVM artifacts that live in this

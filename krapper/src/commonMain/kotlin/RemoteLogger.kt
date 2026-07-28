@@ -29,4 +29,15 @@ interface RemoteLogger : RpcService {
 
     @KsMethod("/w")
     suspend fun w(message: String)
+
+    /**
+     * Report structured [Diagnostic]s back to whoever drove this run (#185).
+     *
+     * Batched rather than one call per diagnostic: a broad import drops symbols in the
+     * hundreds, and each ksrpc call over the stdio pipe is a round trip. Krapper flushes a
+     * batch at each point it has a coherent set to report (the end-of-run drop ledger, a
+     * failing wrapper compile), so the consumer still sees them as the run progresses.
+     */
+    @KsMethod("/diagnostics")
+    suspend fun diagnostics(batch: List<Diagnostic>)
 }

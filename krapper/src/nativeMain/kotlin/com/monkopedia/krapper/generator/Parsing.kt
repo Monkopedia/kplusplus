@@ -870,7 +870,8 @@ private fun dropValueEqualityIfElementLacksEquals(
             "$fullyQualified::${method.name}",
             "Element type $element has no operator== (container value-equality would " +
                 "fail to instantiate) [#10 gate 1]",
-            DropPhase.RESOLVE
+            DropPhase.RESOLVE,
+            elementClass.sourceLocation
         )
         outputClass.removeChild(method)
     }

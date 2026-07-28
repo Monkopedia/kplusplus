@@ -16,10 +16,6 @@ java {
 dependencies {
     // Kotlin/Native loads a plugin compiled against the non-shaded compiler.
     compileOnly("org.jetbrains.kotlin:kotlin-compiler:2.4.0")
-    // Spike #2: in-compiler JNI bridge to libkrapper.so for live libclang access.
-    // `api` (not `implementation`) so the dep surfaces to the K/N compiler's
-    // plugin-classpath resolution — `implementation` is hidden from consumers.
-    api(libs.ksrpc.jni)
 }
 
 // The native plugin shares its sources with the JVM plugin module; sync them in

@@ -138,7 +138,8 @@ suspend fun List<WrappedElement>.resolveAll(
             DropLedger.record(
                 it.type.toString(),
                 "Filtered class did not resolve",
-                DropPhase.RESOLVE
+                DropPhase.RESOLVE,
+                it.sourceLocation
             )
             Log.w("Warning: can't resolve filtered class ${it.type}")
         }
@@ -278,7 +279,8 @@ suspend fun List<WrappedElement>.resolveForcing(
                 DropLedger.record(
                     it.type.toString(),
                     "Filtered class did not resolve",
-                    DropPhase.RESOLVE
+                    DropPhase.RESOLVE,
+                    it.sourceLocation
                 )
                 Log.w("Warning: can't resolve filtered class ${it.type}")
             }
@@ -300,7 +302,8 @@ suspend fun List<WrappedElement>.resolveForcing(
                 DropLedger.record(
                     it.type.toString(),
                     "Forcing struct did not resolve",
-                    DropPhase.RESOLVE
+                    DropPhase.RESOLVE,
+                    it.sourceLocation
                 )
                 Log.w("Warning: can't resolve forcing struct ${it.type}")
             }
@@ -661,7 +664,8 @@ data class ResolveContext(
         DropLedger.record(
             symbol = element?.toString() ?: type?.toString() ?: "<unknown>",
             reason = message,
-            phase = DropPhase.RESOLVE
+            phase = DropPhase.RESOLVE,
+            location = element?.sourceLocation
         )
         if (debugFilter?.invoke(element, type, message) == true) {
             Log.w("$element failed resolving $type: $message")

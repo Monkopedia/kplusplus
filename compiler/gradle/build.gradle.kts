@@ -9,6 +9,11 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("java-gradle-plugin")
     kotlin("jvm")
+    // #185: the plugin speaks ksrpc to the krapper tool, so it compiles the SAME @KsService
+    // interfaces krapper does (see the shared source sets below) and needs both the
+    // serialization and the ksrpc compiler plugins to generate their stubs on this side.
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksrpc)
     // Publish the Gradle plugin. Two cooperating plugins (the de-facto standard combo):
     //   * com.vanniktech.maven.publish — POM metadata, sources+javadoc jars, GPG signing,
     //     and the Central Portal upload for BOTH the plugin jar AND its marker publication,
@@ -30,6 +35,43 @@ dependencies {
     // For KotlinNativeCompilation (MPP-specific). compileOnly because the consumer's
     // build always has kotlin-gradle-plugin on the classpath.
     compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    // #185: the typed channel to krapper. ksrpc-sockets supplies the JVM
+    // `ProcessBuilder.asConnection` that speaks the protocol over the subprocess's stdio
+    // pipe; ksrpc-core + serialization + coroutines are what the generated stubs run on.
+    //
+    // Each one EXCLUDES org.jetbrains:annotations: a Gradle buildscript classpath pins that
+    // module to `strictly 13.0` (Gradle's embedded Kotlin), while coroutines asks for 23.0.0
+    // — an unsatisfiable constraint that fails the consumer's build at configuration time.
+    // The excludes are declared per-dependency (not on the configuration) so they are carried
+    // in the published POM and protect a from-published consumer too. Dropping the module is
+    // safe: its contents are CLASS-retention annotations, and Gradle's own kotlin-stdlib
+    // supplies the 13.0 set anyway.
+    implementation(libs.ksrpc.core) { excludeJetbrainsAnnotations() }
+    implementation(libs.ksrpc.sockets) { excludeJetbrainsAnnotations() }
+    implementation(libs.serialization.json) { excludeJetbrainsAnnotations() }
+    implementation(libs.coroutines.core) { excludeJetbrainsAnnotations() }
+
+    // The subprocess-lifecycle tests fault-inject a stand-in `krapper` (see
+    // KrapperSessionFailureTest); `java-gradle-plugin` already puts gradleApi() on the
+    // classpath, which is where the Logger they need comes from.
+    testImplementation(kotlin("test-junit"))
+}
+
+fun ExternalModuleDependency.excludeJetbrainsAnnotations() =
+    exclude(group = "org.jetbrains", module = "annotations")
+
+// #185: ONE definition of the krapper service protocol, compiled for BOTH sides.
+//
+// The interfaces, the config/filter/fixup payloads and the resolved schema live in
+// :krapper / :krapper_model `commonMain` in the ROOT build; this is a separate included
+// build, so it cannot depend on those projects (and they are Kotlin/Native — there is no
+// JVM artifact to resolve). Compiling the same source here keeps client and server on one
+// definition instead of a hand-maintained mirror, which is what the old FixupDirective JSON
+// mirror was. Both directories are pure common Kotlin — kotlinx.serialization + ksrpc
+// annotations only, no cinterop, no codegen — so they compile unchanged on the JVM.
+kotlin.sourceSets.named("main") {
+    kotlin.srcDir("../../krapper/src/commonMain/kotlin")
+    kotlin.srcDir("../../krapper_model/src/commonMain/kotlin")
 }
 
 java {

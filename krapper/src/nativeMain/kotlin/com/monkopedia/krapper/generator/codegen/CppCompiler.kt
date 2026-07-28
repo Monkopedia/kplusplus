@@ -15,6 +15,11 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.Diagnostic
+import com.monkopedia.krapper.DiagnosticPhase
+import com.monkopedia.krapper.Severity
+import com.monkopedia.krapper.SourceLocation
+import com.monkopedia.krapper.generator.Log
 import platform.posix.remove
 import platform.posix.system
 
@@ -24,7 +29,7 @@ class CppCompiler(
     private val cppStandard: String = "c++14"
 ) {
 
-    fun compile(
+    suspend fun compile(
         cppFile: File,
         header: List<String>,
         library: List<String>,
@@ -50,8 +55,47 @@ class CppCompiler(
             ""
         }
         remove(logFile)
-        require(result == 0) {
-            "Compilation failed (exit $result):\n$command\n\n$output"
-        }
+        if (result == 0) return
+        // #185: the wrapper compile is where a binding gap actually BITES, and the compiler
+        // already told us exactly where. Report the parsed positions as diagnostics and keep
+        // the failure ITSELF short — the raw log drops to info, where it is still one `--info`
+        // away (and still printed outright on the CLI, whose logger is stdout).
+        val diagnostics = parseCompilerOutput(output)
+        Log.i("Wrapper compile failed. Command:\n$command\n\nOutput:\n$output")
+        Log.diagnostics(diagnostics)
+        val errors = diagnostics.count { it.severity == Severity.ERROR }
+        error(
+            "the generated C++ wrapper failed to compile (exit $result, $errors error(s)); " +
+                "the full compiler output is logged at info level"
+        )
+    }
+
+    internal companion object {
+        // The `<file>:<line>:<col>: <severity>: <message>` line every C++ compiler emits for a
+        // positioned diagnostic. Everything else in the log (caret art, "N errors generated")
+        // is not a diagnostic and stays in the exception text.
+        val DIAGNOSTIC_LINE =
+            Regex("""^(.+?):(\d+):(\d+): (fatal error|error|warning|note): (.*)$""")
+
+        fun parseCompilerOutput(output: String): List<Diagnostic> = output.lineSequence()
+            .mapNotNull { DIAGNOSTIC_LINE.matchEntire(it) }
+            .map { match ->
+                val (file, line, column, severity, message) = match.destructured
+                val isError = severity.endsWith("error")
+                Diagnostic(
+                    severity = when {
+                        isError -> Severity.ERROR
+                        severity == "warning" -> Severity.WARNING
+                        else -> Severity.INFO
+                    },
+                    message = message,
+                    location = SourceLocation(file, line.toInt(), column.toInt()),
+                    phase = DiagnosticPhase.COMPILE,
+                    // Only an error carries the "so what" — a warning or a `note:` here is
+                    // context for one of them, not an independent problem.
+                    hint = "the generated wrapper for this declaration cannot be compiled"
+                        .takeIf { isError }
+                )
+            }.toList()
     }
 }

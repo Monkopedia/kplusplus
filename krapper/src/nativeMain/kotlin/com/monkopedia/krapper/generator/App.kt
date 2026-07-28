@@ -212,10 +212,6 @@ class Krapper : CliktCommand() {
         if (serviceMode) {
             return runService()
         }
-        // Arm the in-process cpp front-end (#184): the `headerDirectory(...)` roots every parse
-        // gets as `-I`, and the optional ModelIo debug dump.
-        cppParseIncludeDirs = includeDir
-        cppModelDumpDir = dumpModel
         runBlocking {
             val service = KrapperServiceImpl()
             val resolvedModule = moduleName
@@ -242,7 +238,12 @@ class Krapper : CliktCommand() {
             val baseRequest = IndexRequest(header, library)
             val indexService = service.index(
                 baseRequest.copy(
-                    headerDirectories = (baseRequest.headerDirectories + includeDir).distinct()
+                    headerDirectories = (baseRequest.headerDirectories + includeDir).distinct(),
+                    // Arm the parse's own -I set + the optional ModelIo dump (#185): these
+                    // ride on the request now, so the CLI and the service channel configure
+                    // the front-end through one path.
+                    includeDirs = includeDir,
+                    dumpModelDir = dumpModel
                 )
             )
             try {
@@ -277,7 +278,7 @@ class Krapper : CliktCommand() {
                 val fixups = loadFixups(fixupFile)
                 if (fixups.isNotEmpty()) {
                     Log.i("Loaded ${fixups.size} fixup(s) from $fixupFile")
-                    FixupApplier.apply(indexService, fixups)
+                    indexService.applyFixups(fixups)
                 }
                 if (hasInstantiations && !hasHeaders) {
                     // Pure-instantiation path: matches the original M11 sync flow.
