@@ -96,6 +96,9 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
   -Pkpp.bundleTools.krapper="$PWD/krapper/build/bin/klinker/krapperRelease/krapper"
 # 2. Prove a from-published consumer resolves the bundled tool + runs from mavenLocal:
 (cd samples/minimal && ./gradlew runReleaseExecutableKlinker)
+# 3. ...and that the generated bindings still match what the sample expects (the
+#    `samples/minimal:nativeTest` guard for #195 — see samples/minimal/README.md):
+(cd samples/minimal && ./gradlew nativeTest)
 ```
 
 `publishToMavenLocal` does **not** sign (no key in the environment) — signing is exercised only
