@@ -37,6 +37,9 @@ on:
 jobs:
   native-test:
     runs-on: ubuntu-latest
+    # The job normally takes ~2 minutes; without this it inherits GitHub's 360-minute
+    # cap, so a wedged run could sit for six hours before anyone notices (#198).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -68,3 +71,52 @@ jobs:
       - name: samples/minimal :nativeTest
         working-directory: samples/minimal
         run: ./gradlew nativeTest --no-daemon
+
+      # #198: Gradle's Kotlin/Native test task prints no per-test lines by default (fixed
+      # above via testLogging in build.gradle.kts) and a Test task with no matching
+      # sources succeeds silently — so a green step above is NOT proof anything ran. Parse
+      # the JUnit XML this task itself produced and fail loudly if the count is zero (or if
+      # any failure/error slipped through despite Gradle already having failed the build on
+      # those). This is the actual guarantee; the artifact upload below is just evidence for
+      # a human who wants to double check.
+      - name: Assert nativeTest actually ran tests
+        if: always()
+        working-directory: samples/minimal
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          xml_files=(build/test-results/**/*.xml)
+          if [ ${#xml_files[@]} -eq 0 ]; then
+            echo "::error::No JUnit XML found under samples/minimal/build/test-results — nativeTest produced no report at all, so it cannot have run anything."
+            exit 1
+          fi
+          total_tests=0
+          total_failures=0
+          total_errors=0
+          for f in "${xml_files[@]}"; do
+            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || t=0
+            fa=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || fa=0
+            er=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || er=0
+            echo "$f: tests=$t failures=$fa errors=$er"
+            total_tests=$((total_tests + t))
+            total_failures=$((total_failures + fa))
+            total_errors=$((total_errors + er))
+          done
+          echo "TOTAL across ${#xml_files[@]} report(s): tests=$total_tests failures=$total_failures errors=$total_errors"
+          if [ "$total_tests" -eq 0 ]; then
+            echo "::error::nativeTest reported ZERO tests. This job would otherwise be green having run nothing — failing it explicitly."
+            exit 1
+          fi
+          if [ "$total_failures" -gt 0 ] || [ "$total_errors" -gt 0 ]; then
+            echo "::error::nativeTest reported failures/errors in the JUnit XML."
+            exit 1
+          fi
+
+      - name: Upload nativeTest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: samples-minimal-native-test-results
+          path: samples/minimal/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 14

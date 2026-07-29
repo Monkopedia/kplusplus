@@ -164,3 +164,14 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().all {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 }
+
+// #198: Kotlin/Native's test task (KotlinNativeTest, an AbstractTestTask) prints no
+// per-test lines by default, so a green `nativeTest` in CI looks identical whether it
+// ran 3 tests or zero. Make per-test outcomes show up in the log directly — the CI
+// workflow (.github/workflows/samples-minimal.yml) additionally parses the JUnit XML
+// under build/test-results/** and fails the job outright if the parsed count is 0.
+tasks.withType<org.gradle.api.tasks.testing.AbstractTestTask>().configureEach {
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}
