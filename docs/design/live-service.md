@@ -1,7 +1,8 @@
 # The live krapper service and the FIR client (#186, brick 3)
 
 **Status:** design (no production change). Written 2026-07-29 against `main` @ `34fb7a3`
-(v0.3.4 self-hosted). Bricks 1 (#184, `b787196`) and 2 (#185, `e75707b`) are done.
+(v0.3.4 self-hosted); §7 updated the same day against `3254efc` after #194 was fixed and v0.3.5
+was cut. Bricks 1 (#184, `b787196`) and 2 (#185, `e75707b`) are done.
 **Settled inputs (owner, 2026-07-28, not re-litigated here):** the FIR plugin becomes a live
 client; lifetime is Gradle-daemon-scoped with an idle timeout; featuregen SYNC byte-identity
 stays the hard gate; no session watchdog.
@@ -52,8 +53,11 @@ by a single equality test.
 ### 1.1 The service, as of #185
 
 `KrapperService` / `IndexedService` (`krapper/src/commonMain/kotlin/KrapperService.kt:54-100`)
-are compiled into *both* sides — the tool and the Gradle plugin compile the same source
-(`compiler/gradle/build.gradle.kts:76-84`). The plugin drives one process per sync over the
+are compiled into *both* sides — the tool and the Gradle plugin compile the same source. The
+mechanism is `compiler/gradle/build.gradle.kts:144-147`, which adds
+`../../krapper/src/commonMain/kotlin` and `../../krapper_model/src/commonMain/kotlin` as
+`srcDir`s of the plugin's `main` source set (rationale comment at `:104-107`; the compiler build
+is a separate included build, hence the relative paths). The plugin drives one process per sync over the
 subprocess stdio pipe (`KrapperSession.run`, `compiler/gradle/.../KrapperSession.kt:135-169`),
 in the fixed order `setLogger → setConfig → index → filterAndResolve / requestInstantiation →
 applyFixups → writeTo` (`:215-226`). The tool hosts the service in `-s` mode and exits when the
@@ -114,12 +118,12 @@ map*, *tell me why this spec has no binding*. All three are pure functions of th
 `DropLedger.reset()`, `GenerationContext.reset(config.rootPackage, config.noRtti)`,
 `BaseBindProfiler.reset()` (`IndexedServiceImpl.kt:106-110`). `KrapperServiceImpl.index` sets two
 more process-global vars, `cppParseIncludeDirs` and `cppModelDumpDir`
-(`KrapperServiceImpl.kt:45-46`, declared at `Parsing.kt:97,103`). A third,
-`cppBaseModelTu` (`Parsing.kt:134`), carries the base tree into every forcing parse.
+(`KrapperServiceImpl.kt:45-46`, declared at `Parsing.kt:98,104`). A third,
+`cppBaseModelTu` (`Parsing.kt:135`), carries the base tree into every forcing parse.
 
 `GenerationContext`'s KDoc states the assumption in so many words: *"the generator runs one
 request at a time under `runBlocking`"* (`krapper_model/.../GenerationContext.kt:32-34`);
-`DropLedger` repeats it (`DropLedger.kt:67`). A persistent process serving two modules — or one
+`DropLedger` repeats it (`DropLedger.kt:78`). A persistent process serving two modules — or one
 module under a parallel Gradle build — violates this **today**. De-globalizing (or explicitly
 serializing) is a prerequisite for persistence, not a nice-to-have.
 
@@ -174,7 +178,7 @@ today's behaviour when the layer above is absent.
 ```
   L4  ON_DEMAND binding policy            (opt-in; probe-gated; #10)
   L3  wellFormed() oracle                 (probe-gated; narrows #175 keep-on-doubt)
-  L2  persistent krapper + parse cache    (gated on #194; pure speed)
+  L2  persistent krapper + parse cache    (pure speed; #194 dependency DISCHARGED)
   L1  live query channel                  (optional; diagnostics only)
   L0  the BINDING INDEX                   (the artifact everything else serves)
 ```
@@ -557,30 +561,58 @@ merits, and it is a side-effect of L0.
 
 ---
 
-## 7. #194 interaction
+## 7. #194 interaction — RESOLVED, and not the way this section originally guessed
 
-#194 (0.3.4: multi-project consumers get the root classloader's coroutines 1.8.0 instead of the
-resolved 1.11.0, breaking ktor-io inside `KrapperSession.start`) is a hard dependency for **L2
-only**, and it has a design implication beyond "fix it first":
+> **Updated 2026-07-29.** This section was drafted while #194 was open. **#194 is now CLOSED**,
+> fixed by PR #200 (`0a5a705`) via **option 1, shade/relocate** — the opposite of what this
+> section originally recommended — and shipped in **v0.3.5**. The paragraph below records the
+> outcome; the superseded recommendation is preserved at the end for the record, because the
+> reasoning that turned out wrong is itself worth keeping.
 
-- The Gradle-plugin side already carries ksrpc/ktor/coroutines (`compiler/gradle/build.gradle.kts:49-52`).
-  A *persistent* connection holds that stack open across the whole build and across builds,
-  instead of for one task, so it is exercised far harder than #185's per-run session. **L2 must
-  not land before #194's fix.**
-- #194 offers two remedies: (1) shade/relocate, (2) an isolated-classloader Gradle worker. #194
-  rates (1) simpler. **For #186, (2) is the better fit**: a worker gives the daemon handle a
-  stable, non-buildscript classloader home, which is exactly what cross-build persistence needs
-  (§4.4 D1's orphan risk *is* the classloader-discard risk). Worth routing back to #194 as input;
-  if (1) ships, L2's holder needs an explicit orphan-reaper.
-- **The FIR-plugin side must stay dependency-free.** `compiler/plugin` today declares only
+#194 was: on 0.3.4, multi-project consumers got the root buildscript classloader's coroutines
+1.8.0 instead of the 1.11.0 the plugin resolves, breaking ktor-io inside `KrapperSession.start`
+with `NoSuchMethodError: Job.invokeOnCompletion$default`.
+
+**What actually shipped.** The plugin's ksrpc/ktor/coroutines/serialization runtime is shaded and
+relocated under `com.monkopedia.kplusplus.compiler.shaded`, and the published POM now declares
+only `kotlin-stdlib` / `kotlin-gradle-plugin-api` / `kotlin-reflect`. So the plugin no longer
+depends on what the buildscript classloader happens to own **at all**, for any consumer topology.
+
+**Consequences for this design — all favourable:**
+
+- **L2/B5 is no longer blocked on #194.** The dependency is discharged. Persistence still needs
+  B4 (de-globalizing, §1.4) and probe P3, but the classloader hazard is gone.
+- **The relocation is strictly better for persistence than the worker this section first
+  recommended.** Shading removes the conflict at the source rather than isolating the plugin from
+  it, so a *persistent* connection holding that stack open across builds is no more exposed than
+  a per-task one. The orphan-reaper caveat below still applies to §4.4 D1 (a discarded buildscript
+  classloader loses the daemon handle), but that is now a plain lifecycle concern, not a
+  version-conflict one.
+- **The FIR-plugin side must still stay dependency-free.** `compiler/plugin` declares only
   `compileOnly kotlin-compiler-embeddable` (`compiler/plugin/build.gradle.kts:62-64`). Putting
-  ksrpc/ktor/coroutines on the *kotlinc plugin* classpath would repeat #194's failure mode one
-  level deeper, inside the Kotlin/Native compiler's plugin classloader, next to kotlinc's own
-  bundled coroutines. If L1 ever ships, its client is a hand-written length-prefixed JSON-lines
-  reader over `java.net`, ~150 lines, no third-party classes. This is a hard constraint on L1's
-  design, not a preference.
-- #194 also notes there is **no multi-project consumer in the test matrix**. Adding one is a
-  prerequisite for trusting any of this.
+  ksrpc/ktor/coroutines on the *kotlinc plugin* classpath would reproduce #194's failure mode one
+  level deeper — inside the Kotlin/Native compiler's plugin classloader, beside kotlinc's own
+  bundled coroutines — where shading the *Gradle* plugin does not help. If L1 ever ships, its
+  client is a hand-written length-prefixed JSON-lines reader over `java.net`, ~150 lines, no
+  third-party classes. **This constraint is unchanged and is the one hard rule in this section.**
+- **The multi-project gap is closed.** #194 noted there was no multi-project consumer in the test
+  matrix — which is precisely why the bug shipped. `samples/multiproject` now exists and was
+  verified to fail against the real released 0.3.4, so probe **P7** is largely already done.
+
+<details>
+<summary>Superseded recommendation (kept for the record)</summary>
+
+The original text argued: *"#194 offers two remedies: (1) shade/relocate, (2) an
+isolated-classloader Gradle worker. #194 rates (1) simpler. For #186, (2) is the better fit: a
+worker gives the daemon handle a stable, non-buildscript classloader home, which is exactly what
+cross-build persistence needs."*
+
+Wrong on the substance, and worth understanding why: it optimised for giving the daemon handle a
+stable home, and treated the version conflict as a constraint to be worked around. Shading
+*eliminates* the conflict, which makes the handle's home a much smaller problem than it appeared.
+Removing a hazard beats isolating from it.
+
+</details>
 
 ---
 
@@ -596,11 +628,11 @@ commit. Nothing is deleted until its replacement has shipped for a release.
 | **B2** | **Consume the index.** `bindingIndexPath` SubpluginOption; `CppVectorMapping` prefers the index, keeps static derivation as fallback. Includes **G5** (the drift detector). | G5, full featuregen test run, `samples/minimal` | drop the option | B1, released tool |
 | **B3** | **Real diagnostics.** `SYNC_REQUIRED` carries the ledger reason + C++ `file:line:col`; `kotlinTypeMap` replaces the 4-entry table (`CppVectorMapping.kt:176-182`). | new FIR diagnostic tests; a `cppVector<Boolean>()` row in featuregen | revert the message change | B2 |
 | **B4** | **De-globalize.** `DropLedger` / `GenerationContext` / `cppParseIncludeDirs` / `cppModelDumpDir` / `cppBaseModelTu` become per-`IndexedService` state (or an explicit mutex + documented single-tenancy). | **G3(b)** — two configs in one process match two fresh processes | revert | — (independent, do early) |
-| **B5** | **Persistence (D1).** Parse cache keyed on `IndexKey`; process held across builds; idle timeout; `kplusplusDaemonStop/Status`; falls back to today's per-run session on any failure. | G1, G3, G4; **measured** second-sync wall time; `kill -9` mid-build degrades cleanly | `-Pkpp.daemon.idleTimeout=0` | B4, **#194**, P3 |
+| **B5** | **Persistence (D1).** Parse cache keyed on `IndexKey`; process held across builds; idle timeout; `kplusplusDaemonStop/Status`; falls back to today's per-run session on any failure. | G1, G3, G4; **measured** second-sync wall time; `kill -9` mid-build degrades cleanly | `-Pkpp.daemon.idleTimeout=0` | B4, P3 (#194 discharged — shaded in v0.3.5) |
 | **B6** | **`UnboundMemberChecker`** — unresolved member on a bound type gets the drop reason. | FIR diagnostic tests | remove the checker | B3, P5 |
 | **B7** | **`wellFormed()` oracle** wired as a narrowing of #175's keep-on-doubt. | **G6** + G1 + re-measured broad-force error count | config flag off | P1/P2, B5 |
 | **B8** | **`ON_DEMAND` policy** + re-measure #10's residual ~185 against a live-Sema binder. | G1 unchanged for the eager policies; a new broad-force measurement | policy not selected | B7 |
-| **B9** | **Live channel (L1)**, dependency-free client, diagnostics-only. **Only if** a query is demonstrated that B1–B3 cannot serve. | I1–I4 as tests; D4 by construction | endpoint not configured | B5, #194, and a *demonstrated need* |
+| **B9** | **Live channel (L1)**, dependency-free client, diagnostics-only. **Only if** a query is demonstrated that B1–B3 cannot serve. | I1–I4 as tests; D4 by construction | endpoint not configured | B5, and a *demonstrated need* |
 
 Note the shape: **B9 is last and conditional.** The ruling that the FIR plugin becomes a live
 client is satisfied by B2/B3/B6 — the plugin consumes krapper's own answers at compile time
@@ -637,8 +669,9 @@ Each is cheap, and each can kill a brick.
   **Decides B6.**
 - **P6 — RSS drift.** Peak and steady RSS after 5 sequential featuregen indexes in one process.
   **Decides B5's ceiling and eviction constants.**
-- **P7 (optional) — multi-project consumer.** Stand up the two-module sample #194 asks for and
-  confirm B5's daemon behaves. **Prerequisite for trusting any of this in the field.**
+- **P7 (mostly DONE) — multi-project consumer.** `samples/multiproject` landed with #194's fix
+  (PR #200) and was verified to fail against the real released 0.3.4, so the canary exists and is
+  known-effective. What remains is narrower: confirm **B5's daemon** behaves in that topology.
 
 ---
 
@@ -660,9 +693,10 @@ Each is cheap, and each can kill a brick.
   operational risk in the plan.
 - **R4 — single-tenancy (§1.4).** Shipping persistence before B4 risks silently-wrong output
   under parallel Gradle builds. Sequenced first for this reason.
-- **R5 — #194, one level deeper.** A persistent connection leans harder on ktor/coroutines
-  (§7), and an ksrpc dependency on the *kotlinc* plugin classpath would be strictly worse than
-  #194. Hard constraint, not a preference.
+- **R5 — #194's failure mode one level deeper.** #194 itself is fixed (shaded, v0.3.5 — §7), so
+  the Gradle-plugin side is safe. The residual risk is putting ksrpc on the *kotlinc* plugin
+  classpath, inside the Kotlin/Native compiler's own plugin classloader, where shading the Gradle
+  plugin does not help. Hard constraint, not a preference.
 - **R6 — cross-build cache invalidation.** The exact bug class featuregen SYNC exists to catch.
   D3 + G4 are the defence; if either is hard to hold, drop the parse cache and keep only process
   reuse.
@@ -698,7 +732,8 @@ exactly as that document argued.
 2. **Is `binding-index.json` a committed artifact for seed modules?** Committing it makes mangling
    drift a `git diff`, which is the cheapest possible regression gate — but it adds a file to
    every seed tree.
-3. **#194's remedy.** (2) isolated-classloader worker is the better substrate for #186 than (1)
-   shade/relocate (§7). Worth deciding there with #186 in view.
+3. ~~**#194's remedy.**~~ **RESOLVED, no longer a question** — #194 shipped option 1
+   (shade/relocate) in v0.3.5, and §7 explains why that is the better outcome for #186 than the
+   worker this document originally recommended. Nothing needed here.
 4. **Confirm the read of `broad-forcing-resolve.md:216`** — that bounded/lazy closure cannot be the
    default binding policy. The lazy-binding brick's whole shape depends on it.
