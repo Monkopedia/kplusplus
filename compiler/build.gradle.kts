@@ -15,9 +15,28 @@ plugins {
     alias(libs.plugins.binary.compatibility.validator)
 }
 
+// #192: the project version has exactly ONE declaration — `version` in the REPO ROOT's
+// gradle.properties — and everything else derives from it. It used to be copied into six
+// places (that file, the three module build scripts below, and a `PLUGIN_VERSION` literal in
+// plugin source); the 0.3.4 prep bumped five and missed the sixth, which a green build cannot
+// detect, and which would have made every upgrading consumer keep running the previous
+// release's cached tool binary out of ~/.gradle/kplusplus/tools/<version>/.
+//
+// `compiler` is a SEPARATE build (not an includeBuild of the root), so it cannot read the
+// root's project version — it reads the file. That cross-build reach by relative path is
+// already how this build shares the root's version catalog (see settings.gradle.kts).
+val kplusplusVersion =
+    providers
+        .fileContents(layout.projectDirectory.file("../gradle.properties"))
+        .asText
+        .map { text ->
+            java.util.Properties().apply { load(text.reader()) }.getProperty("version")
+                ?: error("No `version=` in the repo root gradle.properties")
+        }.get()
+
 allprojects {
     group = "com.monkopedia.kplusplus"
-    version = "0.3.4"
+    version = kplusplusVersion
 }
 
 // Scope the ABI gate to the PUBLISHED modules only. The compiler build's published set is the

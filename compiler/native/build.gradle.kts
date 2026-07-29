@@ -5,9 +5,6 @@ plugins {
     kotlin("jvm")
 }
 
-group = "com.monkopedia.kplusplus"
-version = "0.3.4"
-
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
