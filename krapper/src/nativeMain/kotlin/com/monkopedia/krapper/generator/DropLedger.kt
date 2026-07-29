@@ -46,13 +46,24 @@ enum class DropPhase {
  * skip rather than crash on. [symbol] is the best identity available at the drop site
  * (an element's `toString()`, a type spelling, a cursor name); [reason] is the
  * human-readable cause; [phase] is which pass dropped it.
+ *
+ * [severity] is the diagnostic level this drop is reported at (#196). Almost every drop
+ * is [Severity.WARNING]: a binding the consumer might have expected is missing, and the
+ * reason is the actionable "why". A drop site may instead pass [Severity.INFO] when the
+ * drop is a STRUCTURALLY-EXPECTED consequence of the C++ shape itself — nothing a human
+ * could act on, because there is no alternative binding to produce (e.g. a non-const
+ * overload that is redundant with its const sibling, or a container whose element type
+ * is proven to lack `operator==`). Getting this wrong in the INFO direction is worse
+ * than the noise it fixes (a real gap goes quiet), so INFO is opt-in per call site, not
+ * a default any drop can fall into by omission.
  */
 data class DropRecord(
     val symbol: String,
     val reason: String,
     val phase: DropPhase,
     /** Where the dropped declaration lives in C++, when the model carried a location. */
-    val location: SourceLocation? = null
+    val location: SourceLocation? = null,
+    val severity: Severity = Severity.WARNING
 )
 
 /**
@@ -76,21 +87,37 @@ object DropLedger {
     val drops: List<DropRecord>
         get() = records
 
-    /** Record a skip-not-crash drop of [symbol] for [reason] in [phase]. */
-    fun record(symbol: String, reason: String, phase: DropPhase, location: SourceLocation? = null) {
-        records.add(DropRecord(symbol, reason, phase, location))
+    /**
+     * Record a skip-not-crash drop of [symbol] for [reason] in [phase].
+     *
+     * [severity] defaults to [Severity.WARNING] — a binding is missing and [reason] is
+     * why. Pass [Severity.INFO] only at a call site that drops a symbol for a
+     * structurally-expected reason with nothing to act on (#196); see [DropRecord].
+     */
+    fun record(
+        symbol: String,
+        reason: String,
+        phase: DropPhase,
+        location: SourceLocation? = null,
+        severity: Severity = Severity.WARNING
+    ) {
+        records.add(DropRecord(symbol, reason, phase, location, severity))
     }
 
     /**
      * The ledger as structured [Diagnostic]s for the service channel (#185).
      *
-     * Every drop is a WARNING: generation completed, but a binding the consumer might have
-     * expected is not there. The reason is the ledger's verbatim text; the hint translates it
-     * into what the CONSUMER sees in Kotlin.
+     * A drop is a WARNING by default: generation completed, but a binding the consumer might
+     * have expected is not there. A [DropRecord.severity] of INFO (#196) marks a drop that is
+     * structurally expected by the C++ shape itself rather than a modeling gap — it still
+     * reports (nothing is hidden: it stays in the full list and the per-severity summary
+     * tally, and logs at `--info`), it just does not compete with actionable drops for the
+     * capped WARNING budget the build surfaces by default. The reason is the ledger's
+     * verbatim text; the hint translates it into what the CONSUMER sees in Kotlin.
      */
     fun diagnostics(): List<Diagnostic> = records.map { record ->
         Diagnostic(
-            severity = Severity.WARNING,
+            severity = record.severity,
             message = record.reason,
             symbol = record.symbol,
             location = record.location,

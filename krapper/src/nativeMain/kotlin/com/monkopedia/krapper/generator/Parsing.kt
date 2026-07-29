@@ -31,6 +31,7 @@ import com.monkopedia.krapper.HierarchyTarget.BASE
 import com.monkopedia.krapper.HierarchyTarget.PARENT
 import com.monkopedia.krapper.NotFilter
 import com.monkopedia.krapper.OrFilter
+import com.monkopedia.krapper.Severity
 import com.monkopedia.krapper.StringFilter
 import com.monkopedia.krapper.StringMatcher
 import com.monkopedia.krapper.StringMatcherType.CONTAINS
@@ -849,6 +850,12 @@ private val VALUE_EQUALITY_MEMBERS = setOf("equals", "operator==", "operator!=")
  *    the class tracker, so it is left untouched;
  *  - a record we can't find in the tracker (unbound / out-of-scope) is left untouched;
  *  - ONLY an element record whose metadata says `hasEqualityOperator == false` gates.
+ *
+ * #196: reported at INFO, not WARNING. Keep-on-doubt means this only fires when the AST has
+ * already PROVEN the element type has no `operator==` — there is no alternative binding to
+ * produce (the container's equality members could never compile), so unlike a generic
+ * resolve failure this is not a modeling gap. (This gate's heuristic is a plausible target
+ * for #186's live-Sema work; if that changes what this proves, revisit the severity too.)
  */
 private fun dropValueEqualityIfElementLacksEquals(
     outputClass: WrappedClass,
@@ -871,7 +878,8 @@ private fun dropValueEqualityIfElementLacksEquals(
             "Element type $element has no operator== (container value-equality would " +
                 "fail to instantiate) [#10 gate 1]",
             DropPhase.RESOLVE,
-            elementClass.sourceLocation
+            elementClass.sourceLocation,
+            severity = Severity.INFO
         )
         outputClass.removeChild(method)
     }
