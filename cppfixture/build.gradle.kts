@@ -52,76 +52,8 @@ kotlin {
     }
 }
 
-// Single, std-free header — the cpp front-end parses it without any libstdc++ weight, so this
-// module is "cpp-ready" today (unlike v8/clang-slice consumers). Declared out here so the
-// transitional sync bridge below can reuse it without duplicating the value.
-val fixtureHeader = "include/point2d.h"
-
 kplusplus {
-    header(fixtureHeader)
-}
-
-// ---- TRANSITIONAL SINGLE-BINARY SYNC BRIDGE (#184) ----
-// DELETE once the plugin version pinned in settings.gradle.kts is 0.3.4+. See the same block in
-// featuregen/build.gradle.kts for the full rationale: the CONSUMED 0.3.3 plugin's kplusplusSync
-// drives two tool binaries (`krapper_parse --parity-emit` -> `krapper_gen --parsedModel`) whose
-// CLIs no longer exist now that #184 merged them into ONE `:krapper` binary with an in-process
-// handoff, so the task's ACTION is swapped for that single invocation. The rest of the plugin's
-// wiring (build/krapped-cpp cinterop + .def + generated sources, compile ordering) is
-// path-based and still correct.
-if (providers.gradleProperty("kpp.frontend.cppfixture").orNull == "cpp") {
-    val krappedDir =
-        layout.buildDirectory
-            .dir("krapped-cpp")
-            .get()
-            .asFile
-    val krapper =
-        rootProject.layout.projectDirectory
-            .file("krapper/build/bin/klinker/krapperRelease/krapper")
-            .asFile
-    val manifest = File(projectDir, "krapped/requested.txt")
-    val headerPath = file(fixtureHeader).absolutePath
-    // Realize the task EAGERLY (`.get()`) so the plugin's own configuration action — the one
-    // that installs its two-binary doLast — has already run by the time we clear the actions.
-    afterEvaluate {
-        val sync = tasks.named("kplusplusSync").get()
-        sync.dependsOn(":krapper:linkReleaseExecutableKlinker")
-        sync.actions.clear()
-        sync.doLast {
-            val requested =
-                if (manifest.exists()) {
-                    manifest
-                        .readLines()
-                        .map { it.trim() }
-                        .filter { it.isNotEmpty() }
-                        .distinct()
-                        .sorted()
-                } else {
-                    emptyList()
-                }
-            krappedDir.mkdirs()
-            val args =
-                listOf(
-                    krapper.absolutePath,
-                    "cppfixture",
-                    "-r",
-                    "INCLUDE_MISSING",
-                    "-p",
-                    "krapper.cppfixture",
-                    "-c",
-                    "clang++",
-                    "-o",
-                    krappedDir.absolutePath,
-                    "--std",
-                    "c++14",
-                ) + requested.flatMap { listOf("--instantiate", it) } +
-                    listOf("--header", headerPath)
-            println("kplusplusSync[cppfixture]: krapper over ${requested.size} instantiation(s)")
-            val exit = ProcessBuilder(args).inheritIO().start().waitFor()
-            if (exit != 0) {
-                throw GradleException("kplusplusSync[cppfixture]: krapper failed: exit $exit")
-            }
-            File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
-        }
-    }
+    // Single, std-free header — the cpp front-end parses it without any libstdc++ weight, so
+    // this module is "cpp-ready" today (unlike v8/clang-slice consumers).
+    header("include/point2d.h")
 }
