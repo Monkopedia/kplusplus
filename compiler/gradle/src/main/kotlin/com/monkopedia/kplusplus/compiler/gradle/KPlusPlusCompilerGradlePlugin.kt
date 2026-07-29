@@ -824,7 +824,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         const val PLUGIN_ID = "com.monkopedia.kplusplus.compiler"
         const val PLUGIN_GROUP = "com.monkopedia.kplusplus"
         const val PLUGIN_NAME = "kplusplus-compiler-plugin"
-        const val PLUGIN_VERSION = "0.3.4"
+        // PLUGIN_VERSION is GENERATED from the project version (#192) — see
+        // `generatePluginVersion` in compiler/gradle/build.gradle.kts. It was a literal here
+        // until it went stale for the whole 0.3.4 prep out of a green build.
 
         // The ONE tool binary (#184) — also the Gradle project name, the bundled-resource name
         // under /com/monkopedia/kplusplus/tools/linuxX64/, and the published coordinate.

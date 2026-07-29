@@ -65,8 +65,15 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
 
 ## Cutting a release
 
-1. Make sure `version` in the root `gradle.properties` (and the `version = "…"` in the compiler
-   modules) is the release version, committed on `main`.
+1. Make sure `version` in the root `gradle.properties` is the release version, committed on
+   `main`. That line is the **only** place the version is declared (#192): the compiler build
+   reads it, and the plugin's `PLUGIN_VERSION` — which keys the consumer-side
+   `~/.gradle/kplusplus/tools/<version>/` cache — is generated from it, so there is nothing
+   else to bump and nothing that can be left stale.
+   The three *consumed* plugin pins (root `settings.gradle.kts` + the two `samples/`) name the
+   PREVIOUS release until the post-release migration; they move together, and
+   `:kplusplus-compiler-gradle:verifyConsumedPluginPins` (wired into `-p compiler check`) fails
+   if one is left behind or gets ahead of the declared version.
 2. Create a GitHub **Release** (publish it). That fires `.github/workflows/release.yml`
    (`release: published`), or run the workflow manually via **workflow_dispatch**.
 3. The workflow, on an LLVM-equipped runner:
