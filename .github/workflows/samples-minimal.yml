@@ -1,0 +1,70 @@
+# Guard for #195: samples/minimal is a from-published consumer (it resolves the
+# released kplusplus plugin from mavenCentral/gradlePluginPortal, not the in-tree
+# generator — see samples/minimal/README.md), so it cannot catch a generated-shape
+# change at the moment the generator changes. The only moment it CAN catch one is
+# when this sample itself next builds against a plugin version — which is exactly
+# what silently broke here: the context-parameter migration (#145/#146) changed
+# `origin` from a property to `origin()`/`_origin(v)` accessors, and nothing ran
+# `samples/minimal:nativeTest` to notice until the 0.3.4 self-host bump (#193).
+#
+# This workflow closes that gap: any PR/push that touches samples/minimal (most
+# notably a plugin-version bump in samples/minimal/build.gradle.kts, which is
+# precisely the trigger that caused #195) runs `:nativeTest`, which forces
+# src/nativeMain to compile AND exercises the generated bindings' behavior
+# (src/nativeTest/kotlin/GeometryTest.kt). A shape drift fails the compile step
+# loudly, the same way it did when this was reproduced by hand for #195.
+#
+# Deliberately NOT wired into the root build / release.yml: samples/minimal is
+# explicitly not part of the root settings.gradle.kts (it's a standalone,
+# from-published consumer proving the published artifact, not the in-tree one —
+# see docs/ARCHITECTURE.md), and this workflow doesn't need the in-tree LLVM-linked
+# :krapper build at all, so it's cheap and independent of the main build's slower
+# self-hosting path.
+name: samples/minimal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'samples/minimal/**'
+      - '.github/workflows/samples-minimal.yml'
+  pull_request:
+    paths:
+      - 'samples/minimal/**'
+      - '.github/workflows/samples-minimal.yml'
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The published krapper tool binary is LLVM-linked and needs clang++ on PATH at
+      # RUNTIME to parse cpp/geometry.h and compile it (see samples/minimal/README.md
+      # "Requirements") — no in-tree LLVM build required, unlike release.yml.
+      - name: Install LLVM/Clang 22 (apt.llvm.org)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release gnupg ca-certificates software-properties-common
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          sudo ln -sf "$(command -v clang++-22)"     /usr/local/bin/clang++
+          sudo ln -sf "$(command -v clang-22)"       /usr/local/bin/clang
+          sudo ln -sf "$(command -v llvm-config-22)" /usr/local/bin/llvm-config
+          echo "clang++: $(clang++ --version | head -1); llvm-config: $(llvm-config --version)"
+
+      - name: samples/minimal :nativeTest
+        working-directory: samples/minimal
+        run: ./gradlew nativeTest --no-daemon

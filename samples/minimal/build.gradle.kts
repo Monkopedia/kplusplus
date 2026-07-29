@@ -130,6 +130,18 @@ kotlin {
             }
         }
     }
+
+    // `:nativeTest` (src/nativeTest/kotlin) asserts the generated bindings actually
+    // behave as documented, and — just as importantly — forces src/nativeMain to
+    // compile as part of an ordinary `check`/test run. This is the guard for #195:
+    // samples/minimal is a from-published consumer (resolves the released plugin, not
+    // the in-tree generator), so it can't catch a generated-shape change at the moment
+    // the generator changes — only at the moment this sample next builds against a new
+    // plugin version. Wiring nativeTest in means that moment fails loudly instead of
+    // silently, the way the `rect.origin = …` break in this issue did.
+    sourceSets["nativeTest"].dependencies {
+        implementation(kotlin("test"))
+    }
 }
 
 // The bindings can only be generated after libgeometry.a exists: kplusplusSync compiles

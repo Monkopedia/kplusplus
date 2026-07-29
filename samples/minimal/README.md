@@ -53,6 +53,7 @@ Expected output:
 
 ```
 Rect area: 6.0
+Rect origin: (0.0, 0.0)
 distance (0,0)->(3,4): 5.0
 center: (1.0, 1.5)
 ```
@@ -66,6 +67,20 @@ parses the header and compiles `cpp/geometry.cc`. JDK 21 is required to run the 
 
 The first build is slow (it builds the self-hosted front-end, generates the bindings, then
 compiles and links the generated C++ wrapper); later runs are incremental.
+
+## Keeping this sample honest
+
+Because this sample resolves the **published** plugin rather than the in-tree generator, it
+can't catch a generated-shape change (e.g. #145/#146's context-parameter migration) the moment
+the generator changes — only the next time this sample itself builds against a new plugin
+version. `src/nativeTest/kotlin/GeometryTest.kt` exercises every accessor kind the generator
+emits for `cpp/geometry.h` (scalar `var` properties, `context(scope: MemScope)` get/set-style
+accessors for object-valued fields, and a plain const-ref method), so `./gradlew nativeTest`
+fails to compile — loudly — the moment the generated shape drifts from what `Main.kt`/the test
+assume, exactly the way `rect.origin = …` did in #195. This is wired into CI at
+[`.github/workflows/samples-minimal.yml`](../../.github/workflows/samples-minimal.yml) (runs on
+any change under `samples/minimal/**`, most notably a plugin-version bump) and into the release
+[local dry run](../../docs/releasing.md#local-dry-run-no-outward-upload).
 
 ## See also
 

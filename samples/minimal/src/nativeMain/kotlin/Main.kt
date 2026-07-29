@@ -28,12 +28,20 @@ fun main(args: Array<String>) {
     // when it ends. `Point()` / `Rect()` are MemScope extension factories (see
     // the generated companion objects), in scope thanks to the imports above.
     memScoped {
-        // A 2x3 rectangle at the origin.
+        // A 2x3 rectangle at the origin. `origin` is a Point-VALUED field, so its
+        // accessors are `origin()` (get, needs a MemScope to allocate the returned
+        // Point into) / `_origin(value)` (set, no allocation needed) -- NOT a Kotlin
+        // `var` property. A getter that allocates can't be an ordinary property
+        // getter (no way to thread a MemScope through `rect.origin`), so the
+        // generator falls back to plain functions for object-valued fields. Scalar
+        // fields (width, height below; x, y on Point) need no allocation and DO stay
+        // ordinary `var` properties.
         val rect = Rect()
-        rect.origin = Point().apply { x = 0.0; y = 0.0 }
+        rect._origin(Point().apply { x = 0.0; y = 0.0 })
         rect.width = 2.0
         rect.height = 3.0
         println("Rect area: ${rect.area()}")
+        println("Rect origin: (${rect.origin()!!.x}, ${rect.origin()!!.y})")
 
         // distanceTo takes the other Point by const-ref in C++ -> a plain Kotlin
         // parameter here; the classic 3-4-5 right triangle gives 5.0.
