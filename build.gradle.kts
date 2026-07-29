@@ -1,5 +1,22 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
+    // Declared here (never applied) purely to put the kplusplus plugin on the ROOT buildscript
+    // classpath, next to the Kotlin plugin. Its version comes from settings.gradle.kts's
+    // pluginManagement pin, exactly as in the modules that really apply it.
+    //
+    // WHY this is load-bearing, not tidiness: since 0.3.4 the plugin drives krapper over ksrpc,
+    // so its runtime needs kotlinx-coroutines 1.11 / ktor-io 3.5 in the Gradle daemon. Gradle
+    // gives each project's buildscript its OWN classloader whose PARENT is the root's, and
+    // class loading is parent-first. With the Kotlin plugin declared only here, the root
+    // classloader owns kotlin-compiler-runner's kotlinx-coroutines 1.8.0; a module that also
+    // applies the kplusplus plugin resolves coroutines 1.11.0 into its CHILD classloader, but
+    // `kotlinx.coroutines.Job` still loads from the parent at 1.8.0. ktor-io then calls
+    // `Job.invokeOnCompletion$default`, which 1.9+ moved onto the interface itself
+    // (-Xjvm-default=all) and 1.8.0 keeps in `Job$DefaultImpls`, so kplusplusSync dies with a
+    // NoSuchMethodError before krapper is even started. Declaring both plugins in the SAME
+    // (root) block puts them in ONE classpath, where Gradle's conflict resolution picks
+    // coroutines 1.11.0 and the parent-first lookup finds the right class.
+    id("com.monkopedia.kplusplus.compiler") apply false
     alias(libs.plugins.ktlint)
 }
 
