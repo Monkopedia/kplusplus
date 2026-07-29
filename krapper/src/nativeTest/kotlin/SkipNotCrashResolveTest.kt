@@ -16,6 +16,7 @@
 package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.ReferencePolicy
+import com.monkopedia.krapper.Severity
 import com.monkopedia.krapper.generator.model.MethodType
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -129,6 +130,14 @@ class SkipNotCrashResolveTest {
             drop.reason.isNotBlank(),
             "every drop must carry a reason: $drop"
         )
+        // #196: a generic resolve failure is a real modeling gap, not a by-design drop —
+        // it must stay at the default WARNING severity so it competes for (and wins) the
+        // capped warning budget, unlike the structurally-expected DEDUP case below.
+        assertEquals(
+            Severity.WARNING,
+            drop.severity,
+            "a RESOLVE drop must default to WARNING: $drop"
+        )
         // hasDrops() is exactly the predicate the opt-in --fail-on-drop gate reads
         // (IndexedServiceImpl.reportDrops): a dropped symbol makes it true.
         assertTrue(
@@ -188,5 +197,17 @@ class SkipNotCrashResolveTest {
             dedup != null && "get" in dedup.symbol,
             "the deduped non-const overload must be ledgered as a DEDUP drop: ${DropLedger.drops}"
         )
+        // #196: DEDUP is structurally expected by construction — the const half is always
+        // kept, so there is never a missing binding to act on. It is reported at INFO so it
+        // does not crowd the capped WARNING budget out with by-design, non-actionable drops.
+        assertEquals(
+            Severity.INFO,
+            dedup.severity,
+            "a DEDUP drop must be demoted to INFO: $dedup"
+        )
+        // The full drop is still in the ledger (nothing hidden) and still turns into a
+        // Diagnostic the service channel reports — only its severity changed.
+        val diagnostic = DropLedger.diagnostics().single { it.symbol == dedup.symbol }
+        assertEquals(Severity.INFO, diagnostic.severity)
     }
 }

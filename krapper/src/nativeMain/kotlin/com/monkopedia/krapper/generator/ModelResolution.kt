@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
+import com.monkopedia.krapper.Severity
 import com.monkopedia.krapper.generator.codegen.Operator
 import com.monkopedia.krapper.generator.codegen.STACK_CONSTRUCTOR_CALLBACK
 import com.monkopedia.krapper.generator.model.ClassMetadata
@@ -237,6 +238,10 @@ suspend fun WrappedClass.resolve(resolverContext: ResolveContext): ResolvedClass
 // compiles), and a single binding avoids the duplicate. Only fires when the names
 // AND the full parameter-type lists match AND exactly one of the pair is `const`;
 // overloads that differ in parameters (genuinely distinct) are untouched.
+//
+// #196: this drop is structurally expected by construction — it fires only when the class
+// itself declares both halves of a const/non-const pair, and the const half is always kept,
+// so there is never a missing binding to act on. INFO, not WARNING (see [DropRecord]).
 private fun WrappedClass.dropConstOverloadDuplicates() {
     val methods = children.filterIsInstance<WrappedMethod>()
         .filter { it !is WrappedConstructor && it !is WrappedDestructor }
@@ -250,7 +255,8 @@ private fun WrappedClass.dropConstOverloadDuplicates() {
             "$name::${nonConst.name}",
             "Non-const overload duplicates a const overload (kept the const half)",
             DropPhase.DEDUP,
-            nonConst.sourceLocation
+            nonConst.sourceLocation,
+            severity = Severity.INFO
         )
         removeChild(nonConst)
     }
