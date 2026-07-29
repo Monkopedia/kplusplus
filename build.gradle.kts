@@ -1,21 +1,14 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
+    // 0.3.4-ONLY WORKAROUND (#194) — DELETE THIS LINE with the pluginManagement bump to 0.3.5.
     // Declared here (never applied) purely to put the kplusplus plugin on the ROOT buildscript
-    // classpath, next to the Kotlin plugin. Its version comes from settings.gradle.kts's
-    // pluginManagement pin, exactly as in the modules that really apply it.
-    //
-    // WHY this is load-bearing, not tidiness: since 0.3.4 the plugin drives krapper over ksrpc,
-    // so its runtime needs kotlinx-coroutines 1.11 / ktor-io 3.5 in the Gradle daemon. Gradle
-    // gives each project's buildscript its OWN classloader whose PARENT is the root's, and
-    // class loading is parent-first. With the Kotlin plugin declared only here, the root
-    // classloader owns kotlin-compiler-runner's kotlinx-coroutines 1.8.0; a module that also
-    // applies the kplusplus plugin resolves coroutines 1.11.0 into its CHILD classloader, but
-    // `kotlinx.coroutines.Job` still loads from the parent at 1.8.0. ktor-io then calls
-    // `Job.invokeOnCompletion$default`, which 1.9+ moved onto the interface itself
-    // (-Xjvm-default=all) and 1.8.0 keeps in `Job$DefaultImpls`, so kplusplusSync dies with a
-    // NoSuchMethodError before krapper is even started. Declaring both plugins in the SAME
-    // (root) block puts them in ONE classpath, where Gradle's conflict resolution picks
-    // coroutines 1.11.0 and the parent-first lookup finds the right class.
+    // classpath next to the Kotlin plugin, so both resolve as ONE classpath. 0.3.4's plugin
+    // carried its ksrpc/ktor/coroutines runtime as ordinary dependencies, which a multi-project
+    // consumer resolves into a CHILD classloader while parent-first loading keeps serving the
+    // ROOT's older kotlinx-coroutines — `NoSuchMethodError: Job.invokeOnCompletion$default`
+    // before krapper is even started. 0.3.5 SHADES that runtime into the plugin jar (see
+    // compiler/gradle/build.gradle.kts), which is the actual fix; this line is only what keeps
+    // THIS repo building while it self-hosts one release behind, on 0.3.4.
     id("com.monkopedia.kplusplus.compiler") apply false
     alias(libs.plugins.ktlint)
 }

@@ -99,6 +99,10 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
 # 3. ...and that the generated bindings still match what the sample expects (the
 #    `samples/minimal:nativeTest` guard for #195 — see samples/minimal/README.md):
 (cd samples/minimal && ./gradlew nativeTest)
+# 4. ...and that a MULTI-PROJECT consumer can drive the plugin at all (the #194 guard: the
+#    plugin's runtime is shaded into its jar precisely so a subproject's classloader can't be
+#    shadowed by the root's — see samples/multiproject/README.md):
+(cd samples/multiproject && ./gradlew :bindings:build)
 ```
 
 `publishToMavenLocal` does **not** sign (no key in the environment) — signing is exercised only

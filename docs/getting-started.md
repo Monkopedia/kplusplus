@@ -46,6 +46,15 @@ repositories {
 }
 ```
 
+In a **multi-project** build, apply this in whichever project owns the bindings; the plugin
+does not need to be declared at the root alongside the Kotlin plugin. (Under **0.3.4 only** it
+did — the plugin's own runtime classes were shadowed by whatever the root buildscript
+classloader owned, and the first `kplusplusSync` failed with
+`NoSuchMethodError: Job.invokeOnCompletion$default`. Adding
+`id("com.monkopedia.kplusplus.compiler") apply false` to the root `plugins { }` block works
+around it on 0.3.4; upgrading is the real fix. See
+[#194](https://github.com/Monkopedia/kplusplus/issues/194).)
+
 ## 2. Configure the binding
 
 Add a `kplusplus { }` block pointing at the header(s) and library you want to bind:
@@ -109,6 +118,8 @@ cryptic `file not found` deep in the parse. When `llvm-config` reports a default
 ## See also
 
 - [`samples/minimal`](../samples/minimal) — the smallest end-to-end binding, a working copy of this guide.
+- [`samples/multiproject`](../samples/multiproject) — the same thing as two Gradle projects, with the
+  Kotlin plugin declared at the root.
 - [`samples/v8`](../samples/v8) — the heavyweight demo (binds and runs V8).
 - [README](../README.md) — the `kplusplus { }` DSL reference and `fixup { }` escape hatch.
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — how the self-hosted front-end and generator fit together.
