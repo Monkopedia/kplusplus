@@ -28,7 +28,9 @@ That is the entire test. What it binds does not matter.
 
 ## Run it
 
-The plugin is resolved by coordinate (`mavenLocal()` first), so publish the build under test
+The plugin is resolved by coordinate, `mavenLocal()` first. With an empty `mavenLocal` the pin
+resolves the last **released** plugin, which is a useful post-release check that #194 is still
+fixed in what actually shipped. To exercise the build *under test* instead, publish it locally
 first — the release local dry run, from the repo root:
 
 ```sh
@@ -49,6 +51,4 @@ service channel to krapper, before any binding is generated. Compiling the gener
 (`../../gradlew :bindings:build`) exercises the rest, but is not what this sample is for.
 
 `:bindings:build` is step 4 of the release **local dry run** ([docs/releasing.md](../../docs/releasing.md)),
-which is where this sample is exercised. It has no CI workflow of its own — unlike
-`samples/minimal` it cannot run against the *released* plugin, since the plugin under test is
-the point.
+which is where this sample is exercised. It has no CI workflow of its own.

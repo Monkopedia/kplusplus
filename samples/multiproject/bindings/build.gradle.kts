@@ -20,7 +20,7 @@
 // this is a from-published consumer.
 plugins {
     kotlin("multiplatform")
-    id("com.monkopedia.kplusplus.compiler") version "0.3.4"
+    id("com.monkopedia.kplusplus.compiler") version "0.3.5"
 }
 
 repositories {
