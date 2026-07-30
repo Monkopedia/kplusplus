@@ -38,7 +38,7 @@ pluginManagement {
 ```kotlin
 plugins {
     kotlin("multiplatform") version "2.4.0"
-    id("com.monkopedia.kplusplus.compiler") version "0.3.4"
+    id("com.monkopedia.kplusplus.compiler") version "0.3.5"
 }
 
 repositories {
@@ -47,13 +47,13 @@ repositories {
 ```
 
 In a **multi-project** build, apply this in whichever project owns the bindings; the plugin
-does not need to be declared at the root alongside the Kotlin plugin. (Under **0.3.4 only** it
-did — the plugin's own runtime classes were shadowed by whatever the root buildscript
+does not need to be declared at the root alongside the Kotlin plugin. (It did under **0.3.4
+only** — the plugin's own runtime classes were shadowed by whatever the root buildscript
 classloader owned, and the first `kplusplusSync` failed with
-`NoSuchMethodError: Job.invokeOnCompletion$default`. Adding
+`NoSuchMethodError: Job.invokeOnCompletion$default`. 0.3.5 shades that runtime into the plugin
+jar, which is the real fix; if you are stuck on 0.3.4, adding
 `id("com.monkopedia.kplusplus.compiler") apply false` to the root `plugins { }` block works
-around it on 0.3.4; upgrading is the real fix. See
-[#194](https://github.com/Monkopedia/kplusplus/issues/194).)
+around it. See [#194](https://github.com/Monkopedia/kplusplus/issues/194).)
 
 ## 2. Configure the binding
 
