@@ -1,0 +1,104 @@
+# Closes #210: the two coordinates this project PUBLISHES had their tests run by
+# nothing.
+#
+# `compiler/` is a SEPARATE Gradle build, deliberately not an `includeBuild` of the
+# root (settings.gradle.kts:9-15 explains why — a composite would substitute our own
+# coordinates and block :krapper from resolving a published tool). A consequence
+# nobody had noticed: root tasks never reach it, and the only `-p compiler`
+# invocations anywhere in CI were `publishPlugins` and `publishToMavenCentral`. So
+# `:kplusplus-compiler-gradle`'s three tests, and `apiCheck` — the ABI gate on both
+# published artifacts — ran only when someone happened to run them locally.
+#
+# That is the same never-executed shape as #198, one layer further out: there the
+# job ran and could report zero tests; here the job did not exist at all.
+#
+# Cheap to run: both published modules are plain `kotlin("jvm")`, so this needs a
+# JDK and nothing else. No LLVM, no Kotlin/Native, no klinker — unlike release.yml
+# (which builds the LLVM-linked :krapper) and unlike samples-minimal.yml (which
+# needs clang++ at runtime for the bundled tool). It is the cheapest job in the repo.
+name: compiler check
+
+on:
+  pull_request:
+    paths:
+      - 'compiler/**'
+      - 'krapper/src/commonMain/**'      # compiled INTO the plugin as a shared source dir
+      - 'krapper_model/src/commonMain/**'
+      - 'gradle/libs.versions.toml'
+      - 'gradle.properties'              # the single source of the published version (#192)
+      - '.github/workflows/compiler-check.yml'
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # The whole job is a JVM compile plus three tests; if it is anywhere near this
+    # it is wedged, not slow. Same reasoning as #198's cap on samples-minimal.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Delete-before-measure: a task that does not run leaves any previous
+      # report exactly where the guard below looks, so "never ran" and "ran and
+      # passed" are indistinguishable on disk. On a fresh checkout there is
+      # nothing to delete; this matters on a re-run of a cached workspace.
+      - name: Clear stale test reports
+        run: rm -rf compiler/*/build/test-results
+
+      # Deliberately NOT using gradle/actions/setup-gradle here. Its v6 extracted
+      # caching into a proprietary, non-MIT component that a workflow opts into by
+      # upgrading, and that choice is open in #209 pending the owner. Rather than
+      # pre-empt it in an unrelated PR, this job runs the wrapper directly and
+      # forgoes caching — which costs a JVM compile of two small modules, i.e. very
+      # little. Add caching once #209 settles the licence question.
+      - name: -p compiler check
+        run: ./gradlew -p compiler check --no-daemon
+
+      # A green `check` is not evidence tests ran: a task-name typo, a NO-SOURCE
+      # source set, or an up-to-date task all report success having executed
+      # nothing, and the JUnit XML from a PREVIOUS run persists where a verifier
+      # looks. #198 was exactly this on the other workflow. So: delete the reports
+      # first (in the step before), then assert they exist and are non-empty.
+      - name: Assert the tests actually ran
+        if: always()
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          xml=(compiler/**/build/test-results/**/*.xml)
+          if [ ${#xml[@]} -eq 0 ]; then
+            echo "::error::No JUnit XML anywhere under compiler/. The check task cannot have run a test, so this job would be green having executed nothing."
+            exit 1
+          fi
+          total=0; failed=0
+          for f in "${xml[@]}"; do
+            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            total=$((total + ${t:-0}))
+            failed=$((failed + ${e:-0} + ${r:-0}))
+          done
+          echo "compiler build: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::Zero tests reported. This job would otherwise be green having run nothing — failing explicitly."
+            exit 1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::The compiler build reported test failures."
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-check-test-results
+          path: compiler/**/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 14
