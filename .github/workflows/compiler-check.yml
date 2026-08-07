@@ -25,7 +25,17 @@ on:
       - 'krapper/src/commonMain/**'      # compiled INTO the plugin as a shared source dir
       - 'krapper_model/src/commonMain/**'
       - 'gradle/libs.versions.toml'
+      - 'gradle/wrapper/**'              # this job runs the repo-root ./gradlew
       - 'gradle.properties'              # the single source of the published version (#192)
+      # `check` depends on verifyConsumedPluginPins (#192), which reads these three files out
+      # of the REPO ROOT by relative path (compiler/gradle/build.gradle.kts:165-171) and asserts
+      # they agree with the declared version. Without them here the gate is armed and then
+      # filtered off every PR that could trip it: PR #205 -- the post-release pin migration,
+      # whose entire content was these three pins -- has ZERO overlap with the rest of this list
+      # and would not have run this job.
+      - 'settings.gradle.kts'
+      - 'samples/minimal/build.gradle.kts'
+      - 'samples/multiproject/bindings/build.gradle.kts'
       - '.github/workflows/compiler-check.yml'
   push:
     branches: [main]
