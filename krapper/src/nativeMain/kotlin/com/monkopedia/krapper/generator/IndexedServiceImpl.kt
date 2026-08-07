@@ -69,7 +69,13 @@ internal val ResolvedMethod.forcingIdentity: String
 // Pretty-printed so the emitted index is diffable by a human and by `git diff` when a
 // consumer chooses to keep one. Key order comes from the data-class field order and from
 // the collections being sorted before they are handed over -- not from this instance.
-private val bindingIndexJson = Json { prettyPrint = true }
+// encodeDefaults is REQUIRED, not cosmetic: kotlinx.serialization omits any property equal to
+// its default, so `schemaVersion` — which exists precisely so a consumer can check it and fall
+// back — was absent from the emitted file entirely. Verified against the real featuregen output.
+private val bindingIndexJson = Json {
+    prettyPrint = true
+    encodeDefaults = true
+}
 
 // Mixed into the run-id hash between fields so that concatenation cannot alias: without it,
 // ("ab", "c") and ("a", "bc") would hash identically. 0x1F is ASCII UNIT SEPARATOR, chosen
@@ -389,7 +395,19 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             rootPackage = config.rootPackage,
             bindings = canonicalBindings,
             kotlinTypeMap = canonicalBindings.associate { it.classId to it.spec },
-            drops = DropLedger.diagnostics()
+            // Drop locations arrive as ABSOLUTE C++ paths. Rewriting them relative to the
+            // output dir is what keeps the index free of host paths (§5 D1) — the same rule
+            // #86 applies to the generated forcing headers. Rewritten HERE rather than in the
+            // ledger so the existing drop report and the diagnostics streamed over the service
+            // channel are untouched: this brick must not move a single pre-existing byte.
+            drops = DropLedger.diagnostics().map { diagnostic ->
+                val location = diagnostic.location ?: return@map diagnostic
+                diagnostic.copy(
+                    location = location.copy(
+                        file = BindingIndex.relativizePath(location.file, outputBase.path)
+                    )
+                )
+            }
         )
         File(outputBase, BindingIndex.FILE_NAME)
             .writeText(bindingIndexJson.encodeToString(BindingIndex.serializer(), index))

@@ -124,6 +124,36 @@ class BindingIndexTest {
     }
 
     @Test
+    fun `relativizePath strips the checkout root so no host path reaches the index`() {
+        // The real shape, from featuregen: every located drop pointed at a header inside the
+        // checkout, and the emitted index contained /home/<user>/... until this was added.
+        assertEquals(
+            "../../src/cppMain/include/strings_feature.h",
+            BindingIndex.relativizePath(
+                "/home/someone/git/kplusplus/featuregen/src/cppMain/include/strings_feature.h",
+                "/home/someone/git/kplusplus/featuregen/build/krapped-cpp"
+            )
+        )
+        // Same tree, different checkout location: the relative answer must be identical, which
+        // is the whole point (D1 — a tree generated in one checkout matches another).
+        assertEquals(
+            BindingIndex.relativizePath("/a/b/c/src/x.h", "/a/b/c/build/out"),
+            BindingIndex.relativizePath("/zz/yy/c/src/x.h", "/zz/yy/c/build/out")
+        )
+        // Nothing in common but the filesystem root (a system header): left alone rather than
+        // rewritten into a longer, less useful path.
+        assertEquals(
+            "/usr/lib/llvm-22/include/clang/AST/Decl.h",
+            BindingIndex.relativizePath(
+                "/usr/lib/llvm-22/include/clang/AST/Decl.h",
+                "/home/someone/git/kplusplus/featuregen/build/krapped-cpp"
+            )
+        )
+        // Already relative: untouched.
+        assertEquals("src/x.h", BindingIndex.relativizePath("src/x.h", "/a/b"))
+    }
+
+    @Test
     fun `the index round-trips through JSON`() {
         val index = BindingIndex.canonical(
             runId = "abc123",

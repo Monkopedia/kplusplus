@@ -97,6 +97,31 @@ data class BindingIndex(
          * kotlinx.serialization writes a map in iteration order, so sorting the entries is what
          * actually makes the bytes stable — a plain `associate` would not.
          */
+        /**
+         * Rewrite an absolute [path] as relative to [base], or return it unchanged when it does
+         * not sit under a shared root.
+         *
+         * The index must carry **no absolute host path** (§5 D1) — a tree generated in one
+         * checkout has to be byte-identical to one generated in another, and
+         * `/home/<someone>/git/...` is neither reproducible nor meaningful to a consumer. This is
+         * the same rule the generated forcing headers already follow (#86); applying it here
+         * keeps the two consistent.
+         *
+         * Kept pure and string-based so it is testable without a filesystem.
+         */
+        fun relativizePath(path: String, base: String): String {
+            if (!path.startsWith("/") || !base.startsWith("/")) return path
+            val from = base.trim('/').split("/").filter { it.isNotEmpty() }
+            val to = path.trim('/').split("/").filter { it.isNotEmpty() }
+            var shared = 0
+            while (shared < from.size && shared < to.size && from[shared] == to[shared]) shared++
+            // Nothing in common beyond the filesystem root: relativizing would produce a path
+            // longer and less useful than the original (a system header, typically). Leave it.
+            if (shared == 0) return path
+            val ups = List(from.size - shared) { ".." }
+            return (ups + to.drop(shared)).joinToString("/")
+        }
+
         fun canonical(
             runId: String,
             rootPackage: String? = null,
