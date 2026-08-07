@@ -18,6 +18,7 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.BindingIndex
 import com.monkopedia.krapper.BindingRef
 import com.monkopedia.krapper.Diagnostic
+import com.monkopedia.krapper.DiagnosticPhase
 import com.monkopedia.krapper.Severity
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -151,6 +152,28 @@ class BindingIndexTest {
         )
         // Already relative: untouched.
         assertEquals("src/x.h", BindingIndex.relativizePath("src/x.h", "/a/b"))
+        // path IS base: every segment shared, nothing left over. "" is not a path.
+        assertEquals(".", BindingIndex.relativizePath("/a/b/c", "/a/b/c"))
+    }
+
+    @Test
+    fun `drops tying on symbol location and message are still ordered totally`() {
+        // Without severity and phase in the comparator these two tie on every compared key, so
+        // their relative order would come from the input and D1 would hold only by luck.
+        val info = Diagnostic(Severity.INFO, "same", symbol = "s", phase = DiagnosticPhase.DEDUP)
+        val warn = Diagnostic(
+            Severity.WARNING,
+            "same",
+            symbol = "s",
+            phase = DiagnosticPhase.RESOLVE
+        )
+        val forward = BindingIndex.canonical(runId = "r", drops = listOf(info, warn)).drops
+        val reversed = BindingIndex.canonical(runId = "r", drops = listOf(warn, info)).drops
+        assertEquals(forward, reversed, "ordering must not depend on arrival order")
+        assertEquals(
+            listOf(DiagnosticPhase.DEDUP, DiagnosticPhase.RESOLVE),
+            forward.map { it.phase }
+        )
     }
 
     @Test
