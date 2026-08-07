@@ -18,6 +18,8 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.AddToChild
 import com.monkopedia.krapper.AddToParent
 import com.monkopedia.krapper.AllowListFilter
+import com.monkopedia.krapper.BindingIndex
+import com.monkopedia.krapper.BindingRef
 import com.monkopedia.krapper.FilterDefinition
 import com.monkopedia.krapper.Fixup
 import com.monkopedia.krapper.IndexRequest
@@ -53,6 +55,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
+import kotlinx.serialization.json.Json
 
 // A fuller identity for a resolved method than its (possibly-null, possibly-colliding)
 // uniqueCName: the C++ qualified name + simple name + full argument-type signature, plus
@@ -62,6 +65,22 @@ import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 // collision can't false-keep an incidental function (which would emit non-compiling Kotlin).
 internal val ResolvedMethod.forcingIdentity: String
     get() = "$qualified::$name(${args.joinToString(",") { it.type.toString() }})#$uniqueCName"
+
+// Pretty-printed so the emitted index is diffable by a human and by `git diff` when a
+// consumer chooses to keep one. Key order comes from the data-class field order and from
+// the collections being sorted before they are handed over -- not from this instance.
+// encodeDefaults is REQUIRED, not cosmetic: kotlinx.serialization omits any property equal to
+// its default, so `schemaVersion` — which exists precisely so a consumer can check it and fall
+// back — was absent from the emitted file entirely. Verified against the real featuregen output.
+private val bindingIndexJson = Json {
+    prettyPrint = true
+    encodeDefaults = true
+}
+
+// Mixed into the run-id hash between fields so that concatenation cannot alias: without it,
+// ("ab", "c") and ("a", "bc") would hash identically. 0x1F is ASCII UNIT SEPARATOR, chosen
+// because it cannot occur in a C++ spec, a package name or a module name.
+private const val FIELD_SEPARATOR: ULong = 0x1FUL
 
 class IndexedServiceImpl(private val config: KrapperConfig, private val request: IndexRequest) :
     IndexedService {
@@ -331,8 +350,99 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             classes
         )
         writeCppBindingAnnotation(srcDir)
+        writeBindingIndex(outputBase)
         reportDrops()
         Log.i("Code generation complete")
+    }
+
+    /**
+     * Emit `binding-index.json` — krapper's own answers about what it just emitted (#186 B1).
+     *
+     * Written LAST, after every generated artifact exists, so the index describes a completed
+     * tree rather than a partial one. It has no consumer yet: B2 adds the `bindingIndexPath`
+     * SubpluginOption that makes the compiler plugin read these names instead of re-deriving
+     * them by hand (#206).
+     *
+     * Every name here is read off the emitted model. In particular the Kotlin identity comes
+     * from [ResolvedKotlinType.fullyQualified] and [ResolvedKotlinType.pkg], NOT from `name` —
+     * `name` resolves through `remap`, which `ImportBlock.build` sets as shared mutable state
+     * while emitting a single file, so reading it here would make the index depend on which
+     * file happened to be written last. `fullyQualified` is the canonical, alias-free identity;
+     * `simpleName` is derived from it rather than fetched separately so the three fields cannot
+     * disagree with each other.
+     */
+    private fun writeBindingIndex(outputBase: File) {
+        val bindings = classes.filterIsInstance<ResolvedClass>().map { cls ->
+            val spec = cls.type.toString()
+            val kotlinType = cls.type.kotlinType
+            val fullyQualified = kotlinType.fullyQualified
+            BindingRef(
+                spec = spec,
+                classId = fullyQualified,
+                pkg = kotlinType.pkg,
+                simpleName = fullyQualified.substringAfterLast('.'),
+                // A prefix, not a parse: everything before the first '<'. The argument list
+                // itself needs a depth-aware split and lands in B2 (see BindingRef).
+                cppBase = if ('<' in spec) spec.substringBefore('<') else null
+            )
+        }
+        // Ordering is BindingIndex.canonical's job, not this call site's — see its doc. The
+        // runId is computed from the already-canonical bindings so it too is arrival-order
+        // independent.
+        val canonicalBindings = BindingIndex.canonical(runId = "", bindings = bindings).bindings
+        val index = BindingIndex.canonical(
+            runId = stableRunId(canonicalBindings),
+            rootPackage = config.rootPackage,
+            bindings = canonicalBindings,
+            kotlinTypeMap = canonicalBindings.associate { it.classId to it.spec },
+            // Drop locations arrive as ABSOLUTE C++ paths. Rewriting them relative to the
+            // output dir is what keeps the index free of host paths (§5 D1) — the same rule
+            // #86 applies to the generated forcing headers. Rewritten HERE rather than in the
+            // ledger so the existing drop report and the diagnostics streamed over the service
+            // channel are untouched: this brick must not move a single pre-existing byte.
+            drops = DropLedger.diagnostics().map { diagnostic ->
+                val location = diagnostic.location ?: return@map diagnostic
+                diagnostic.copy(
+                    location = location.copy(
+                        file = BindingIndex.relativizePath(location.file, outputBase.path)
+                    )
+                )
+            }
+        )
+        File(outputBase, BindingIndex.FILE_NAME)
+            .writeText(bindingIndexJson.encodeToString(BindingIndex.serializer(), index))
+    }
+
+    /**
+     * A run identity that is stable for identical inputs and carries no host path or timestamp,
+     * so the index stays diffable and safe as a cache key (§5 D1).
+     *
+     * FNV-1a over the module identity plus the sorted binding specs. Not cryptographic and not
+     * meant to be: its job is to change when the emitted set changes, so a consumer holding a
+     * stale index can notice.
+     */
+    private fun stableRunId(bindings: List<BindingRef>): String {
+        var hash = 0xcbf29ce484222325UL
+        fun mix(value: String) {
+            for (char in value) {
+                hash = hash xor char.code.toULong()
+                hash *= 0x100000001b3UL
+            }
+            hash = hash xor FIELD_SEPARATOR
+            hash *= 0x100000001b3UL
+        }
+        mix(config.moduleName ?: "")
+        mix(config.pkg)
+        mix(config.rootPackage ?: "")
+        bindings.forEach { mix(it.spec) }
+        // Rendered nibble by nibble rather than via toString(radix): the unsigned radix
+        // overloads are easy to get subtly wrong across targets, and this is unambiguous.
+        val digits = "0123456789abcdef"
+        return buildString(16) {
+            for (shift in 60 downTo 0 step 4) {
+                append(digits[((hash shr shift) and 0xFUL).toInt()])
+            }
+        }
     }
 
     /**
