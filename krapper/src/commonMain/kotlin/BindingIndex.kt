@@ -207,9 +207,14 @@ data class BindingRef(
     // NOTE for B2: the design (§4.1) also declares `factory` and `holderFactory` — the companion
     // default-ctor and `<name>_Holder` factory names. They are NOT declared here because B1 has no
     // way to read them: they are decided by the Kotlin writer's emit, not present on the resolved
-    // model. Adding them in B2 WILL change this class's shape, unlike `templates`/`templateArgs`
-    // which are declared-but-empty precisely so they do not. Recording it so that shape change is
-    // expected rather than discovered.
+    // model. Adding them in B2 will change this class's shape, so bump SCHEMA_VERSION with them.
+    //
+    // The previous version of this note claimed `templates`/`templateArgs` were declared-but-empty
+    // "precisely so they do not" change shape. That prediction was wrong within a day: #213 made
+    // both nullable (schemaVersion 2), because a defaulted empty list cannot be distinguished from
+    // a missing one after decoding, so `[]` was asserting "computed, none" about things that had
+    // not been computed. Declaring a field early does NOT freeze its shape — only getting its
+    // MEANING right does.
     /**
      * Template arguments as krapper spells them, in declaration order.
      *

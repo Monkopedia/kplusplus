@@ -206,7 +206,7 @@ data class BindingIndex(
     /** Every emitted binding, sorted by `spec`. */
     val bindings: List<BindingRef>,
     /** Every `@CppTemplate` facade emitted, sorted by `base`. */
-    val templates: List<TemplateFacadeRef>,
+    val templates: List<TemplateFacadeRef>?,   // null = not computed; [] = computed, none (#213)
     /** Kotlin fq-name -> C++ spelling, krapper's own table. Sorted by key. */
     val kotlinTypeMap: Map<String, String>,
     /** The drop ledger, keyed for lookup by spec/symbol. Sorted. */
@@ -226,7 +226,7 @@ data class BindingRef(
     /** `<name>_Holder` fallback factory, when one was emitted (CppVectorIrExtension:78-80). */
     val holderFactory: String?,
     val cppBase: String?,        // "std::vector" for a specialization, else null
-    val templateArgs: List<String>
+    val templateArgs: List<String>?           // null = not computed (#213)
 )
 
 @Serializable
@@ -238,6 +238,13 @@ data class TemplateFacadeRef(
 `BindingRef.classId` / `pkg` / `simpleName` / `factory` are **read off the emitted model**, not
 recomputed — they come from the same `ResolvedClass.type.kotlinType.fullyQualified` the writer
 used (`KotlinWriter.kt:166-167`). That is the entire point: one source of truth for mangling.
+
+**Nullability correction (#213, landed after this doc was written).** `templates` and
+`templateArgs` are **nullable**, not defaulted-empty. kotlinx decodes a *missing*
+`List<X> = emptyList()` identically to a *present* empty one, so a defaulted empty list cannot say
+"I did not compute this" — it can only assert "there are none". B1 emitted `"templates": []` for a
+generation that produced **two** `@CppTemplate` facades. `null` and `[]` decode differently, which
+is the only shape that separates the two claims. `SCHEMA_VERSION` is **2**.
 
 `Diagnostic` is reused verbatim (`krapper/src/commonMain/kotlin/Diagnostic.kt:70-77`), so drops
 already carry severity, symbol, C++ `file:line:col`, phase and consumer hint.
