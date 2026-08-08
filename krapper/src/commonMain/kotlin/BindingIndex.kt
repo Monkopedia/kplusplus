@@ -65,11 +65,16 @@ data class BindingIndex(
     /**
      * Every `@CppTemplate` facade emitted, sorted by [TemplateFacadeRef.base].
      *
-     * Empty in B1: the facade surface is computed inside `KotlinWriter` and is not currently
-     * reachable from the emit site. It is declared here so the schema does not change shape when
-     * B2 gains the consumer that needs it.
+     * **`null` means "this producer did not compute it"; `[]` means "computed, and there were
+     * none".** They are different claims and a consumer must be able to tell them apart — so this
+     * is nullable rather than a defaulted empty list.
+     *
+     * `null` in B1: the facade surface is computed inside `KotlinWriter` (`TemplateFacade` is
+     * private to it) and is not reachable from the emit site. Emitting `[]` here would have been
+     * an affirmative falsehood — featuregen emits **two** facades, so the index would have stated
+     * that a generation producing two facades produced none.
      */
-    val templates: List<TemplateFacadeRef> = emptyList(),
+    val templates: List<TemplateFacadeRef>? = null,
     /**
      * Kotlin fully-qualified name to C++ spelling — krapper's own table, sorted by key.
      *
@@ -85,8 +90,14 @@ data class BindingIndex(
     val drops: List<Diagnostic> = emptyList()
 ) {
     companion object {
-        /** Increment on any incompatible change to the shape above. */
-        const val SCHEMA_VERSION: Int = 1
+        /**
+         * Increment on any incompatible change to the shape above.
+         *
+         * **2** — `templates` and `BindingRef.templateArgs` became nullable, so `null` ("not
+         * computed") is distinguishable from `[]` ("computed, none"). Bumped while the reader
+         * count was still zero, which is the only time this is free (#213).
+         */
+        const val SCHEMA_VERSION: Int = 2
 
         /** The file name, relative to the module's generated `krapped/` root. */
         const val FILE_NAME: String = "binding-index.json"
@@ -141,7 +152,7 @@ data class BindingIndex(
             runId: String,
             rootPackage: String? = null,
             bindings: List<BindingRef> = emptyList(),
-            templates: List<TemplateFacadeRef> = emptyList(),
+            templates: List<TemplateFacadeRef>? = null,
             kotlinTypeMap: Map<String, String> = emptyMap(),
             drops: List<Diagnostic> = emptyList()
         ): BindingIndex = BindingIndex(
@@ -150,7 +161,10 @@ data class BindingIndex(
             // `spec` alone is not a guaranteed-unique key, so break ties on classId to keep the
             // order total — otherwise two bindings of the same spec could swap between runs.
             bindings = bindings.sortedWith(compareBy({ it.spec }, { it.classId })),
-            templates = templates.sortedWith(compareBy({ it.base }, { it.pkg })),
+            // ?. not orEmpty(): null means "this producer did not compute it" and MUST survive
+            // canonicalization. Collapsing it to [] here would reintroduce exactly the false
+            // statement this nullability exists to prevent.
+            templates = templates?.sortedWith(compareBy({ it.base }, { it.pkg })),
             kotlinTypeMap = kotlinTypeMap.entries.sortedBy { it.key }
                 .associateTo(LinkedHashMap()) { it.key to it.value },
             // severity and phase are included because the ledger genuinely emits several
@@ -199,12 +213,15 @@ data class BindingRef(
     /**
      * Template arguments as krapper spells them, in declaration order.
      *
-     * Empty in B1. Splitting a spec's argument list correctly needs a depth-aware parse
-     * (`std::map<int, std::vector<int>>` is two args, not three), and shipping a field populated
-     * by an unverified splitter is worse than shipping it empty — a consumer cannot tell a wrong
-     * answer from a missing one. Declared now so the schema does not change shape in B2.
+     * **`null` means "not computed"; `[]` means "computed, and this type has no template args".**
+     *
+     * `null` in B1. Splitting a spec's argument list correctly needs a depth-aware parse
+     * (`std::map<int, std::vector<int>>` is two args, not three), and a field populated by an
+     * unverified splitter is worse than one that admits it is absent. Note the previous shape
+     * emitted `[]` alongside a non-null [cppBase] — so `std::vector<int>` claimed a template base
+     * AND zero template arguments, which cannot both be true.
      */
-    val templateArgs: List<String> = emptyList()
+    val templateArgs: List<String>? = null
 )
 
 /** A `@CppTemplate` facade: the shape the plugin refines from. Populated in B2 — see above. */

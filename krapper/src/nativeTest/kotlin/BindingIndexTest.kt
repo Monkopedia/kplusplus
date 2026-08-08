@@ -23,6 +23,7 @@ import com.monkopedia.krapper.Severity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
 
 /**
@@ -173,6 +174,36 @@ class BindingIndexTest {
         assertEquals(
             listOf(DiagnosticPhase.DEDUP, DiagnosticPhase.RESOLVE),
             forward.map { it.phase }
+        )
+    }
+
+    @Test
+    fun `null and empty are distinguishable rather than collapsed`() {
+        // The whole point of #213. `null` = this producer did not compute it; `[]` = it computed
+        // and found none. If canonical() or the serializer collapses one into the other, a
+        // consumer cannot tell "unknown" from "known empty" and the index states a falsehood.
+        val notComputed = BindingIndex.canonical(runId = "r", templates = null)
+        val computedNone = BindingIndex.canonical(runId = "r", templates = emptyList())
+        assertNull(notComputed.templates)
+        assertEquals(emptyList(), computedNone.templates)
+        assertNotEquals(
+            json.encodeToString(BindingIndex.serializer(), notComputed),
+            json.encodeToString(BindingIndex.serializer(), computedNone),
+            "null and [] must serialize differently or the distinction is cosmetic"
+        )
+        // ...and survive a round trip, which is where a defaulted non-null field would collapse.
+        assertNull(
+            json.decodeFromString(
+                BindingIndex.serializer(),
+                json.encodeToString(BindingIndex.serializer(), notComputed)
+            ).templates
+        )
+        assertEquals(
+            emptyList(),
+            json.decodeFromString(
+                BindingIndex.serializer(),
+                json.encodeToString(BindingIndex.serializer(), computedNone)
+            ).templates
         )
     }
 
