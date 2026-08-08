@@ -217,7 +217,9 @@ data class BindingIndex(
 data class BindingRef(
     /** Canonical C++ spelling, exactly as krapper spells it: "std::vector<int>". */
     val spec: String,
-    /** `ClassId.asString()`, e.g. "std/Vector__Int" — the generator's own answer. */
+    /** Kotlin fully-qualified name, e.g. "std.Vector__Int" — the generator's own answer.
+     *  NOT `ClassId.asString()`: that is the slash form ("std/Vector__Int"), and B1 emits the
+     *  DOTTED fq-name because it is read straight off `ResolvedKotlinType.fullyQualified`. */
     val classId: String,
     val pkg: String,
     val simpleName: String,
