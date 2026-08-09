@@ -58,6 +58,27 @@ java {
 
 dependencies {
     compileOnly("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
+
+    // #206: this module's first tests. `compileOnly` above keeps the compiler off the
+    // published runtime classpath (the Kotlin compiler supplies it when it loads this
+    // plugin), but the tests instantiate ClassId/FqName/Name for real, so they need it.
+    testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
+    testImplementation(kotlin("test-junit"))
+}
+
+tasks.withType<Test> {
+    // #206: krapper GENERATES the binding classes this plugin looks up, and its mangling is
+    // the authority. It lives in `krapper/src/nativeMain`, which is Kotlin/Native and is NOT
+    // among the shared source dirs this build compiles, so the cross-check test reads the
+    // rule out of krapper's source file instead of calling it. Point it at that file.
+    // (`rootProject` is the `compiler` build root, one level below the repo root.)
+    systemProperty(
+        "kplusplus.test.krapperManglingSource",
+        rootProject.file(
+            "../krapper/src/nativeMain/kotlin/com/monkopedia/krapper/generator/model/" +
+                "WrappedKotlinType.kt"
+        ).absolutePath
+    )
 }
 
 tasks.withType<KotlinCompile> {
