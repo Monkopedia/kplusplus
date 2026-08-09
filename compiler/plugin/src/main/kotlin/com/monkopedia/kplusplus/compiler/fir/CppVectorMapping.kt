@@ -242,8 +242,9 @@ internal object CppVectorMapping {
     /**
      * Generated Kotlin binding ClassId, e.g. std.Vector__Int / std.Map__Int__Int /
      * std.Vector__Vector_int_ (for std::vector<std::vector<int>>). Mirrors the
-     * mangling krapper's WrappedKotlinType applies to each template arg:
-     * split on "::" take last, capitalize first char, replace ` `<`,`>`*` with `_`.
+     * mangling krapper's WrappedKotlinType applies to each template arg: split on
+     * "::" take last, capitalize first char, replace `*` with `_P` and ` `<`,`>`
+     * with `_`. BindingNameManglingTest cross-checks that against krapper's source.
      */
     fun bindingClassId(container: Container, args: List<String>): ClassId = ClassId(
         // std containers live in `std` (their C++ namespace), rooted under the
@@ -257,14 +258,22 @@ internal object CppVectorMapping {
         )
     )
 
-    private fun mangleTemplateArg(spec: String): String {
+    // `internal` (inside an already-internal object, so no widening of the module's surface)
+    // purely so BindingNameManglingTest can compare it against krapper's own rule — see #206.
+    internal fun mangleTemplateArg(spec: String): String {
         val last = spec.substringAfterLast("::")
+        // Character-for-character krapper's `String.mangleToIdentifier()`, in its order.
+        // NOTE the pointer: krapper spells `*` as `_P`, not `_` (#206) — its own self-hosting
+        // run emits `std.Vector__CXXBaseSpecifier_P` for
+        // `std::vector<clang::CXXBaseSpecifier*>`. BindingNameManglingTest holds the two
+        // implementations together until #186/B2 lets the plugin read krapper's emitted name
+        // out of `binding-index.json` and deletes this copy outright.
         return last.replaceFirstChar { it.uppercase() }
-            .replace(' ', '_')
+            .replace("*", "_P")
             .replace('<', '_')
-            .replace(',', '_')
             .replace('>', '_')
-            .replace('*', '_')
+            .replace(',', '_')
+            .replace(' ', '_')
     }
 
     /** Single-arg compat: defaults to vector. */
