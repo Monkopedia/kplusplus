@@ -70,8 +70,9 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
    reads it, and the plugin's `PLUGIN_VERSION` — which keys the consumer-side
    `~/.gradle/kplusplus/tools/<version>/` cache — is generated from it, so there is nothing
    else to bump and nothing that can be left stale.
-   The three *consumed* plugin pins (root `settings.gradle.kts` + the two `samples/`) name the
-   PREVIOUS release until the post-release migration; they move together, and
+   The four *consumed* plugin pins (root `settings.gradle.kts`, the two `samples/`, and the
+   copy-paste quickstart in `docs/getting-started.md` — #218) name the PREVIOUS release until
+   the post-release migration; they move together, and
    `:kplusplus-compiler-gradle:verifyConsumedPluginPins` (wired into `-p compiler check`) fails
    if one is left behind or gets ahead of the declared version.
 2. Create a GitHub **Release** (publish it). That fires `.github/workflows/release.yml`
