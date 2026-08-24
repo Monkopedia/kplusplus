@@ -99,11 +99,16 @@ The verification tasks (all need the LLVM toolchain, which is always required):
 | --- | --- |
 | `:featuregen:nativeTest` | The self-hosted feature suite: `krapper` parses + generates featuregen's whole C++ surface (including instantiation forcing), and the tests exercise the generated bindings. |
 | `:cppfixture:nativeTest` | The same generic path on a second module's own config, std-free. |
-| `:krapper:noncopyableDeterminismCheck` | #101: the front-end's special-member set for a NonCopyable type is byte-identical and complete across repeated parses. |
+| `:krapper:noncopyableDeterminismCheck` | #101: the front-end's special-member set for a NonCopyable type is byte-identical and complete across repeated parses. Wired into `:krapper:check` (#222), so it no longer needs to be typed by hand. |
 | `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
 
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the
 normal build picks up the generated bindings.
+
+All of the above run in CI since #222 — `.github/workflows/root-build.yml` splits them across
+two jobs by whether they need the IN-TREE tool (`:krapper:linkReleaseExecutableKlinker`) or only
+the tool bundled in the last released plugin. Before that, the whole root build — 566 `@Test`s,
+every `ktlintCheck`, and this table's tasks — ran on developer machines only.
 
 ## 6. Troubleshooting
 

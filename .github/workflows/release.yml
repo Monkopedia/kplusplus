@@ -30,6 +30,52 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # #222: the release path used to be LESS gated than a pull request. compiler-check.yml
+      # (#210) runs `-p compiler check` on every PR — apiCheck on BOTH published ABIs,
+      # verifyConsumedPluginPins (#192), and the compiler build's own tests — but this workflow
+      # went straight from checkout to publish, so at release time that gate was simply skipped.
+      # The plugin published below CARRIES the bundled krapper binary (docs/releasing.md), i.e.
+      # the artifact every consumer runs was shipped past a gate its own PRs must pass. Run it
+      # here too, FIRST: `compiler/` is a separate, JVM-only Gradle build (no LLVM, no
+      # Kotlin/Native), so this is the cheapest possible thing to fail on and it fails before
+      # the LLVM install below costs anything.
+      #
+      # Delete-before-measure + a non-zero-count assert, the #198 pattern: a green `check` is
+      # not evidence tests ran, and stale JUnit XML in a re-run workspace sits exactly where a
+      # verifier looks.
+      - name: Clear stale test reports
+        run: rm -rf compiler/*/build/test-results
+
+      - name: Gate the release on -p compiler check
+        run: ./gradlew -p compiler check --no-daemon
+
+      - name: Assert the compiler check actually ran tests
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          xml=(compiler/**/build/test-results/**/*.xml)
+          if [ ${#xml[@]} -eq 0 ]; then
+            echo "::error::No JUnit XML anywhere under compiler/. The check task cannot have run a test, so this release would publish past a gate that executed nothing."
+            exit 1
+          fi
+          total=0; failed=0
+          for f in "${xml[@]}"; do
+            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+            total=$((total + ${t:-0}))
+            failed=$((failed + ${e:-0} + ${r:-0}))
+          done
+          echo "compiler build: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::Zero tests reported. Refusing to publish on a gate that ran nothing."
+            exit 1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::The compiler build reported test failures. Not publishing."
+            exit 1
+          fi
+
       # :krapper regenerates its own Clang-AST bindings with the tool bundled in the last
       # released plugin. The generated wrapper #includes <clang/AST/...> and is built against
       # LLVM 22 — it only compiles against LLVM 22 (the cross-major C++ API drift proven in the
