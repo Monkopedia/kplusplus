@@ -147,20 +147,31 @@ kotlin.sourceSets.named("main") {
     kotlin.srcDir(generatePluginVersion)
 }
 
-// #192 (part two): the three CONSUMED plugin pins — the repo's own `pluginManagement` pin plus
-// the two from-published samples — are deliberately LAGGING: they name the last PUBLISHED
-// release, so between the release-prep version bump and the post-release migration they are
-// legitimately behind the version above. There is no single value to derive them from (the
-// samples are standalone builds that must stay copy-pasteable for a real consumer), so assert
-// the two properties that hold in BOTH phases instead: they all name the same version, and
-// none of them is ahead of what this build declares. That catches a half-done migration —
-// which is how samples/minimal went stale for a whole release cycle (#195).
+// #192 (part two): the four CONSUMED plugin pins — the repo's own `pluginManagement` pin, the
+// two from-published samples, and the quickstart snippet in docs/getting-started.md — are
+// deliberately LAGGING: they name the last PUBLISHED release, so between the release-prep
+// version bump and the post-release migration they are legitimately behind the version above.
+// There is no single value to derive them from (the samples are standalone builds that must
+// stay copy-pasteable for a real consumer, and the doc is prose), so assert the two properties
+// that hold in BOTH phases instead: they all name the same version, and none of them is ahead
+// of what this build declares. That catches a half-done migration — which is how
+// samples/minimal went stale for a whole release cycle (#195).
+//
+// #218: the doc pin is here for the same reason but with a worse failure mode — the other
+// three drift for at most one release cycle by construction, whereas nothing at all bounds a
+// stale quickstart, and it is the first thing a new external consumer copy-pastes. It is
+// matched by the SAME `pin` regex below, which anchors on the plugin-id line and requires a
+// `version "…"` clause. That is what keeps it safe on a markdown file: the historical version
+// MENTIONS in the surrounding prose ("0.3.5 shades that runtime into the plugin jar") and the
+// versionless `id(...) apply false` workaround snippet are true statements about past
+// releases that must NOT track the current version, and neither matches a pin.
 val verifyConsumedPluginPins =
     tasks.register("verifyConsumedPluginPins") {
         group = "verification"
         description =
-            "Check the consumed kplusplus plugin pins (root settings + samples) agree with " +
-                "each other and are not ahead of the declared project version."
+            "Check the consumed kplusplus plugin pins (root settings + samples + the " +
+                "getting-started quickstart) agree with each other and are not ahead of the " +
+                "declared project version."
         val declaredVersion = version.toString()
         val repoRoot = layout.projectDirectory.dir("../..")
         val pinFiles =
@@ -168,6 +179,8 @@ val verifyConsumedPluginPins =
                 "settings.gradle.kts",
                 "samples/minimal/build.gradle.kts",
                 "samples/multiproject/bindings/build.gradle.kts",
+                // The copy-paste quickstart block a real external consumer runs first (#218).
+                "docs/getting-started.md",
             ).map { repoRoot.file(it).asFile }
         doLast {
             val pin = Regex("""id\("com\.monkopedia\.kplusplus\.compiler"\)\s+version\s+"([^"]+)"""")
@@ -185,7 +198,7 @@ val verifyConsumedPluginPins =
             val listing = found.entries.joinToString("\n") { "  ${it.value}  ${it.key}" }
             check(found.values.distinct().size == 1) {
                 "The consumed kplusplus plugin pins disagree:\n$listing\n" +
-                    "All three must name the SAME published release — they move together in the " +
+                    "All four must name the SAME published release — they move together in the " +
                     "post-release migration. Bump whichever was missed."
             }
             // Numeric-component compare, zero-padded to equal width; a `-SNAPSHOT`-style
