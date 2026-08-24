@@ -42,39 +42,67 @@ jobs:
       #
       # Delete-before-measure + a non-zero-count assert, the #198 pattern: a green `check` is
       # not evidence tests ran, and stale JUnit XML in a re-run workspace sits exactly where a
-      # verifier looks.
+      # verifier looks. The clear glob below and the assert glob further down are deliberately
+      # the SAME depth (`compiler/<module>/build/test-results`) — compiler-check.yml clears one
+      # level but asserts over `compiler/**`, which also matches the root project's own
+      # `compiler/build/test-results`, so stale XML there is read but never cleared. Inert
+      # there (the compiler root has no tests) and tracked in #230; not reproduced here.
       - name: Clear stale test reports
         run: rm -rf compiler/*/build/test-results
 
       - name: Gate the release on -p compiler check
         run: ./gradlew -p compiler check --no-daemon
 
+      # PER MODULE, not summed. A grand total across `compiler/**` passes when a whole test
+      # module's report vanishes (task rename, source-set change, a `check` wiring edit) as long
+      # as some OTHER module still reports: `compiler/plugin` holds BindingNameManglingTest, the
+      # #206 FIR-vs-krapper mangling cross-check, and losing just that one still counts 3 tests
+      # from `compiler/gradle` and publishes green. On the release path the blast radius of that
+      # is every consumer, so each module is asserted on its own.
+      #
+      # And the module list is DISCOVERED from the source tree, never hardcoded — a hardcoded
+      # pair is an enumeration that cannot report its own gap (#231): add
+      # `compiler/native/src/test` and a literal `for mod in compiler/gradle compiler/plugin`
+      # would silently not require it, which is the same defect one level up. Discovery fails
+      # closed: no test module found at all is itself a gap and fails the gate.
       - name: Assert the compiler check actually ran tests
         run: |
           set -euo pipefail
           shopt -s globstar nullglob
-          xml=(compiler/**/build/test-results/**/*.xml)
-          if [ ${#xml[@]} -eq 0 ]; then
-            echo "::error::No JUnit XML anywhere under compiler/. The check task cannot have run a test, so this release would publish past a gate that executed nothing."
+          mods=(compiler/*/src/test)
+          if [ ${#mods[@]} -eq 0 ]; then
+            echo "::error::Found no compiler/*/src/test source tree at all. Either the layout moved (this guard needs updating) or the tests are gone; refusing to publish either way."
             exit 1
           fi
-          total=0; failed=0
-          for f in "${xml[@]}"; do
-            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            total=$((total + ${t:-0}))
-            failed=$((failed + ${e:-0} + ${r:-0}))
+          mods=("${mods[@]%/src/test}")
+          echo "gating on ${#mods[@]} test module(s): ${mods[*]}"
+          grand=0
+          for mod in "${mods[@]}"; do
+            xml=("$mod"/build/test-results/**/*.xml)
+            if [ ${#xml[@]} -eq 0 ]; then
+              echo "::error::No JUnit XML under $mod/build/test-results, though $mod/src/test exists. That module's tests cannot have run, so this release would publish past a gate that skipped them."
+              exit 1
+            fi
+            total=0; failed=0
+            for f in "${xml[@]}"; do
+              t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+              e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+              r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
+              total=$((total + ${t:-0}))
+              failed=$((failed + ${e:-0} + ${r:-0}))
+            done
+            echo "$mod: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+            if [ "$total" -eq 0 ]; then
+              echo "::error::$mod reported ZERO tests. Refusing to publish on a gate that ran nothing."
+              exit 1
+            fi
+            if [ "$failed" -ne 0 ]; then
+              echo "::error::$mod reported test failures. Not publishing."
+              exit 1
+            fi
+            grand=$((grand + total))
           done
-          echo "compiler build: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-          if [ "$total" -eq 0 ]; then
-            echo "::error::Zero tests reported. Refusing to publish on a gate that ran nothing."
-            exit 1
-          fi
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::The compiler build reported test failures. Not publishing."
-            exit 1
-          fi
+          echo "compiler build: $grand test(s) across ${#mods[@]} module(s)"
 
       # :krapper regenerates its own Clang-AST bindings with the tool bundled in the last
       # released plugin. The generated wrapper #includes <clang/AST/...> and is built against

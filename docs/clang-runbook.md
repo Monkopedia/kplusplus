@@ -105,10 +105,13 @@ The verification tasks (all need the LLVM toolchain, which is always required):
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the
 normal build picks up the generated bindings.
 
-All of the above run in CI since #222 — `.github/workflows/root-build.yml` splits them across
-two jobs by whether they need the IN-TREE tool (`:krapper:linkReleaseExecutableKlinker`) or only
-the tool bundled in the last released plugin. Before that, the whole root build — 566 `@Test`s,
-every `ktlintCheck`, and this table's tasks — ran on developer machines only.
+Since #222, the first THREE rows of that table run in CI (`.github/workflows/root-build.yml`,
+`generator-suite` job), together with `:krapper`/`:krapper_model`/`:feature-tests` `nativeTest`
+and every `ktlintCheck` in the `unit-tests` job — 566 `@Test`s that previously ran on developer
+machines only. The FOURTH row is the exception: **`:clangwalk:runReleaseExecutableKlinker` still
+runs in no workflow.** `clangwalk/**` appears in that workflow only as a `paths:` filter (so a
+change to it is linted), and `clangwalk` is `kpp.frontend.clangwalk=seed` — a dev-only
+self-hosting demo, not part of the release. Run it by hand when touching the stage1 demo.
 
 ## 6. Troubleshooting
 

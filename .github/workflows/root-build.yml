@@ -45,6 +45,10 @@ on:
       - 'build.gradle.kts'      # configures ktlint across every subproject
       - 'settings.gradle.kts'   # the LLVM probe + the pinned consumed plugin version
       - 'gradle.properties'     # kpp.frontend.* per-module front ends, daemon heap
+      # ktlint reads it, so it can fail every ktlintCheck in the build by itself: setting
+      # max_line_length=40 fails :cppfixture:ktlintCheck in 6s, and without this line a PR
+      # containing only that edit would trigger no workflow at all.
+      - '.editorconfig'
       - '.github/workflows/root-build.yml'
   # Unfiltered on main, same as compiler-check.yml: a merge should always leave a full
   # root-build signal on the branch, whatever the merge happened to touch.
