@@ -331,7 +331,13 @@ kplusplus {
 // special-member set is byte-identical and complete across parses — the standing regression
 // lock for the Persistent<v8::Value> parse-dependent copy-member report (a non-zero exit fails
 // the task).
-tasks.register<Exec>("noncopyableDeterminismCheck") {
+val noncopyableDeterminismCheck by tasks.registering(Exec::class) {
+    // #222: the task had no group, so `./gradlew tasks` never listed it — a lock documented in
+    // docs/clang-runbook.md's verification table that only fired if a human typed its name.
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description =
+        "#101: assert the front-end's special-member set for a NonCopyable type is " +
+        "byte-identical and complete across repeated parses."
     dependsOn("linkReleaseExecutableKlinker")
     commandLine(
         layout.buildDirectory
@@ -341,4 +347,13 @@ tasks.register<Exec>("noncopyableDeterminismCheck") {
             .absolutePath,
         "--noncopyable-determinism",
     )
+}
+
+// #222: make the #101 lock STANDING rather than ceremonial. It was registered but reachable
+// only by typing its name, so it ran nowhere — not in `check`, not in any workflow. Hanging it
+// off `check` costs a release link (`linkReleaseExecutableKlinker`), which is why the root-build
+// workflow runs it in the job that already pays for that link (the in-tree tool the generator
+// suite needs), not in the cheap unit-test job.
+tasks.named("check") {
+    dependsOn(noncopyableDeterminismCheck)
 }
