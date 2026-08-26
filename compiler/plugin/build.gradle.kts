@@ -67,17 +67,22 @@ dependencies {
 }
 
 tasks.withType<Test> {
-    // #206: krapper GENERATES the binding classes this plugin looks up, and its mangling is
-    // the authority. It lives in `krapper/src/nativeMain`, which is Kotlin/Native and is NOT
-    // among the shared source dirs this build compiles, so the cross-check test reads the
-    // rule out of krapper's source file instead of calling it. Point it at that file.
-    // (`rootProject` is the `compiler` build root, one level below the repo root.)
+    // #186 B2 / #206: the coverage gate's DENOMINATOR is featuregen's real instantiation
+    // surface, read from the repo rather than hand-listed so a new feature row is covered
+    // automatically. Two files make it up: the committed manifest the FIR checker itself grew,
+    // and the `instantiate(...)` calls the build seeds (the user-template specs no compile can
+    // request). `rootProject` is the `compiler` build root, one level below the repo root.
+    //
+    // (This replaces `kplusplus.test.krapperManglingSource`, which pointed at krapper's
+    // `WrappedKotlinType.kt` so the plugin's hand-copied mangling could be cross-checked
+    // against it. B2 deleted that copy, so there is nothing left to cross-check.)
     systemProperty(
-        "kplusplus.test.krapperManglingSource",
-        rootProject.file(
-            "../krapper/src/nativeMain/kotlin/com/monkopedia/krapper/generator/model/" +
-                "WrappedKotlinType.kt"
-        ).absolutePath
+        "kplusplus.test.featuregenRequested",
+        rootProject.file("../featuregen/krapped/requested.txt").absolutePath
+    )
+    systemProperty(
+        "kplusplus.test.featuregenBuildScript",
+        rootProject.file("../featuregen/build.gradle.kts").absolutePath
     )
 }
 

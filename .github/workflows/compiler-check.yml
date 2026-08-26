@@ -24,15 +24,15 @@ on:
       - 'compiler/**'
       - 'krapper/src/commonMain/**'      # compiled INTO the plugin as a shared source dir
       - 'krapper_model/src/commonMain/**'
-      # krapper's `mangleToIdentifier` is the authority BindingNameManglingTest (#206) cross-
-      # checks the FIR plugin's hand copy against, and the test reads this exact file, via the
-      # `kplusplus.test.krapperManglingSource` property set in compiler/plugin/build.gradle.kts.
-      # Pinned to the file rather than `krapper/src/nativeMain/**` so the job stays off the many
-      # nativeMain PRs that cannot affect it; the pin and that property must move together, and
-      # the test already fails loudly if the file moves. Without this entry the guard is filtered
-      # off the very PRs it exists to catch and fires only on the later push-to-main run -- which
-      # in a repo where PRs auto-merge on green review means after the drift has landed (#220).
-      - 'krapper/src/nativeMain/kotlin/com/monkopedia/krapper/generator/model/WrappedKotlinType.kt'
+      # NOTE: `krapper/src/nativeMain/.../WrappedKotlinType.kt` used to be pinned here, because
+      # BindingNameManglingTest cross-checked the FIR plugin's hand copy of `mangleToIdentifier`
+      # against that exact file. #186/B2 deleted the hand copy — the plugin now reads binding
+      # names out of krapper's emitted `binding-index.json` — so nothing under `compiler/**`
+      # depends on that source any more and the pin has been removed with the test. The gate
+      # that replaced it (BindingIndexCoverageTest) reads featuregen's committed
+      # `krapped/requested.txt` + `featuregen/build.gradle.kts`, pinned below.
+      - 'featuregen/krapped/requested.txt'
+      - 'featuregen/build.gradle.kts'
       - 'gradle/libs.versions.toml'
       - 'gradle/wrapper/**'              # this job runs the repo-root ./gradlew
       - 'gradle.properties'              # the single source of the published version (#192)
