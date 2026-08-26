@@ -17,6 +17,8 @@ public final class com/monkopedia/kplusplus/compiler/KPlusPlusCommandLineProcess
 }
 
 public final class com/monkopedia/kplusplus/compiler/KPlusPlusCommandLineProcessor$Companion {
+	public final fun getBINDING_INDEX_PATH_KEY ()Lorg/jetbrains/kotlin/config/CompilerConfigurationKey;
+	public final fun getBINDING_INDEX_PATH_OPTION ()Lorg/jetbrains/kotlin/compiler/plugin/CliOption;
 	public final fun getREQUEST_MANIFEST_PATH_KEY ()Lorg/jetbrains/kotlin/config/CompilerConfigurationKey;
 	public final fun getREQUEST_MANIFEST_PATH_OPTION ()Lorg/jetbrains/kotlin/compiler/plugin/CliOption;
 	public final fun getROOT_PACKAGE_KEY ()Lorg/jetbrains/kotlin/config/CompilerConfigurationKey;
@@ -41,6 +43,7 @@ public final class com/monkopedia/kplusplus/compiler/fir/CppVectorCallRefinement
 
 public final class com/monkopedia/kplusplus/compiler/fir/KPlusPlusDiagnostics : org/jetbrains/kotlin/diagnostics/KtDiagnosticsContainer {
 	public static final field INSTANCE Lcom/monkopedia/kplusplus/compiler/fir/KPlusPlusDiagnostics;
+	public final fun getBINDING_INDEX_UNAVAILABLE ()Lorg/jetbrains/kotlin/diagnostics/KtDiagnosticFactory1;
 	public fun getRendererFactory ()Lorg/jetbrains/kotlin/diagnostics/rendering/BaseDiagnosticRendererFactory;
 	public final fun getSYNC_REQUIRED ()Lorg/jetbrains/kotlin/diagnostics/KtDiagnosticFactory1;
 }

@@ -18,8 +18,10 @@ import org.jetbrains.kotlin.name.Name
  * call site sees the concrete generated binding type (e.g. std.Vector__Int,
  * std.Map__Int__Int) instead of the declared generic. The return type points
  * at the existing generated class, not a synthetic one, so this extension owns
- * no symbols. When the binding is absent the call is left unrefined and
- * [CppVectorCallChecker] reports SYNC_REQUIRED instead.
+ * no symbols. The concrete class comes from krapper's emitted `binding-index.json`
+ * ([CppVectorMapping.resolveBinding]), never from a name this plugin reconstructs (#206). When
+ * the binding is absent — or no index can be read — the call is left unrefined and
+ * [CppVectorCallChecker] reports it.
  */
 @OptIn(FirExtensionApiInternals::class)
 class CppVectorCallRefinement(session: FirSession) :
@@ -29,8 +31,10 @@ class CppVectorCallRefinement(session: FirSession) :
         val container = CppVectorMapping.containerForCallable(symbol, session) ?: return null
         val elements = CppVectorMapping.elementsOf(callInfo, session) ?: return null
         if (elements.size != container.arity) return null
+        val resolved = CppVectorMapping.resolveBinding(container, elements)
+            as? BindingResolution.Resolved ?: return null
         val bindingSymbol = session.symbolProvider
-            .getClassLikeSymbolByClassId(CppVectorMapping.bindingClassId(container, elements))
+            .getClassLikeSymbolByClassId(resolved.classId)
             as? FirRegularClassSymbol ?: return null
         val typeRef = buildResolvedTypeRef {
             coneType = bindingSymbol.constructType(emptyArray(), isMarkedNullable = false)

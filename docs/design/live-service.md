@@ -90,13 +90,17 @@ can it query" (§4.3).
 
 Grounding the query surface in what the file actually does:
 
-- **Name mangling.** `bindingClassId` + `mangleTemplateArg` (`CppVectorMapping.kt:248-268`)
-  reimplement `KotlinWriter`'s class-name mangling: last `::` segment, capitalize first char,
-  replace `` ` ` <,>* `` with `_`. The package rule (`bindingPackage ?: "$rootPackage.std" ?: "std"`,
-  `:253`) reimplements the generator's package rooting. **Nothing checks these two implementations
-  against each other.** A generator-side change silently degrades to "binding not found" →
-  spurious `SYNC_REQUIRED` on a binding that exists. The file's own header comment concedes this:
-  *"Binding-name mangling mirrors what krapper's KotlinWriter emits"* (`:26-31`).
+- ~~**Name mangling.**~~ **CLOSED by B2 (#206).** `bindingClassId` + `mangleTemplateArg`
+  reimplemented `KotlinWriter`'s class-name mangling — last `::` segment, capitalize first char,
+  replace `` ` ` <,>* `` with `_` — and the package rule
+  (`bindingPackage ?: "$rootPackage.std" ?: "std"`) reimplemented the generator's package
+  rooting, with **nothing checking the two implementations against each other**. They had already
+  drifted on `*` (#206: krapper emits `Vector__CXXBaseSpecifier_P`, the copy looked up
+  `Vector__CXXBaseSpecifier_`). Both are **deleted**: `CppVectorMapping.resolveBinding` looks the
+  C++ spec up in krapper's emitted `binding-index.json` and returns the ClassId krapper recorded.
+  A spec the index does not list is a definitive `SYNC_REQUIRED`; no readable index is a
+  `BINDING_INDEX_UNAVAILABLE` diagnostic. There is deliberately no derivation fallback — a
+  fallback that can be wrong is worse than one that says it cannot answer.
 - **Kotlin→C++ type table.** `cppElementType` (`:176-182`) knows exactly four types: `Int`, `Long`,
   `Double`, `Float`. `cppVector<Boolean>()` / `<Short>` / `<Byte>` / `<Char>` are reported as
   *"type arguments are not supported C++ element types"* (`CppVectorCallChecker.kt:31-38`) even
@@ -538,10 +542,24 @@ Machine-checkable gates, per brick:
   §1.4 and is a prerequisite for persistence.
 - **G4** — a cached `WrappedTU`'s `ModelIo.encodeToString` equals a fresh parse's, for
   featuregen's header and for `clang_slice.h`.
-- **G5** — index/derivation agreement: for every `BindingRef` in featuregen's index,
-  `CppVectorMapping.bindingClassId(...)` (the static derivation) produces the same ClassId. This
-  is the drift detector §1.3 says we currently lack, and it is why the static path should be kept
-  rather than deleted.
+- **G5** — index **coverage** (revised by B2; see the note below): every container-facade
+  binding the plugin resolves over featuregen's real instantiation surface gets its ClassId from
+  `binding-index.json`, a spec the index does not list is a sync request, and a lookup with no
+  readable index is a **diagnostic** — never a silently derived name.
+  `BindingIndexCoverageTest` is that gate; it reads its denominator from featuregen's committed
+  `krapped/requested.txt` plus the `instantiate(...)` calls in its build script, and every index
+  it builds maps specs to names no mangling could produce, so it cannot pass unless the name came
+  out of the file.
+
+  > **Why this is no longer an agreement check.** As first written, G5 compared the index against
+  > `CppVectorMapping`'s static derivation and concluded "this is why the static path should be
+  > kept rather than deleted". That rationale held only while the derivation was the *only*
+  > source of binding names, when either side could be wrong. Once the index is authoritative the
+  > comparison degenerates into asserting that two implementations of one rule agree — which is
+  > the maintenance burden #206 was filed to end, not a drift detector. What replaces it keeps
+  > G5's real purpose (catch plugin and tool disagreeing about what exists) without the second
+  > implementation. The cross-check that *does* survive is `rootPackage`: an index generated
+  > under a different one does not describe this compilation, and is refused.
 - **G6** (L3 only) — the oracle may only turn keeps into drops: the post-oracle ledger must be a
   **superset** of the pre-oracle ledger, and G1 must stay green.
 
@@ -630,11 +648,17 @@ Removing a hazard beats isolating from it.
 Each brick is independently landable, independently verifiable, and reversible by reverting one
 commit. Nothing is deleted until its replacement has shipped for a release.
 
+B2 is the first discharge of that rule: B1's emitter shipped in **v0.3.6** and this repo migrated
+onto it in `bd7f448`, so B2 deletes the hand-rolled mangling outright rather than leaving it as a
+fallback. Note what "discharged" bought — the alternative, keeping a fallback that had *already
+been measured wrong* on `*`, would have preserved exactly the silent-wrong-answer mode #206
+exists to remove.
+
 | # | Brick | Verifies with | Reversible by | Blocked on |
 |---|---|---|---|---|
 | **B0** | **Probes** (§9). No production code; each lands as a measurement note or a `nativeTest`. | the probe's own output | n/a | — |
 | **B1** | **Emit the index.** `writeTo` also writes `binding-index.json`. No consumer. | G1 (all pre-existing files byte-identical), G2 | delete the writer | — |
-| **B2** | **Consume the index.** `bindingIndexPath` SubpluginOption; `CppVectorMapping` prefers the index, keeps static derivation as fallback. Includes **G5** (the drift detector). | G5, full featuregen test run, `samples/minimal` | drop the option | B1, released tool |
+| **B2** | **Consume the index.** `bindingIndexPath` SubpluginOption; `CppVectorMapping` resolves binding ClassIds **only** from the index — `mangleTemplateArg` and the package rule are deleted, and there is no derivation fallback (a miss is `SYNC_REQUIRED`, an unreadable index is `BINDING_INDEX_UNAVAILABLE`). Includes **G5** as revised above (coverage, not agreement). Closes #206. | G5, full featuregen test run, seed-module compile | drop the option | B1, released tool |
 | **B3** | **Real diagnostics.** `SYNC_REQUIRED` carries the ledger reason + C++ `file:line:col`; `kotlinTypeMap` replaces the 4-entry table (`CppVectorMapping.kt:176-182`). | new FIR diagnostic tests; a `cppVector<Boolean>()` row in featuregen | revert the message change | B2 |
 | **B4** | **De-globalize.** `DropLedger` / `GenerationContext` / `cppParseIncludeDirs` / `cppModelDumpDir` / `cppBaseModelTu` become per-`IndexedService` state (or an explicit mutex + documented single-tenancy). | **G3(b)** — two configs in one process match two fresh processes | revert | — (independent, do early) |
 | **B5** | **Persistence (D1).** Parse cache keyed on `IndexKey`; process held across builds; idle timeout; `kplusplusDaemonStop/Status`; falls back to today's per-run session on any failure. | G1, G3, G4; **measured** second-sync wall time; `kill -9` mid-build degrades cleanly | `-Pkpp.daemon.idleTimeout=0` | B4, P3 (#194 discharged — shaded in v0.3.5) |
@@ -723,7 +747,7 @@ socket, and no Sema.** It replaces a silently-drifting re-derivation of the gene
 (`CppVectorMapping.kt:248-268`) with the generator's own answer, replaces a 4-entry type table
 with krapper's, and turns `kplusplus-sync-required: <spec>` into a real compiler diagnostic
 carrying the C++ position and the reason. It is three small, independently verifiable changes
-with an equality test (G5) that would have caught the drift class we currently cannot see.
+with a coverage gate (G5) over the plugin's real resolution surface.
 
 Everything above that line — persistence, the socket, Sema, lazy binding — should each be gated
 on its own probe, and each is allowed to come back negative. In particular: if P3 says a second
@@ -738,9 +762,17 @@ exactly as that document argued.
 1. **Is a bare `SYNC_REQUIRED` failure + one extra invocation acceptable UX?** If yes, §4.6's
    convergence mitigations (scan pass / compile-retry) stay unbuilt and this issue shrinks
    considerably. If no, that is a separate, Gradle-level piece of work worth its own issue.
-2. **Is `binding-index.json` a committed artifact for seed modules?** Committing it makes mangling
-   drift a `git diff`, which is the cheapest possible regression gate — but it adds a file to
-   every seed tree.
+2. **Is `binding-index.json` a committed artifact for seed modules?** *Still open, and B2 made it
+   concrete rather than hypothetical.* A `-Pkpp.frontend.<m>=seed` module never runs krapper, so
+   it can never have an index; with the derivation deleted, a container-facade call in a seed
+   module now gets `BINDING_INDEX_UNAVAILABLE` instead of a name. **Measured before landing B2:
+   no seed module reaches that path** — `:clangwalk` is the only one, it makes no facade call
+   (its `krapped/src/std_Vector__*.kt` are reached as member return types, not through
+   `cppVector<T>()`), and it compiles clean with no index present. So the hole is structural, not
+   actual. If a seed module ever needs a facade call, the fix is to give the seed an index —
+   either committed alongside the rest of the seed, or reassembled by `runSeedSync` from the
+   `@CppBinding` annotations the committed sources already carry (which reads krapper's emitted
+   output rather than re-deriving anything). Do NOT answer it by restoring the derivation.
 3. ~~**#194's remedy.**~~ **RESOLVED, no longer a question** — #194 shipped option 1
    (shade/relocate) in v0.3.5, and §7 explains why that is the better outcome for #186 than the
    worker this document originally recommended. Nothing needed here.

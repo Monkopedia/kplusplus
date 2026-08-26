@@ -21,7 +21,8 @@ class KPlusPlusCommandLineProcessor : CommandLineProcessor {
 
     override val pluginOptions: Collection<AbstractCliOption> = listOf(
         REQUEST_MANIFEST_PATH_OPTION,
-        ROOT_PACKAGE_OPTION
+        ROOT_PACKAGE_OPTION,
+        BINDING_INDEX_PATH_OPTION
     )
 
     override fun processOption(
@@ -34,6 +35,8 @@ class KPlusPlusCommandLineProcessor : CommandLineProcessor {
                 configuration.put(REQUEST_MANIFEST_PATH_KEY, value)
             ROOT_PACKAGE_OPTION.optionName ->
                 configuration.put(ROOT_PACKAGE_KEY, value)
+            BINDING_INDEX_PATH_OPTION.optionName ->
+                configuration.put(BINDING_INDEX_PATH_KEY, value)
             else -> error("Unexpected kplusplus compiler plugin option: ${option.optionName}")
         }
     }
@@ -66,5 +69,20 @@ class KPlusPlusCommandLineProcessor : CommandLineProcessor {
 
         val ROOT_PACKAGE_KEY: CompilerConfigurationKey<String> =
             CompilerConfigurationKey.create("kplusplus generated-binding root package")
+
+        val BINDING_INDEX_PATH_OPTION = CliOption(
+            optionName = "bindingIndexPath",
+            valueDescription = "<path>",
+            description = "Absolute path of krapper's binding-index.json — its own record of " +
+                "which Kotlin class each C++ instantiation became. The plugin resolves " +
+                "container-facade calls through it instead of recomputing the generated " +
+                "name (#186 B2 / #206). Without it the plugin cannot resolve a facade call " +
+                "and says so.",
+            required = false,
+            allowMultipleOccurrences = false
+        )
+
+        val BINDING_INDEX_PATH_KEY: CompilerConfigurationKey<String> =
+            CompilerConfigurationKey.create("kplusplus binding index path")
     }
 }

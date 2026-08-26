@@ -1,5 +1,6 @@
 package com.monkopedia.kplusplus.compiler.gradle
 
+import com.monkopedia.krapper.BindingIndex
 import com.monkopedia.krapper.ErrorPolicy
 import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
@@ -756,14 +757,30 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // Per-compilation manifest path: matches the krapped/ layout the sync
         // task + wireGeneratedBindings already use, so the on-disk wiring stays consistent.
         val manifestPath = File(project.projectDir, "krapped/requested.txt").absolutePath
-        // Mirror the generator's rootPackage to the FIR plugin so its binding lookup
-        // (bindingClassId) finds the container bindings under the same package.
+        // Mirror the generator's rootPackage to the FIR plugin. Since #206/B2 the plugin no
+        // longer positions bindings with it — it cross-checks it against the rootPackage the
+        // index records, so a krapped tree predating a rootPackage change is reported rather
+        // than resolved against.
         val rootPackage = project.extensions
             .findByType(KPlusPlusExtension::class.java)?.rootPackage
+        // krapper's own record of which Kotlin class each C++ instantiation became (#186 B1),
+        // written into the SAME directory the generated sources and .def come from — so it
+        // tracks whichever front-end produced them (build/krapped-cpp for the cpp path,
+        // <projectDir>/krapped otherwise). The FIR plugin reads binding names out of this file
+        // instead of recomputing krapper's mangling, which is what #206 was filed about.
+        //
+        // Passed as a plain path, not a FilesSubpluginOption: the index's binding list is a
+        // function of the same generation that writes krapped/src, and those sources are
+        // already a declared input of this compilation, so content-hashing the index adds no
+        // up-to-date signal the compile task does not already have. (The one part of the index
+        // that CAN move on its own is `drops`, which this plugin never reads.)
+        val bindingIndexPath =
+            File(krappedDirFor(project), BindingIndex.FILE_NAME).absolutePath
         return project.provider {
             buildList {
                 add(SubpluginOption("requestManifestPath", manifestPath))
                 rootPackage?.let { add(SubpluginOption("rootPackage", it)) }
+                add(SubpluginOption("bindingIndexPath", bindingIndexPath))
             }
         }
     }
