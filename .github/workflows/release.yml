@@ -19,16 +19,38 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # `gradle/actions/setup-gradle` used to sit below the JDK setup. It is gone: its v6 moved
+      # caching into `gradle-actions-caching`, a proprietary non-MIT component whose Terms of Use
+      # you accept by upgrading, and this repo declines that everywhere (compiler-check.yml and
+      # root-build.yml were already written this way). Two things it actually did for us survive
+      # the removal, and they are split apart here.
+      #
+      # (1) Wrapper validation, which setup-gradle did by default (`validate-wrappers: true`) —
+      # so removing it without this line would have quietly weakened the RELEASE path, the one
+      # place in this repo where an unvalidated wrapper jar reaches signed, published artifacts.
+      # The standalone sub-action is MIT-only: `dist/wrapper-validation/main/index.js` at v6.3.0
+      # contains zero occurrences of `gradle-actions-caching`, where setup-gradle's contains one.
+      # It runs before the JDK setup because the point is to validate the jar before anything
+      # executes it.
+      - name: Validate the Gradle wrapper jars
+        uses: gradle/actions/wrapper-validation@v6
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      # (2) Gradle User Home caching — and this one is deliberately NOT reinstated, unlike in the
+      # other three workflows. GitHub scopes an Actions cache by ref. This workflow runs only on
+      # `release: published` (ref = the tag) and `workflow_dispatch`, so it never writes a cache
+      # any later run can read, and there is no push-to-main run of THIS workflow to warm one for
+      # it. setup-gradle's `cache-read-only` default (`ref_name != default_branch`) already made
+      # it read-only here for exactly that reason. An actions/cache step would be decoration, so
+      # there isn't one; a release is not latency-sensitive, and the job pays a ~1 GB Kotlin/Native
+      # download anyway.
 
       # #222: the release path used to be LESS gated than a pull request. compiler-check.yml
       # (#210) runs `-p compiler check` on every PR — apiCheck on BOTH published ABIs,

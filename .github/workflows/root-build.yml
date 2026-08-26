@@ -65,10 +65,10 @@ jobs:
     # not slow — the same reasoning as #198's cap on samples-minimal.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -76,11 +76,12 @@ jobs:
       # The Kotlin/Native distribution is a ~1 GB download that is identical for every run of
       # a given Kotlin version, and it is the largest fixed cost in a cold root build. This is
       # first-party actions/cache, deliberately NOT gradle/actions/setup-gradle — whose v6
-      # moved caching into a proprietary, non-MIT component that #209 has open pending the
-      # owner (compiler-check.yml declines it for the same reason). A cache miss just means
-      # the download happens.
+      # moved caching into a proprietary, non-MIT component. That was open in #209 when this
+      # file was written; #209 settled it by declining the component repo-wide, so no workflow
+      # here uses setup-gradle any more and this pattern is now the repo's only cache. A cache
+      # miss just means the download happens.
       - name: Cache the Kotlin/Native distribution
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -155,7 +156,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: root-build-unit-test-results
           path: ./*/build/test-results/**
@@ -171,16 +172,16 @@ jobs:
     # would let a wedged run sit for six hours (#198).
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Cache the Kotlin/Native distribution
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -253,7 +254,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: root-build-generator-suite-test-results
           path: ./*/build/test-results/**
