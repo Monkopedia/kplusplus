@@ -17,6 +17,8 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.model.type.WrappedType
 
+private const val DETACHED_SITE = "GenerationContext.current"
+
 /**
  * Run-scoped state for a single generation pass: the [WrappedType] intern cache plus the
  * two config values that are baked into types at resolve time.
@@ -34,12 +36,14 @@ import com.monkopedia.krapper.generator.model.type.WrappedType
  * context-less surfaces called pervasively from non-suspend code, so passing a carrier to
  * every call site would be sprawling churn for no behavioral gain.
  *
- * **Single-tenancy still applies within one process.** [using] is stack-disciplined (it
- * restores the previous installation), so nested and *sequential* runs are correct and
- * independent. Two runs interleaving at a suspension point are not: that is what B5's
- * mutex is for. What B4 buys is that the state itself is no longer shared, so serializing
- * calls is now sufficient — before B4 it was not, because run B's `reset()` destroyed
- * run A's state outright.
+ * **Two contexts may be alive at once; two may not be INSTALLED at once.** Each run owns its
+ * instance, so building or using one context cannot disturb another — the claim at the top of
+ * this doc comment, gated by `DeterminismTest`'s G3(c). [using] is stack-disciplined (it
+ * restores the previous installation), so nested and sequential scopes are correct too. What
+ * is still shared is the *installed* slot: two runs interleaving at a suspension point
+ * collide, and that is what B5's mutex is for. So B4 makes serializing **sufficient** — it
+ * does not make it optional. Before B4 it was not sufficient, because run B's `reset()`
+ * destroyed run A's state outright.
  */
 class GenerationContext(
     /**
@@ -70,19 +74,53 @@ class GenerationContext(
          * The context used when no run is installed. Exists for unit tests that drive
          * pieces of the pipeline directly (`WrappedType("int")` in a fixture builder);
          * every production read happens inside a `KrapperRun.using` scope, which is what
-         * `DeterminismTest.twoConfigsInOneProcessMatchFreshProcesses` proves — a
-         * production read that escaped the scope would land here, be shared between the
-         * two configs, and diverge from the fresh-process baselines.
+         * `DeterminismTest`'s G3(b)/G3(c) gates measure — a production read that escaped
+         * its scope would land here, be shared between two differently-configured runs,
+         * and diverge from their fresh-process baselines.
+         *
+         * It is deliberately a working context rather than a thrown error, because the
+         * unit tests that build fixtures outside any run depend on it. The cost is that
+         * escaping a scope FAILS SILENTLY, surfacing much later as "the output diverged
+         * from the baseline" with nothing pointing at the cause — [onFirstDetachedRead]
+         * exists to turn that into a named diagnostic.
          */
         @PublishedApi
         internal val detached = GenerationContext()
 
+        /**
+         * Invoked at most ONCE per process, on the first read that finds no run installed,
+         * with the name of the reading site.
+         *
+         * Null by default, so the fallback stays silent and an untouched run is
+         * byte-identical. `:krapper` wires this to a stderr warning under the
+         * `diag.detachedReads` flag; it is a hook rather than a direct log call because
+         * this module cannot see `:krapper`'s flag registry or logger.
+         *
+         * One-shot on purpose: these reads come from `WrappedType.invoke`'s interner, so a
+         * per-read warning would emit thousands of lines and bury the signal.
+         */
+        var onFirstDetachedRead: ((String) -> Unit)? = null
+
+        private var detachedReadReported = false
+
+        /**
+         * Report that [site] read run-scoped state with no run installed. Public because
+         * `KrapperRun.current` in `:krapper` funnels its own detached reads through the
+         * same one-shot latch, so a process emits one warning naming whichever site got
+         * there first rather than one per carrier.
+         */
+        fun noteDetachedRead(site: String) {
+            if (detachedReadReported) return
+            detachedReadReported = true
+            onFirstDetachedRead?.invoke(site)
+        }
+
         @PublishedApi
         internal var installed: GenerationContext = detached
 
-        /** The context of the run currently in scope. */
+        /** The context of the run currently in scope, or [detached] if there is none. */
         val current: GenerationContext
-            get() = installed
+            get() = installed.also { if (it === detached) noteDetachedRead(DETACHED_SITE) }
 
         /**
          * Install [context] for the duration of [body] and restore the previous

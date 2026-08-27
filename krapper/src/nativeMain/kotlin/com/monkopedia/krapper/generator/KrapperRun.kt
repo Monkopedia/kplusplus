@@ -41,13 +41,19 @@ import com.monkopedia.krapper.generator.model.WrappedTU
  * surfaces are non-suspend and called pervasively, so it is sprawling churn for no
  * behavioural gain.
  *
- * **What this does and does not buy.** [using] is stack-disciplined, so sequential and
- * nested runs in one process are independent: run B no longer erases run A, and each run's
- * output is a function of its own config. That is the property `DeterminismTest`'s G3(b)
- * gate checks against genuine fresh-process baselines. It is *not* a concurrency fix: two
- * runs interleaving at a suspension point still share the installed slot, so the daemon
- * serializes calls (§4, "Single-tenancy"). De-globalizing is what makes serializing
- * *sufficient* — before B4 even a serialized second call destroyed the first run's ledger.
+ * **What this does and does not buy.** Two runs may be **alive at the same time** and stay
+ * independent: each owns its ledger, profiler and context, so constructing or using one does
+ * not disturb the other, and [using] is stack-disciplined so neither leaves state behind.
+ * That is the property `DeterminismTest`'s **G3(c)** gate checks — two runs built before
+ * either generates, used out of construction order, each against a genuine fresh-process
+ * baseline. Its weaker sibling G3(b) only shows that *sequential* runs do not leak, which
+ * the pre-B4 globals already satisfied because they were reset at construction; do not cite
+ * it as the gate for this class.
+ *
+ * It is *not* a concurrency fix: two runs interleaving at a suspension point still share the
+ * process-wide installed slot, so the daemon serializes calls (§4, "Single-tenancy").
+ * De-globalizing is what makes serializing *sufficient* — before B4 even a serialized second
+ * call destroyed the first run's ledger.
  */
 class KrapperRun(
     /** The intern cache and the resolve-time config (root package, `-fno-rtti`). */
@@ -97,7 +103,11 @@ class KrapperRun(
          * pipeline directly; every production read happens inside a [using] scope. A
          * production read that escaped its scope would land here, be shared between two
          * differently-configured runs, and diverge from their fresh-process baselines — which
-         * is precisely what `DeterminismTest`'s G3(b) gate measures.
+         * is what `DeterminismTest`'s G3(b)/G3(c) gates measure.
+         *
+         * Escaping a scope otherwise fails SILENTLY, so reads of this fallback are reported
+         * once per process through `GenerationContext.noteDetachedRead` (one shared latch
+         * across both carriers) under the `diag.detachedReads` flag.
          */
         @PublishedApi
         internal val detached = KrapperRun(GenerationContext())
@@ -105,9 +115,11 @@ class KrapperRun(
         @PublishedApi
         internal var installed: KrapperRun = detached
 
-        /** The run currently in scope. */
+        /** The run currently in scope, or [detached] if there is none. */
         val current: KrapperRun
-            get() = installed
+            get() = installed.also {
+                if (it === detached) GenerationContext.noteDetachedRead("KrapperRun.current")
+            }
 
         /**
          * Install [run] (and its [GenerationContext]) for the duration of [body], restoring

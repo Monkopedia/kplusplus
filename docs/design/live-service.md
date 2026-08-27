@@ -138,14 +138,19 @@ roots) read the installed run rather than a global. Threading a carrier through 
 and codegen signature was rejected for the reason `GenerationContext`'s KDoc already gave: those
 surfaces are non-suspend and called pervasively.
 
-**What that does and does not buy — read this before B5.** `KrapperRun.using` is
-stack-disciplined, so *sequential* and *nested* runs in one process are now independent: run B
-no longer erases run A, and each run's output is a function of its own config. That is what
-`DeterminismTest.twoConfigsInOneProcessMatchFreshProcesses` (G3(b)) measures, against genuine
-fresh-process baselines. It is **not** a concurrency fix: two runs interleaving at a suspension
-point still share the installed slot, so the daemon must still serialize (§4). The change is
-that serializing is now **sufficient** — before B4 even a serialized second call destroyed the
-first run's ledger, which is why the mutex alone was never going to be enough.
+**What that does and does not buy — read this before B5.** Two runs may now be **alive at the
+same time** and stay independent: each owns its ledger, intern cache and config, so
+constructing or using one does not disturb the other. That is the property this section claims,
+and the one `DeterminismTest.interleavedRunLifetimesMatchFreshProcesses` (G3(c)) measures
+against genuine fresh-process baselines — by building both runs before either generates and
+then using them out of construction order. Its weaker sibling G3(b) only shows that
+*sequential* runs do not leak, which the pre-B4 code already satisfied; see G3 for the
+measurement.
+
+It is **not** a concurrency fix. Two runs interleaving at a suspension point still share the
+process-wide installed slot, so the daemon must still serialize (§4). The change is that
+serializing is now **sufficient** — before B4 even a serialized second call destroyed the first
+run's ledger, which is why the mutex alone was never going to be enough.
 
 ### 1.5 Output is wholesale, and ordering is insertion-ordered
 
@@ -439,8 +444,9 @@ every subsequent build) without putting any deadline on real work.
 - `./gradlew kplusplusDaemonStop` / `kplusplusDaemonStatus` tasks, so the escape hatch is
   discoverable.
 
-**Single-tenancy.** B4 made §1.4's state per-`IndexedService`, so successive syncs in one
-process no longer share a `GenerationContext`, a `DropLedger` or the front-end's parse config.
+**Single-tenancy.** B4 made §1.4's state per-`IndexedService`, so two syncs — even two alive at
+the same time — no longer share a `GenerationContext`, a `DropLedger` or the front-end's parse
+config (G3(c)).
 The daemon still takes a mutex around every call that touches resolve state, and still documents
 that concurrent module syncs serialize: the *installed-run slot* is process-wide even though the
 state it points at is not, so two calls interleaving at a suspension point would still collide.
@@ -556,18 +562,40 @@ Machine-checkable gates, per brick:
 - **G2** — `:cppfixture` + `:clangwalk` regenerate-and-diff, plus a `DropLedger` diff (the pattern
   `wellformedness-binding-gate.md:329-333` established).
 - **G3** — extend `DeterminismTest` (`krapper/src/nativeTest/kotlin/DeterminismTest.kt`, which
-  exists precisely to catch leaked process globals) with: (a) two runs in one process over the
-  **same** set in **shuffled request order** → identical; (b) two runs in one process over
-  **different configs** → each identical to its own fresh-process run. (b) is the direct test of
-  §1.4 and is a prerequisite for persistence. **Both landed with B4.** (a) permutes an
-  `AllowListFilter`'s names across three orders — the order that reaches the writers comes from
-  the parse-tree walk, not the request list, which is what makes insertion-order emission (§1.5)
-  a function of the model. (b) takes its baseline from a **real second process**: the test
-  re-executes its own binary (`/proc/self/exe`) with the config named in the environment and the
-  runner filtered to one child entry point. That indirection is the point — comparing two
-  in-process runs to each other cannot detect a leak both sides share, and a missing child fails
-  loudly rather than comparing against nothing. The drop-ledger report is compared alongside the
-  emitted files, since it is run-scoped state the sources do not reflect.
+  exists precisely to catch leaked process globals) with **three** tests. (a) two runs in one
+  process over the **same** set in **shuffled request order** → identical; (b) two runs in one
+  process over **different configs** → each identical to its own fresh-process run; (c) two runs
+  **constructed before either generates** and then **used out of construction order** → each
+  still identical to its own fresh-process run, and a run re-entered after another ran in
+  between unchanged. **All three landed with B4.**
+
+  > **(b) alone is not the gate, and the original wording of this section said it was.** As
+  > first written, G3 stopped at (b) and called it "the direct test of §1.4". It is not. A test
+  > that runs `construct A → use A → construct B → use B` never has two runs configured at the
+  > same time, so it is passed by the **actual pre-B4 shape** — process globals **reset at
+  > construction** (`IndexedServiceImpl.init` calling
+  > `GenerationContext.reset(config.rootPackage, config.noRtti)`), where each construction
+  > happened after the previous run had already finished. Measured, not reasoned: under a
+  > construction-time-reset mutation, (a), (b) and the original same-config guard all stay
+  > **green** and only (c) goes **red**. §1.4's claim is about runs *alive at once*, so the
+  > gate has to create that overlap; (b) checks the weaker sequential property, which the code
+  > it was meant to reject already had. **B5 must not inherit this**: any persistence gate
+  > phrased as "two syncs in one process" needs to say whether the two are alive at the same
+  > time, because a daemon holding one index while another is requested is exactly case (c).
+
+  (a) permutes an `AllowListFilter`'s names across three orders — the order that reaches the
+  writers comes from the parse-tree walk, not the request list, which is what makes
+  insertion-order emission (§1.5) a function of the model. (b) and (c) take their baselines
+  from a **real second process**: the test re-executes its own binary (`/proc/self/exe`) with
+  the config named in the environment and the runner filtered to one child entry point. That
+  indirection is the point — comparing two in-process runs to each other cannot detect a leak
+  both sides share, and a missing child fails loudly rather than comparing against nothing.
+  Two traps are worth recording for whoever writes the next such mutation: a lazily-initialised
+  shared fallback can clobber the very baseline the test compares against (producing a red for
+  the wrong reason — a bypass constructor is what keeps the measurement clean), and (c)'s
+  re-entry leg must compare emitted files only, because a ledger belongs to its run and a run
+  used twice has legitimately recorded twice. The drop-ledger report is otherwise compared
+  alongside the emitted files, since it is run-scoped state the sources do not reflect.
 - **G4** — a cached `WrappedTU`'s `ModelIo.encodeToString` equals a fresh parse's, for
   featuregen's header and for `clang_slice.h`.
 - **G5** — index **coverage** (revised by B2; see the note below): every container-facade
@@ -688,7 +716,7 @@ exists to remove.
 | **B1** | **Emit the index.** `writeTo` also writes `binding-index.json`. No consumer. | G1 (all pre-existing files byte-identical), G2 | delete the writer | — |
 | **B2** | **Consume the index.** `bindingIndexPath` SubpluginOption; `CppVectorMapping` resolves binding ClassIds **only** from the index — `mangleTemplateArg` and the package rule are deleted, and there is no derivation fallback (a miss is `SYNC_REQUIRED`, an unreadable index is `BINDING_INDEX_UNAVAILABLE`). Includes **G5** as revised above (coverage, not agreement). Closes #206. | G5, full featuregen test run, seed-module compile | drop the option | B1, released tool |
 | **B3** | **Real diagnostics.** `SYNC_REQUIRED` carries the ledger reason + C++ `file:line:col`; `kotlinTypeMap` replaces the 4-entry table (`CppVectorMapping.kt:176-182`). | new FIR diagnostic tests; a `cppVector<Boolean>()` row in featuregen | revert the message change | B2 |
-| **B4** | **De-globalize — DONE.** `DropLedger`, `GenerationContext`, `BaseBindProfiler`, `cppParseIncludeDirs`, `cppModelDumpDir` and `cppBaseModelTu` are instance state on a `KrapperRun` that `IndexedServiceImpl` builds from its own `(config, request)` and installs (`KrapperRun.using`) for the duration of each service call. Per-`IndexedService`, not the mutex alternative. Not a concurrency fix — see §1.4. | **G3(b)** — two configs in one process match two fresh processes; `DeterminismTest` | revert | — (independent, do early) |
+| **B4** | **De-globalize — DONE.** `DropLedger`, `GenerationContext`, `BaseBindProfiler`, `cppParseIncludeDirs`, `cppModelDumpDir` and `cppBaseModelTu` are instance state on a `KrapperRun` that `IndexedServiceImpl` builds from its own `(config, request)` and installs (`KrapperRun.using`) for the duration of each service call. Per-`IndexedService`, not the mutex alternative. Not a concurrency fix — see §1.4. | **G3(c)** — two runs alive at once, used out of construction order, each matching its own fresh process. G3(b) is NOT sufficient: it is green against a construction-time reset (see G3) | revert | — (independent, do early) |
 | **B5** | **Persistence (D1).** Parse cache keyed on `IndexKey`; process held across builds; idle timeout; `kplusplusDaemonStop/Status`; falls back to today's per-run session on any failure. | G1, G3, G4; **measured** second-sync wall time; `kill -9` mid-build degrades cleanly | `-Pkpp.daemon.idleTimeout=0` | B4, P3 (#194 discharged — shaded in v0.3.5) |
 | **B6** | **`UnboundMemberChecker`** — unresolved member on a bound type gets the drop reason. | FIR diagnostic tests | remove the checker | B3, P5 |
 | **B7** | **`wellFormed()` oracle** wired as a narrowing of #175's keep-on-doubt. | **G6** + G1 + re-measured broad-force error count | config flag off | P1/P2, B5 |
@@ -756,11 +784,13 @@ Each is cheap, and each can kill a brick.
   by: idle timeout, handshake liveness deadline, total cache keys (D3), RSS ceiling, a documented
   stop task, and `idleTimeout=0` returning to today's behaviour exactly. Still the biggest
   operational risk in the plan.
-- **R4 — single-tenancy (§1.4). Largely retired by B4.** The state is per-`IndexedService` now,
-  so a second sync cannot reset a first one's out from under it. The residual is narrower and
-  still real: the *installed-run slot* is process-wide, so B5 must serialize calls that touch
-  resolve state (§4). Shipping persistence without that mutex still risks silently-wrong output
-  under parallel Gradle builds.
+- **R4 — single-tenancy (§1.4). Reduced by B4, NOT retired.** What B4 removed is *shared
+  storage*: two runs can be alive at once without sharing a ledger, intern cache or root
+  package, and G3(c) gates exactly that. What remains is the *installed-run slot*, which is
+  still process-wide — so two calls interleaving at a suspension point still collide, and B5
+  must serialize every call that touches resolve state (§4). Shipping persistence without that
+  mutex still risks silently-wrong output under parallel Gradle builds. Treat B4 as making the
+  mutex sufficient, not as making it optional.
 - **R5 — #194's failure mode one level deeper.** #194 itself is fixed (shaded, v0.3.5 — §7), so
   the Gradle-plugin side is safe. The residual risk is putting ksrpc on the *kotlinc* plugin
   classpath, inside the Kotlin/Native compiler's own plugin classloader, where shading the Gradle

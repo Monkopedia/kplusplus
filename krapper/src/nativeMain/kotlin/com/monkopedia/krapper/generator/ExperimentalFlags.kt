@@ -99,10 +99,22 @@ object ExperimentalFlags {
             "slowest-N distribution + tree-walk counters (O(n) vs O(n²) diagnosis)."
     )
 
+    // Warn (once) when run-scoped state is read with no KrapperRun installed. Since B4 the
+    // drop ledger, intern cache, root package and parse config belong to a run that each
+    // service call installs; a read that escapes that scope silently gets the detached
+    // fallback and shows up much later as "the output diverged from the baseline". This names
+    // the site instead. Off by default and byte-identical when off (it only logs).
+    val DIAG_DETACHED_READS = ExperimentalFlag.BoolFlag(
+        "diag.detachedReads",
+        default = false,
+        description = "Warn once when run-scoped state is read outside any KrapperRun scope."
+    )
+
     /** Every declared flag. Add new flags here. */
     val all: List<ExperimentalFlag<*>> = listOf(
         DIAG_TIMING,
-        DIAG_BASE_BIND_TIMING
+        DIAG_BASE_BIND_TIMING,
+        DIAG_DETACHED_READS
     )
 
     private val byName: Map<String, ExperimentalFlag<*>> = all.associateBy { it.name }

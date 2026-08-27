@@ -247,43 +247,41 @@ class DeterminismTest {
         config: Config,
         modelJson: String,
         filter: FilterDefinition = DefaultFilter
-    ): Map<String, String> {
-        return KrapperRun.using(run) {
-            val tu = ModelIo.decodeFromString(modelJson)
-            val resolver = ParsedResolver(tu)
-            val requests = resolver.findClasses(filter.wrapperFilter())
-            val classes: List<ResolvedElement> = requests.resolveAll(resolver, config.policy)
+    ): Map<String, String> = KrapperRun.using(run) {
+        val tu = ModelIo.decodeFromString(modelJson)
+        val resolver = ParsedResolver(tu)
+        val requests = resolver.findClasses(filter.wrapperFilter())
+        val classes: List<ResolvedElement> = requests.resolveAll(resolver, config.policy)
 
-            val outDir = File.createTempDir("krapper_determinism")
-            try {
-                val module = config.module
-                val headers = listOf("fixture.h")
-                File(outDir, "$module.h").writeText(
-                    CppCodeBuilder().also {
-                        HeaderWriter(it).generate(module, headers, classes)
-                    }.toString()
-                )
-                File(outDir, "$module.cc").writeText(
-                    CppCodeBuilder(qualifyFunctionPointers = true).also {
-                        CppWriter(File(outDir, "$module.cc"), it).generate(module, headers, classes)
-                    }.toString()
-                )
-                val srcDir = File(outDir, "src")
-                KotlinWriter(config.kotlinPackage).generate(srcDir, classes)
+        val outDir = File.createTempDir("krapper_determinism")
+        try {
+            val module = config.module
+            val headers = listOf("fixture.h")
+            File(outDir, "$module.h").writeText(
+                CppCodeBuilder().also {
+                    HeaderWriter(it).generate(module, headers, classes)
+                }.toString()
+            )
+            File(outDir, "$module.cc").writeText(
+                CppCodeBuilder(qualifyFunctionPointers = true).also {
+                    CppWriter(File(outDir, "$module.cc"), it).generate(module, headers, classes)
+                }.toString()
+            )
+            val srcDir = File(outDir, "src")
+            KotlinWriter(config.kotlinPackage).generate(srcDir, classes)
 
-                val files = mutableMapOf<String, String>()
-                collect(outDir, outDir, files)
-                // The drop ledger is run-scoped state the emitted sources do not reflect, so
-                // it is compared alongside them (the `report` shape IndexedServiceImpl logs).
-                files[ledgerEntry] = run.drops.report(
-                    requested = requests.filterIsInstance<WrappedClass>()
-                        .map { it.type.toString() }.sorted(),
-                    bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
-                )
-                files
-            } finally {
-                outDir.rmR()
-            }
+            val files = mutableMapOf<String, String>()
+            collect(outDir, outDir, files)
+            // The drop ledger is run-scoped state the emitted sources do not reflect, so
+            // it is compared alongside them (the `report` shape IndexedServiceImpl logs).
+            files[ledgerEntry] = run.drops.report(
+                requested = requests.filterIsInstance<WrappedClass>()
+                    .map { it.type.toString() }.sorted(),
+                bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
+            )
+            files
+        } finally {
+            outDir.rmR()
         }
     }
 
