@@ -92,23 +92,77 @@ want "XML attribute reads still using head -1"        0 "$nh"
 # the thing instead of the thing is how this defect survived three reviews; it is
 # not allowed to be how its guard fails too.
 #
-# So: pull each gate's OWN assignment out of the workflow text and RUN it on an
-# all-skipped suite. This tests semantics, not spelling -- reformat the line
-# freely, but a gate that stops subtracting `skipped` reads 9 instead of 0 here.
+# So: pull each gate's OWN arithmetic out of the workflow text and RUN it on the
+# fixtures -- its own `sum_attr`, its own accumulation loop, its own subtraction,
+# nothing reimplemented here. This tests semantics, not spelling: reformat the
+# lines freely, but a gate that stops subtracting `skipped` reads 9 instead of 0
+# on all-skipped.xml.
+#
+# Two properties this deliberately has, both learned the hard way (Refs #240):
+#
+#  * SEVERAL data points, not one. The earlier version of this block ran only
+#    `reported=9 skipped=9 -> 0`, which `executed=$((reported - 9))` also
+#    satisfies while reporting 91 executed on a real all-skipped 100-test suite.
+#    One sample can be hit by a constant; six cannot.
+#  * The ACCUMULATION LOOP, not just the subtraction. `sum_attr "$f" skips` -- a
+#    one-letter typo -- sums nothing, so `skipped` stays 0 and every suite reports
+#    its full `tests` count as executed. That is the original bug restored, and
+#    checking the `executed=` line alone cannot see it.
 # ---------------------------------------------------------------------------
-echo "== each gate's own executed-count line, run on a 9-of-9-skipped suite"
-mapfile -t exec_lines < <(grep -hoE '^ *(total_)?executed=\$\(\([^)]*\)\)' ../workflows/*.yml)
-want "gate sites computing an executed count" 5 "${#exec_lines[@]}"
-zero=0
-for line in "${exec_lines[@]}"; do
-  reported=9 skipped=9 total_reported=9 total_skipped=9
-  unset executed total_executed
-  eval "$line"
-  v=${executed:-${total_executed:-UNSET}}
-  if [ "$v" = 0 ]; then zero=$((zero + 1))
-  else bad "in situ: '${line#"${line%%[![:space:]]*}"}' yields $v on an all-skipped suite, must be 0"; fi
-done
-want "gate sites reading ZERO executed for an all-skipped suite" 5 "$zero"
+echo "== each gate's own arithmetic (accumulation AND subtraction), run on the fixtures"
+TMPD=$(mktemp -d) || exit 1
+trap 'rm -rf "$TMPD"' EXIT
+
+# Each gate site contributes one runnable block: its `sum_attr` definition, then the
+# contiguous run from `reported=0` (or `total_reported=0`) through the `executed=`
+# subtraction. The outer per-module loop is not part of the arithmetic, and at every
+# site the arithmetic is contiguous, so nothing has to be stitched or rewritten.
+nblocks=$(awk -v outdir="$TMPD" '
+  FNR == 1 { st = 0; blk = "" }
+  st == 0 && /^[[:space:]]*sum_attr\(\) \{/ { st = 1; blk = $0 "\n"; next }
+  st == 1 { blk = blk $0 "\n"; if ($0 ~ /^[[:space:]]*\}[[:space:]]*$/) st = 2; next }
+  st == 2 && /^[[:space:]]*(total_)?reported=0/ { st = 3; blk = blk $0 "\n"; next }
+  st == 3 { blk = blk $0 "\n"
+            if ($0 ~ /^[[:space:]]*(total_)?executed=\$\(\(/) {
+              n++; f = sprintf("%s/site-%02d.sh", outdir, n)
+              printf "%s", blk > f; close(f); st = 0; blk = "" }
+            next }
+  END { print n + 0 }' ../workflows/*.yml)
+# Vacuity guard: a run over zero extracted blocks would report a serene OK, which is
+# this repo's signature defect. Rename the variable at all five sites and this is the
+# check that goes red.
+want "gate arithmetic blocks extracted from the workflows" 5 "${nblocks:-0}"
+blocks=(); for b in "$TMPD"/site-*.sh; do [ -f "$b" ] && blocks+=("$b"); done
+
+run_block() { # <block-file> <report.xml...> -> "<executed> <failed>" as that block computes them
+  local blk=$1; shift
+  ( xml=("$@"); xml_files=("$@")                # the two names the gates glob into
+    unset -v executed total_executed failed total_failures total_errors
+    . "$blk" >/dev/null                         # one site logs per file; keep it out of the answer
+    printf '%s %s\n' "${executed-${total_executed-UNSET}}" \
+                     "${failed-$(( ${total_failures:-0} + ${total_errors:-0} ))}" )
+}
+at_sites() { # <executed|failed> <expected> <label> <report.xml...>
+  local fld=$1 expect=$2 label=$3; shift 3
+  local n=0 blk ex fl v
+  for blk in ${blocks[@]+"${blocks[@]}"}; do
+    read -r ex fl < <(run_block "$blk" "$@")
+    case $fld in executed) v=$ex ;; failed) v=$fl ;; esac
+    if [ "$v" = "$expect" ]; then n=$((n + 1))
+    else bad "in situ ${blk##*/}: $fld = $v on $label, expected $expect"; fi
+  done
+  want "gate sites computing $fld=$expect on $label" 5 "$n"
+}
+at_sites executed  0 "an all-skipped 9-of-9 suite"    $F/all-skipped.xml
+at_sites executed  9 "a healthy suite"                $F/healthy.xml
+at_sites executed  1 "a mostly-skipped suite"         $F/boundary.xml
+at_sites executed  6 "a <testsuites>-wrapped file"    $F/nested.xml
+at_sites executed 10 "a two-suite file"               $F/multi-suite-failure.xml
+at_sites executed  2 "a chatty <system-out> file"     $F/decoy-system-out.xml
+at_sites executed 10 "three report files at once"     $F/healthy.xml $F/all-skipped.xml $F/boundary.xml
+# The same loop accumulates failures/errors, and a typo there drops a real failure
+# and turns a red build green -- strictly worse than miscounting passes.
+at_sites failed    1 "a failure in the SECOND suite"  $F/multi-suite-failure.xml
 
 # The gate must also ACT on that number. Computing `executed` correctly and then
 # testing `reported` would pass everything above and still ship the defect.
@@ -118,10 +172,25 @@ nr=$(grep -cE '^ *if \[ "\$(total_)?reported" -eq 0 \]' ../workflows/*.yml | awk
 want "gate sites failing when zero tests EXECUTED"      5 "$ng"
 want "gate sites failing on the REPORTED count instead" 0 "$nr"
 
-# Negative control for the two checks above: the broken forms must still be broken
-# here, or the in-situ test has stopped discriminating and says nothing.
-reported=9 skipped=9; unset executed; eval 'executed=$((reported))'
-want "a gate that dropped '- skipped' reads nonzero (so it IS caught)" 9 "$executed"
+# Negative control for the in-situ block. A guard whose failure path has never been
+# observed is exactly what this whole sequence is about, so watch it fail: take each
+# gate's REAL extracted text -- not a hand-written stand-in -- delete its `skipped`
+# accumulation line, and require every site to stop reading 0 on the all-skipped
+# suite. If a mutant ever comes back byte-identical the mutation matched nothing and
+# proves nothing, which is itself reported as a failure.
+echo "== negative control: a broken accumulation loop MUST be caught above"
+nc=0
+for blk in ${blocks[@]+"${blocks[@]}"}; do
+  sed -E '/^[[:space:]]*(total_)?skipped=\$\(\(/d' "$blk" > "$blk.mutant"
+  if cmp -s "$blk" "$blk.mutant"; then
+    bad "negative control ${blk##*/}: no 'skipped' accumulation was removed, so this proves nothing"
+    continue
+  fi
+  read -r ex _ < <(run_block "$blk.mutant" $F/all-skipped.xml)
+  if [ "$ex" != 0 ]; then nc=$((nc + 1))
+  else bad "negative control ${blk##*/}: dropping the 'skipped' accumulation still reads 0 -- the in-situ run does not discriminate"; fi
+done
+want "gate blocks where a deleted 'skipped' accumulation IS caught" 5 "$nc"
 
 echo
 [ $rc -eq 0 ] && echo "test-evidence gate arithmetic: OK" || echo "test-evidence gate arithmetic: FAILED"
