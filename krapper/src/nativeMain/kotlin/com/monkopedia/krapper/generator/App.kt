@@ -201,6 +201,19 @@ class Krapper : CliktCommand() {
         // Resolve experimental / diagnostic flags ONCE, before any work: CLI -X overrides the
         // KRAPPER_X env var overrides each flag's declared default. Inert when nothing is set.
         ExperimentalFlags.init(cli = experimental)
+        // Name the site the first time run-scoped state is read outside any KrapperRun scope
+        // (brick B4). The carriers live in :krapper_model, which cannot see this flag registry
+        // or the logger, so the reporting is a hook installed here at the one process entry
+        // point. Inert unless the flag is on.
+        if (ExperimentalFlags.isEnabled(ExperimentalFlags.DIAG_DETACHED_READS)) {
+            GenerationContext.onFirstDetachedRead = { site ->
+                Utils.printerrln(
+                    "krapper: WARNING — $site read run-scoped state with no KrapperRun " +
+                        "installed; it got the detached fallback, which is SHARED. Reported " +
+                        "once per process."
+                )
+            }
+        }
         if (listExperimental) {
             print(ExperimentalFlags.listing())
             return

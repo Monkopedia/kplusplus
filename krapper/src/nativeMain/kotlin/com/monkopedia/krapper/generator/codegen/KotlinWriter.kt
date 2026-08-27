@@ -177,7 +177,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             // Root the free-functions container's own package the same way the type
             // bindings are rooted (it bypasses fullyQualifiedType, so apply the override
             // here). Override null -> rawPkg as-is; empty namespace under a root -> the root.
-            val pkg = GenerationContext.rootPackage
+            val pkg = GenerationContext.current.rootPackage
                 ?.let { if (rawPkg.isEmpty()) it else "$it.$rawPkg" }
                 ?: rawPkg
             builder.pkg(pkg)

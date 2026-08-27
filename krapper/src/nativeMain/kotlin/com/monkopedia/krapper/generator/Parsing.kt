@@ -90,19 +90,6 @@ typealias ElementFilter = WrappedElement.() -> Boolean
 // handing this tree over as ModelIo JSON (krapper_parse --parity-emit -> krapper_gen
 // --parsedModel); they are one binary now and the handoff is a plain object.
 
-// The module's `kplusplus { headerDirectory(...) }` roots (--include-dir), threaded to every
-// parse as `-I` so cross-directory quote-includes resolve the same way the generated wrapper's
-// compile sees them. Deliberately NOT the header files' own parent dirs: those reach only the
-// wrapper compile (IndexRequest.headerDirectories). CLI-scoped global so the ksrpc service
-// schema stays untouched.
-var cppParseIncludeDirs: List<String> = emptyList()
-
-// Optional ModelIo JSON dump dir (--dump-model <dir>): the base tree lands in base_model.json
-// and each forcing parse in <forceName>.json. Purely a debug aid for inspecting the tree the
-// resolver consumed — this format used to BE the inter-process handoff, and is off the hot
-// path now. CLI-scoped global, same rationale as [cppParseIncludeDirs].
-var cppModelDumpDir: String? = null
-
 // The virtual filename the base parse runs under. Clang infers the language from the extension
 // (a `.h` would parse as C), and this exact spelling is what the two-binary path used — kept
 // verbatim so the merge is provably byte-identical.
@@ -121,18 +108,15 @@ private suspend fun prepareParsed(tu: WrappedTU): ParsedResolver {
     return ParsedResolver(tu)
 }
 
-// Write [tu] to <cppModelDumpDir>/<name> when --dump-model asked for it; otherwise a no-op.
+// Write [tu] to <KrapperRun.dumpModelDir>/<name> when --dump-model asked for it; otherwise a
+// no-op. The dump dir is per-run state (brick B4), not a process global.
 private suspend fun dumpModel(name: String, tu: WrappedTU) {
-    val dir = cppModelDumpDir ?: return
+    val dir = KrapperRun.current.dumpModelDir ?: return
     File(dir).mkdirs()
     val target = File(File(dir), name)
     target.writeText(ModelIo.encodeToString(tu))
     Log.i("cpp front-end: dumped model to ${target.path}")
 }
-
-// The base tree, kept so each forcing parse can mirror libclang's first-seen ordering
-// against it (O1, #46).
-internal var cppBaseModelTu: WrappedTU? = null
 
 /**
  * Parse the FORCING translation unit for instantiation [target] (#46 O1): synthesize the
@@ -157,11 +141,11 @@ internal suspend fun parseForcingModel(
     val tu = CppParser.parse(
         ForcingHeader.contentFor(target, userHeaders),
         "$forceName.cc",
-        CppParser.driverArgs(std, cppParseIncludeDirs)
+        CppParser.driverArgs(std, KrapperRun.current.includeDirs)
     )
     dumpModel("$forceName.json", tu)
     val resolver = prepareParsed(tu)
-    cppBaseModelTu?.let { base -> reorderToFirstSeen(resolver.tu, base) }
+    KrapperRun.current.baseModelTu?.let { base -> reorderToFirstSeen(resolver.tu, base) }
     return resolver
 }
 
@@ -497,7 +481,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         if (indexBuilt) return
         var walkedNodes = 0
         tu.forEachRecursive { element ->
-            if (BaseBindProfiler.enabled) walkedNodes++
+            if (baseBindProfiler.enabled) walkedNodes++
             when (element) {
                 is WrappedClass ->
                     classIndex.getOrPut(element.type.toString()) { mutableListOf() }.add(element)
@@ -509,7 +493,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
             }
         }
         // One build pass instead of one whole-TU walk per distinct type — the whole point of #10.
-        BaseBindProfiler.recordTreeWalk(walkedNodes)
+        baseBindProfiler.recordTreeWalk(walkedNodes)
         indexBuilt = true
     }
 
@@ -530,13 +514,13 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         // When the profiler is OFF this is exactly the original `classMap.getOrPut(key) { ... }`.
         // When ON, a memo HIT returns early (no timing — no work done); only a genuine MISS is
         // timed + recorded, so the rate reflects real per-type resolve work, not memo lookups.
-        if (!BaseBindProfiler.enabled) {
+        if (!baseBindProfiler.enabled) {
             return classMap.getOrPut(key) { computeResolve(type, key, context) }
         }
         classMap[key]?.let { return it }
         val resolveMark = kotlin.time.TimeSource.Monotonic.markNow()
         val result = classMap.getOrPut(key) { computeResolve(type, key, context) }
-        BaseBindProfiler.recordResolved(key, resolveMark.elapsedNow().inWholeMicroseconds / 1000.0)
+        baseBindProfiler.recordResolved(key, resolveMark.elapsedNow().inWholeMicroseconds / 1000.0)
         return result
     }
 
@@ -589,8 +573,8 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
  * THE BASE PARSE (#184). Parse [headerPath]'s bytes with the Clang C++ AST front-end and
  * prepare the resulting tree for resolution: the pre-resolution rewrites
  * (rewriteViewReturns/rewriteUniquePtrReturns) run on it, then ParsedResolver wraps it. The
- * tree is stashed in [cppBaseModelTu] for the forcing parses' first-seen reorder (O1, #46 —
- * [parseForcingModel]).
+ * tree is stashed in the run's `baseModelTu` for the forcing parses' first-seen reorder
+ * (O1, #46 — [parseForcingModel]).
  *
  * One root header: the forcing headers `#include` it by the same path string, and the
  * cpp-ready modules are single-header. Multi-header parsing is a later extension.
@@ -600,10 +584,10 @@ suspend fun parseHeader(headerPath: String, std: String): Resolver {
     val tu = CppParser.parse(
         File(headerPath).readText(),
         BASE_TU_FILENAME,
-        CppParser.driverArgs(std, cppParseIncludeDirs)
+        CppParser.driverArgs(std, KrapperRun.current.includeDirs)
     )
     dumpModel("base_model.json", tu)
-    cppBaseModelTu = tu
+    KrapperRun.current.baseModelTu = tu
     return prepareParsed(tu)
 }
 
@@ -873,7 +857,7 @@ private fun dropValueEqualityIfElementLacksEquals(
     if (elementClass.metadata.hasEqualityOperator) return
     for (method in outputClass.children.filterIsInstance<WrappedMethod>()) {
         if (method.name !in VALUE_EQUALITY_MEMBERS) continue
-        DropLedger.record(
+        dropLedger.record(
             "$fullyQualified::${method.name}",
             "Element type $element has no operator== (container value-equality would " +
                 "fail to instantiate) [#10 gate 1]",

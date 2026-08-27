@@ -2,7 +2,8 @@
 
 **Status:** design (no production change). Written 2026-07-29 against `main` @ `34fb7a3`
 (v0.3.4 self-hosted); §7 updated the same day against `3254efc` after #194 was fixed and v0.3.5
-was cut. Bricks 1 (#184, `b787196`) and 2 (#185, `e75707b`) are done.
+was cut. Bricks 1 (#184, `b787196`) and 2 (#185, `e75707b`) are done; of the nine bricks
+below, B1, B2 and B4 have landed.
 **Settled inputs (owner, 2026-07-28, not re-litigated here):** the FIR plugin becomes a live
 client; lifetime is Gradle-daemon-scoped with an idle timeout; featuregen SYNC byte-identity
 stays the hard gate; no session watchdog.
@@ -116,20 +117,40 @@ Grounding the query surface in what the file actually does:
 So the real, present-day query surface is: *give me the ClassId for this spec*, *give me the type
 map*, *tell me why this spec has no binding*. All three are pure functions of the last sync.
 
-### 1.4 Krapper is single-tenant by construction
+### 1.4 Krapper was single-tenant by construction — B4 removed the sharing
 
-`IndexedServiceImpl.init` resets three **process-global** objects before any resolution:
-`DropLedger.reset()`, `GenerationContext.reset(config.rootPackage, config.noRtti)`,
-`BaseBindProfiler.reset()` (`IndexedServiceImpl.kt:106-110`). `KrapperServiceImpl.index` sets two
-more process-global vars, `cppParseIncludeDirs` and `cppModelDumpDir`
-(`KrapperServiceImpl.kt:45-46`, declared at `Parsing.kt:98,104`). A third,
-`cppBaseModelTu` (`Parsing.kt:135`), carries the base tree into every forcing parse.
+> **Updated: brick B4 has landed.** What follows describes the state B4 found and what it left.
 
-`GenerationContext`'s KDoc states the assumption in so many words: *"the generator runs one
-request at a time under `runBlocking`"* (`krapper_model/.../GenerationContext.kt:32-34`);
-`DropLedger` repeats it (`DropLedger.kt:78`). A persistent process serving two modules — or one
-module under a parallel Gradle build — violates this **today**. De-globalizing (or explicitly
-serializing) is a prerequisite for persistence, not a nice-to-have.
+**As found.** `IndexedServiceImpl.init` reset three **process-global** objects before any
+resolution — `DropLedger.reset()`, `GenerationContext.reset(config.rootPackage, config.noRtti)`,
+`BaseBindProfiler.reset()` — and `KrapperServiceImpl.index` set two more process-global vars,
+`cppParseIncludeDirs` and `cppModelDumpDir`, declared alongside a third, `cppBaseModelTu`, which
+carried the base tree into every forcing parse. `GenerationContext`'s KDoc stated the assumption
+in so many words: *"the generator runs one request at a time under `runBlocking`"*, and
+`DropLedger` repeated it. One run's state and the next run's state occupied the same storage, so
+the only way to start clean was to **destroy** what came before.
+
+**As left.** All six live on a `KrapperRun` (`krapper/.../KrapperRun.kt`) that
+`IndexedServiceImpl` builds from its own `(config, request)` and installs for the duration of
+each service call; the deep, context-less read sites (`WrappedType.invoke`'s intern cache, the
+drop sites in `Resolver` / `Parsing` / `ModelResolution` / `WrappedKotlinType`, the parse's `-I`
+roots) read the installed run rather than a global. Threading a carrier through every resolve
+and codegen signature was rejected for the reason `GenerationContext`'s KDoc already gave: those
+surfaces are non-suspend and called pervasively.
+
+**What that does and does not buy — read this before B5.** Two runs may now be **alive at the
+same time** and stay independent: each owns its ledger, intern cache and config, so
+constructing or using one does not disturb the other. That is the property this section claims,
+and the one `DeterminismTest.interleavedRunLifetimesMatchFreshProcesses` (G3(c)) measures
+against genuine fresh-process baselines — by building both runs before either generates and
+then using them out of construction order. Its weaker sibling G3(b) only shows that
+*sequential* runs do not leak, which the pre-B4 code already satisfied; see G3 for the
+measurement.
+
+It is **not** a concurrency fix. Two runs interleaving at a suspension point still share the
+process-wide installed slot, so the daemon must still serialize (§4). The change is that
+serializing is now **sufficient** — before B4 even a serialized second call destroyed the first
+run's ledger, which is why the mutex alone was never going to be enough.
 
 ### 1.5 Output is wholesale, and ordering is insertion-ordered
 
@@ -423,11 +444,16 @@ every subsequent build) without putting any deadline on real work.
 - `./gradlew kplusplusDaemonStop` / `kplusplusDaemonStatus` tasks, so the escape hatch is
   discoverable.
 
-**Single-tenancy.** Until §1.4's globals are per-index (brick B4), the daemon takes a mutex
-around every call that touches resolve state and documents that concurrent module syncs
-serialize. Do **not** ship persistence before B4 or the mutex; a parallel Gradle build sharing
-one `GenerationContext` is a silent-wrong-output bug, which is the exact class featuregen SYNC
-has caught twice.
+**Single-tenancy.** B4 made §1.4's state per-`IndexedService`, so two syncs — even two alive at
+the same time — no longer share a `GenerationContext`, a `DropLedger` or the front-end's parse
+config (G3(c)).
+The daemon still takes a mutex around every call that touches resolve state, and still documents
+that concurrent module syncs serialize: the *installed-run slot* is process-wide even though the
+state it points at is not, so two calls interleaving at a suspension point would still collide.
+What B4 changed is that serializing is now sufficient — before it, even a serialized second call
+reset the first run's state out from under it, and a parallel Gradle build sharing one
+`GenerationContext` was a silent-wrong-output bug of exactly the class featuregen SYNC has caught
+twice.
 
 **The measurable payoff, and it is not the FIR client.** `docs/design/ide-sync-perf.md` measured
 a recurring ~1 min on *every* IDE sync, of which ~46 s is the tool module regenerating its own
@@ -536,10 +562,46 @@ Machine-checkable gates, per brick:
 - **G2** — `:cppfixture` + `:clangwalk` regenerate-and-diff, plus a `DropLedger` diff (the pattern
   `wellformedness-binding-gate.md:329-333` established).
 - **G3** — extend `DeterminismTest` (`krapper/src/nativeTest/kotlin/DeterminismTest.kt`, which
-  exists precisely to catch leaked process globals) with: (a) two runs in one process over the
-  **same** set in **shuffled request order** → identical; (b) two runs in one process over
-  **different configs** → each identical to its own fresh-process run. (b) is the direct test of
-  §1.4 and is a prerequisite for persistence.
+  exists precisely to catch leaked process globals) with **three** tests. (a) two runs in one
+  process over the **same** set in **shuffled request order** → identical; (b) two runs in one
+  process over **different configs** → each identical to its own fresh-process run; (c) two runs
+  **constructed before either generates** and then **used out of construction order** → each
+  still identical to its own fresh-process run, and a run re-entered after another ran in
+  between unchanged. **All three landed with B4.**
+
+  > **(b) alone is not the gate, and the original wording of this section said it was.** As
+  > first written, G3 stopped at (b) and called it "the direct test of §1.4". It is not. A test
+  > that runs `construct A → use A → construct B → use B` never has two runs configured at the
+  > same time, so it is passed by the **actual pre-B4 shape** — process globals **reset at
+  > construction** (`IndexedServiceImpl.init` calling
+  > `GenerationContext.reset(config.rootPackage, config.noRtti)`), where each construction
+  > happened after the previous run had already finished. Measured, not reasoned: under a
+  > construction-time-reset mutation, (a), (b) and the original same-config guard all stay
+  > **green** and only (c) goes **red**. §1.4's claim is about runs *alive at once*, so the
+  > gate has to create that overlap; (b) checks the weaker sequential property, which the code
+  > it was meant to reject already had. **B5 must not inherit this**: any persistence gate
+  > phrased as "two syncs in one process" needs to say whether the two are alive at the same
+  > time, because a daemon holding one index while another is requested is exactly case (c).
+
+  (a) permutes an `AllowListFilter`'s names across three orders — the order that reaches the
+  writers comes from the parse-tree walk, not the request list, which is what makes
+  insertion-order emission (§1.5) a function of the model. (b) and (c) take their baselines
+  from a **real second process**: the test re-executes its own binary (`/proc/self/exe`) with
+  the config named in the environment and the runner filtered to one child entry point. That
+  indirection is the point — comparing two in-process runs to each other cannot detect a leak
+  both sides share, and a missing child fails loudly rather than comparing against nothing.
+  One trap is worth recording for whoever writes the next such mutation: a lazily-initialised
+  shared fallback can clobber the very baseline the test compares against, producing a red for
+  the wrong reason — a bypass constructor is what keeps the measurement clean.
+
+  All legs of all three tests compare the drop-ledger report alongside the emitted files, since
+  it is run-scoped state the sources do not reflect. An earlier revision of this section
+  exempted (c)'s re-entry leg from the ledger comparison "because a run used twice has recorded
+  twice"; that reason was **false as written** — the config re-entered in that leg records no
+  drops, so its ledger is empty both times and the full comparison holds. The exemption was
+  removed rather than re-justified. It would become genuinely necessary only if that config
+  were given a dropped member, which is accumulation within one run rather than state crossing
+  between runs.
 - **G4** — a cached `WrappedTU`'s `ModelIo.encodeToString` equals a fresh parse's, for
   featuregen's header and for `clang_slice.h`.
 - **G5** — index **coverage** (revised by B2; see the note below): every container-facade
@@ -660,7 +722,7 @@ exists to remove.
 | **B1** | **Emit the index.** `writeTo` also writes `binding-index.json`. No consumer. | G1 (all pre-existing files byte-identical), G2 | delete the writer | — |
 | **B2** | **Consume the index.** `bindingIndexPath` SubpluginOption; `CppVectorMapping` resolves binding ClassIds **only** from the index — `mangleTemplateArg` and the package rule are deleted, and there is no derivation fallback (a miss is `SYNC_REQUIRED`, an unreadable index is `BINDING_INDEX_UNAVAILABLE`). Includes **G5** as revised above (coverage, not agreement). Closes #206. | G5, full featuregen test run, seed-module compile | drop the option | B1, released tool |
 | **B3** | **Real diagnostics.** `SYNC_REQUIRED` carries the ledger reason + C++ `file:line:col`; `kotlinTypeMap` replaces the 4-entry table (`CppVectorMapping.kt:176-182`). | new FIR diagnostic tests; a `cppVector<Boolean>()` row in featuregen | revert the message change | B2 |
-| **B4** | **De-globalize.** `DropLedger` / `GenerationContext` / `cppParseIncludeDirs` / `cppModelDumpDir` / `cppBaseModelTu` become per-`IndexedService` state (or an explicit mutex + documented single-tenancy). | **G3(b)** — two configs in one process match two fresh processes | revert | — (independent, do early) |
+| **B4** | **De-globalize — DONE.** `DropLedger`, `GenerationContext`, `BaseBindProfiler`, `cppParseIncludeDirs`, `cppModelDumpDir` and `cppBaseModelTu` are instance state on a `KrapperRun` that `IndexedServiceImpl` builds from its own `(config, request)` and installs (`KrapperRun.using`) for the duration of each service call. Per-`IndexedService`, not the mutex alternative. Not a concurrency fix — see §1.4. | **G3(c)** — two runs alive at once, used out of construction order, each matching its own fresh process. G3(b) is NOT sufficient: it is green against a construction-time reset (see G3) | revert | — (independent, do early) |
 | **B5** | **Persistence (D1).** Parse cache keyed on `IndexKey`; process held across builds; idle timeout; `kplusplusDaemonStop/Status`; falls back to today's per-run session on any failure. | G1, G3, G4; **measured** second-sync wall time; `kill -9` mid-build degrades cleanly | `-Pkpp.daemon.idleTimeout=0` | B4, P3 (#194 discharged — shaded in v0.3.5) |
 | **B6** | **`UnboundMemberChecker`** — unresolved member on a bound type gets the drop reason. | FIR diagnostic tests | remove the checker | B3, P5 |
 | **B7** | **`wellFormed()` oracle** wired as a narrowing of #175's keep-on-doubt. | **G6** + G1 + re-measured broad-force error count | config flag off | P1/P2, B5 |
@@ -694,9 +756,13 @@ Each is cheap, and each can kill a brick.
   for featuregen with the parse cached vs. not. If the second is not dramatically cheaper,
   descope B5 to process reuse or drop it. **Decides B5.**
 - **P4 — in-process repeat on the real parse path.** Run `filterAndResolve` + `writeTo` twice in
-  one process for featuregen and diff the trees. `DeterminismTest` covers a synthetic model
-  (`DeterminismTest.kt:44-63`); this covers the real front-end. **Cheapest possible test of §1.4
-  and a prerequisite to B4/B5. An hour.**
+  one process for featuregen and diff the trees. `DeterminismTest` covers a synthetic model;
+  this covers the real front-end. **Still open — B4 landed without it.** G3(a)/(b) exercise the
+  deserialize → resolve → codegen half of the pipeline, which is where all six de-globalized
+  values but the parse config are read; `cppParseIncludeDirs` / `cppModelDumpDir` /
+  `cppBaseModelTu` are only reachable through a clang parse, so their per-run wiring is covered
+  by the featuregen SYNC byte-identity gate (G1) rather than by a unit test. P4 would close that
+  gap directly. **An hour.**
 - **P5 — FIR feasibility.** Prototype a checkers-phase checker that sees an *unresolved* callee,
   recovers the receiver's `ConeKotlinType`, and reports a custom diagnostic, against Kotlin 2.4.
   **Decides B6.**
@@ -724,8 +790,13 @@ Each is cheap, and each can kill a brick.
   by: idle timeout, handshake liveness deadline, total cache keys (D3), RSS ceiling, a documented
   stop task, and `idleTimeout=0` returning to today's behaviour exactly. Still the biggest
   operational risk in the plan.
-- **R4 — single-tenancy (§1.4).** Shipping persistence before B4 risks silently-wrong output
-  under parallel Gradle builds. Sequenced first for this reason.
+- **R4 — single-tenancy (§1.4). Reduced by B4, NOT retired.** What B4 removed is *shared
+  storage*: two runs can be alive at once without sharing a ledger, intern cache or root
+  package, and G3(c) gates exactly that. What remains is the *installed-run slot*, which is
+  still process-wide — so two calls interleaving at a suspension point still collide, and B5
+  must serialize every call that touches resolve state (§4). Shipping persistence without that
+  mutex still risks silently-wrong output under parallel Gradle builds. Treat B4 as making the
+  mutex sufficient, not as making it optional.
 - **R5 — #194's failure mode one level deeper.** #194 itself is fixed (shaded, v0.3.5 — §7), so
   the Gradle-plugin side is safe. The residual risk is putting ksrpc on the *kotlinc* plugin
   classpath, inside the Kotlin/Native compiler's own plugin classloader, where shading the Gradle

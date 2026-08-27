@@ -78,21 +78,27 @@ class SkipNotCrashResolveTest {
     private fun method(name: String, returnType: WrappedType, isConst: Boolean = false) =
         WrappedMethod(name, returnType, MethodType.METHOD).also { it.isConst = isConst }
 
+    // The run [resolve] last executed under. Its ledger is what the assertions below read:
+    // since brick B4 the ledger is per-run state owned by the run, not a process global that
+    // has to be reset first.
+    private var testRun = KrapperRun(GenerationContext())
+
     /**
-     * Reset the process-scoped generation state (as `IndexedServiceImpl.init` does), then
-     * run the real `findClasses { defaultFilter() }.resolveAll(...)` path over [tu] under
-     * [policy] — the exact resolve the self-hosted CLI runs, minus the parse front-end.
+     * Install a fresh [KrapperRun] (as `IndexedServiceImpl` does for every service call),
+     * then run the real `findClasses { defaultFilter() }.resolveAll(...)` path over [tu]
+     * under [policy] — the exact resolve the self-hosted CLI runs, minus the parse front-end.
      */
     private fun resolve(
         tu: WrappedTU,
         policy: ReferencePolicy = ReferencePolicy.IGNORE_MISSING
     ): List<ResolvedClass> = runBlocking {
-        DropLedger.reset()
-        GenerationContext.reset(null)
-        val resolver = ParsedResolver(tu)
-        resolver.findClasses { defaultFilter() }
-            .resolveAll(resolver, policy)
-            .filterIsInstance<ResolvedClass>()
+        testRun = KrapperRun(GenerationContext())
+        KrapperRun.using(testRun) {
+            val resolver = ParsedResolver(tu)
+            resolver.findClasses { defaultFilter() }
+                .resolveAll(resolver, policy)
+                .filterIsInstance<ResolvedClass>()
+        }
     }
 
     private fun ResolvedClass.methodNames() =
@@ -121,10 +127,10 @@ class SkipNotCrashResolveTest {
             "bad" in widget.methodNames(),
             "the unmodelable method must be dropped: ${widget.methodNames()}"
         )
-        val drop = DropLedger.drops.firstOrNull { "bad" in it.symbol }
+        val drop = testRun.drops.drops.firstOrNull { "bad" in it.symbol }
         assertTrue(
             drop != null && drop.phase == DropPhase.RESOLVE,
-            "the dropped method must be ledgered as a RESOLVE drop: ${DropLedger.drops}"
+            "the dropped method must be ledgered as a RESOLVE drop: ${testRun.drops.drops}"
         )
         assertTrue(
             drop.reason.isNotBlank(),
@@ -141,7 +147,7 @@ class SkipNotCrashResolveTest {
         // hasDrops() is exactly the predicate the opt-in --fail-on-drop gate reads
         // (IndexedServiceImpl.reportDrops): a dropped symbol makes it true.
         assertTrue(
-            DropLedger.hasDrops(),
+            testRun.drops.hasDrops(),
             "a dropped symbol must make --fail-on-drop's hasDrops() gate fire"
         )
     }
@@ -165,11 +171,11 @@ class SkipNotCrashResolveTest {
         )
         assertEquals(
             emptyList(),
-            DropLedger.drops,
-            "a fully-bindable class must drop nothing: ${DropLedger.drops}"
+            testRun.drops.drops,
+            "a fully-bindable class must drop nothing: ${testRun.drops.drops}"
         )
         assertFalse(
-            DropLedger.hasDrops(),
+            testRun.drops.hasDrops(),
             "a clean run must leave --fail-on-drop's hasDrops() gate false"
         )
     }
@@ -192,10 +198,10 @@ class SkipNotCrashResolveTest {
             accessor.methodNames().filter { it == "get" || it == "_get" },
             "the const/non-const pair must collapse to ONE `get`: ${accessor.methodNames()}"
         )
-        val dedup = DropLedger.drops.firstOrNull { it.phase == DropPhase.DEDUP }
+        val dedup = testRun.drops.drops.firstOrNull { it.phase == DropPhase.DEDUP }
         assertTrue(
             dedup != null && "get" in dedup.symbol,
-            "the deduped non-const overload must be ledgered as a DEDUP drop: ${DropLedger.drops}"
+            "the deduped non-const overload must be ledgered as a DEDUP drop: ${testRun.drops.drops}"
         )
         // #196: DEDUP is structurally expected by construction — the const half is always
         // kept, so there is never a missing binding to act on. It is reported at INFO so it
@@ -207,7 +213,7 @@ class SkipNotCrashResolveTest {
         )
         // The full drop is still in the ledger (nothing hidden) and still turns into a
         // Diagnostic the service channel reports — only its severity changed.
-        val diagnostic = DropLedger.diagnostics().single { it.symbol == dedup.symbol }
+        val diagnostic = testRun.drops.diagnostics().single { it.symbol == dedup.symbol }
         assertEquals(Severity.INFO, diagnostic.severity)
     }
 }

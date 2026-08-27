@@ -80,6 +80,36 @@ byte-identical when off** (every method early-returns; the profiler is measureme
 changes what gets bound). Run it e.g. with
 `krapper … --referencePolicy INCLUDE_MISSING -X diag.baseBindTiming`.
 
+## `diag.detachedReads` — run-scope escape detector
+
+Since brick B4 (#186) the drop ledger, `WrappedType` intern cache, root package, `-fno-rtti` flag
+and cpp front-end parse config belong to a
+[`KrapperRun`](../krapper/src/nativeMain/kotlin/com/monkopedia/krapper/generator/KrapperRun.kt)
+that each service call installs for the duration of that call. A read that happens *outside* any
+such scope does not fail — it silently gets the `detached` fallback, which exists so unit tests can
+build fixtures without a run and is **shared by every caller that reaches it**.
+
+That is a bad failure mode to leave silent: the symptom shows up much later as "the generated
+output diverged from its baseline", with nothing naming the cause. `diag.detachedReads` turns it
+into a named diagnostic — the first such read per process logs
+
+```
+krapper: WARNING — GenerationContext.current read run-scoped state with no KrapperRun installed;
+it got the detached fallback, which is SHARED. Reported once per process.
+```
+
+**Once** per process, deliberately: these reads come from `WrappedType.invoke`'s interner, so a
+per-read warning would emit thousands of lines and bury the signal. Both carriers
+(`GenerationContext.current` and `KrapperRun.current`) share one latch, so the warning names
+whichever site got there first.
+
+The reporting is an installable hook (`GenerationContext.onFirstDetachedRead`) rather than a direct
+log call, because the carriers live in `:krapper_model`, which cannot see this flag registry or the
+logger; `App.run` installs the stderr warning next to where the flags are resolved. **Inert +
+byte-identical when off** — the only cost on the hot path is an identity compare against the
+fallback, and nothing is logged unless the flag is on. Run it e.g. with
+`krapper … -X diag.detachedReads`.
+
 ## Candidates to migrate later (NOT done here — kept out of scope)
 
 These pre-existing ad-hoc toggles could later move into the registry for consistency:

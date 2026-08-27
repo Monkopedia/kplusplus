@@ -62,22 +62,22 @@ class FreeFunctionDedupTest {
     /**
      * Resolve a TU whose `Ns` namespace holds [build] free functions, returning the
      * top-level resolved element list (free functions surface as top-level [ResolvedMethod]s,
-     * exactly as the writers consume them). Resets the process-scoped state as
-     * `IndexedServiceImpl.init` does.
+     * exactly as the writers consume them). Installs a fresh per-run [KrapperRun] as
+     * `IndexedServiceImpl` does for every service call.
      */
     private fun resolveFreeFns(build: (WrappedNamespace) -> Unit): List<ResolvedElement> =
         runBlocking {
-            DropLedger.reset()
-            GenerationContext.reset(null)
-            val tu = WrappedTU()
-            val ns = WrappedNamespace("Ns").also {
-                tu.addChild(it)
-                it.parent = tu
+            KrapperRun.using(KrapperRun(GenerationContext())) {
+                val tu = WrappedTU()
+                val ns = WrappedNamespace("Ns").also {
+                    tu.addChild(it)
+                    it.parent = tu
+                }
+                build(ns)
+                val resolver = ParsedResolver(tu)
+                resolver.findClasses { defaultFilter() }
+                    .resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
             }
-            build(ns)
-            val resolver = ParsedResolver(tu)
-            resolver.findClasses { defaultFilter() }
-                .resolveAll(resolver, ReferencePolicy.INCLUDE_MISSING)
         }
 
     private val ResolvedMethod.identity: String
