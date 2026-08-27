@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The off-by-one boundary. Mostly-skipped is LEGITIMATE: one test really ran.
+     executed = 5 - 4 = 1 -> must PASS. A gate that rejects this looks like
+     strictness and is actually a defect. -->
+<testsuite name="MostlySkipped" tests="5" skipped="4" failures="0" errors="0" time="0.1">
+  <testcase name="t1" classname="MostlySkipped" time="0.1"/>
+</testsuite>

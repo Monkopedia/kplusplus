@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The double-count trap. Some JUnit writers wrap the file in a <testsuites> ROOT
+     carrying its own aggregate totals. Summing every element whose name merely
+     starts with "testsuite" adds the root ON TOP of the children it summarises:
+     executed reads 12 instead of 6 -- wrong in the reassuring direction.
+     The literal SPACE after `testsuite` in the pattern is the entire defence, and
+     it is the first thing lost when the pattern is adapted or rewritten.
+     executed = 10 - 4 = 6, never 12. -->
+<testsuites tests="10" skipped="4" failures="0" errors="0">
+  <testsuite name="A" tests="4" skipped="1" failures="0" errors="0"/>
+  <testsuite name="B" tests="6" skipped="3" failures="0" errors="0"/>
+</testsuites>

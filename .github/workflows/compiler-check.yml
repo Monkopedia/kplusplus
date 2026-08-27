@@ -46,6 +46,12 @@ on:
       - 'samples/minimal/build.gradle.kts'
       - 'samples/multiproject/bindings/build.gradle.kts'
       - '.github/workflows/compiler-check.yml'
+      # The gate arithmetic below is pinned by executable fixtures; run them when
+      # either the fixtures or ANY workflow carrying a gate changes.
+      - '.github/test-evidence-gate/**'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/root-build.yml'
+      - '.github/workflows/samples-minimal.yml'
   push:
     branches: [main]
 
@@ -83,6 +89,17 @@ jobs:
           key: gradle-compiler-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'compiler/**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-compiler-${{ runner.os }}-
 
+      # Executable evidence for the JUnit-XML arithmetic every gate in this repo uses
+      # (.github/test-evidence-gate/). An all-skipped suite must read as zero executed,
+      # a <testsuites> wrapper must not be double-counted, and a failure in a second
+      # suite must not be dropped. It also pins all five gate sites to the tested form
+      # AND runs each gate's own `executed = reported - skipped` line in situ, so a gate
+      # that stops subtracting `skipped` fails here rather than shipping green.
+      # Runs in about a second and needs nothing but bash, so it sits in the cheapest
+      # job in the repo and covers the gates in the three workflows it cannot run.
+      - name: Verify the test-evidence gate arithmetic
+        run: bash .github/test-evidence-gate/verify.sh
+
       # Delete-before-measure: a task that does not run leaves any previous
       # report exactly where the guard below looks, so "never ran" and "ran and
       # passed" are indistinguishable on disk. On a fresh checkout there is
@@ -108,17 +125,36 @@ jobs:
             echo "::error::No JUnit XML anywhere under compiler/. The check task cannot have run a test, so this job would be green having executed nothing."
             exit 1
           fi
-          total=0; failed=0
+          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
+          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
+          # surely as an empty one — which is the exact hole this gate exists to close
+          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
+          # both attributes sit on the same <testsuite> element.
+          #
+          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
+          # counts were extracted the same way, so a second suite carrying a failure was
+          # silently dropped — that one turns a red build green. Gradle happens to write
+          # one suite per file today (both `test` and `nativeTest`), but a gate should be
+          # right by construction, not by a property of the current report writer.
+          #
+          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
+          # attribute-looking text inside a <system-out> block from being counted, and the
+          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
+          # whose totals would otherwise be added on top of the children they summarise.
+          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
+            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
+              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
+          }
+          reported=0; skipped=0; failed=0
           for f in "${xml[@]}"; do
-            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-            total=$((total + ${t:-0}))
-            failed=$((failed + ${e:-0} + ${r:-0}))
+            reported=$((reported + $(sum_attr "$f" tests)))
+            skipped=$((skipped + $(sum_attr "$f" skipped)))
+            failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
           done
-          echo "compiler build: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-          if [ "$total" -eq 0 ]; then
-            echo "::error::Zero tests reported. This job would otherwise be green having run nothing — failing explicitly."
+          executed=$((reported - skipped))
+          echo "compiler build: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+          if [ "$executed" -eq 0 ]; then
+            echo "::error::Zero tests EXECUTED ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing explicitly."
             exit 1
           fi
           if [ "$failed" -ne 0 ]; then

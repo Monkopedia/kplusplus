@@ -115,21 +115,45 @@ jobs:
             echo "::error::No JUnit XML found under samples/minimal/build/test-results — nativeTest produced no report at all, so it cannot have run anything."
             exit 1
           fi
-          total_tests=0
+          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
+          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
+          # surely as an empty one — which is the exact hole this gate exists to close
+          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
+          # both attributes sit on the same <testsuite> element.
+          #
+          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
+          # counts were extracted the same way, so a second suite carrying a failure was
+          # silently dropped — that one turns a red build green. Gradle happens to write
+          # one suite per file today (both `test` and `nativeTest`), but a gate should be
+          # right by construction, not by a property of the current report writer.
+          #
+          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
+          # attribute-looking text inside a <system-out> block from being counted, and the
+          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
+          # whose totals would otherwise be added on top of the children they summarise.
+          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
+            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
+              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
+          }
+          total_reported=0
+          total_skipped=0
           total_failures=0
           total_errors=0
           for f in "${xml_files[@]}"; do
-            t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || t=0
-            fa=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || fa=0
-            er=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*') || er=0
-            echo "$f: tests=$t failures=$fa errors=$er"
-            total_tests=$((total_tests + t))
+            t=$(sum_attr "$f" tests)
+            sk=$(sum_attr "$f" skipped)
+            fa=$(sum_attr "$f" failures)
+            er=$(sum_attr "$f" errors)
+            echo "$f: executed=$((t - sk)) (tests=$t skipped=$sk) failures=$fa errors=$er"
+            total_reported=$((total_reported + t))
+            total_skipped=$((total_skipped + sk))
             total_failures=$((total_failures + fa))
             total_errors=$((total_errors + er))
           done
-          echo "TOTAL across ${#xml_files[@]} report(s): tests=$total_tests failures=$total_failures errors=$total_errors"
-          if [ "$total_tests" -eq 0 ]; then
-            echo "::error::nativeTest reported ZERO tests. This job would otherwise be green having run nothing — failing it explicitly."
+          total_executed=$((total_reported - total_skipped))
+          echo "TOTAL across ${#xml_files[@]} report(s): executed=$total_executed (tests=$total_reported skipped=$total_skipped) failures=$total_failures errors=$total_errors"
+          if [ "$total_executed" -eq 0 ]; then
+            echo "::error::nativeTest EXECUTED zero tests ($total_reported reported, $total_skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
             exit 1
           fi
           if [ "$total_failures" -gt 0 ] || [ "$total_errors" -gt 0 ]; then
