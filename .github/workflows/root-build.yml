@@ -126,6 +126,26 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s globstar nullglob
+          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
+          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
+          # surely as an empty one — which is the exact hole this gate exists to close
+          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
+          # both attributes sit on the same <testsuite> element.
+          #
+          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
+          # counts were extracted the same way, so a second suite carrying a failure was
+          # silently dropped — that one turns a red build green. Gradle happens to write
+          # one suite per file today (both `test` and `nativeTest`), but a gate should be
+          # right by construction, not by a property of the current report writer.
+          #
+          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
+          # attribute-looking text inside a <system-out> block from being counted, and the
+          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
+          # whose totals would otherwise be added on top of the children they summarise.
+          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
+            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
+              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
+          }
           grand=0
           for mod in krapper krapper_model feature-tests; do
             xml=("$mod"/build/test-results/**/*.xml)
@@ -133,26 +153,25 @@ jobs:
               echo "::error::No JUnit XML under $mod/build/test-results — :$mod:nativeTest produced no report at all, so it cannot have run anything."
               exit 1
             fi
-            total=0; failed=0
+            reported=0; skipped=0; failed=0
             for f in "${xml[@]}"; do
-              t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              total=$((total + ${t:-0}))
-              failed=$((failed + ${e:-0} + ${r:-0}))
+              reported=$((reported + $(sum_attr "$f" tests)))
+              skipped=$((skipped + $(sum_attr "$f" skipped)))
+              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
             done
-            echo "$mod: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$total" -eq 0 ]; then
-              echo "::error::$mod reported ZERO tests. This job would otherwise be green having run nothing — failing it explicitly."
+            executed=$((reported - skipped))
+            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+            if [ "$executed" -eq 0 ]; then
+              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
               exit 1
             fi
             if [ "$failed" -ne 0 ]; then
               echo "::error::$mod reported test failures/errors in its JUnit XML."
               exit 1
             fi
-            grand=$((grand + total))
+            grand=$((grand + executed))
           done
-          echo "TOTAL: $grand test(s)"
+          echo "TOTAL: $grand test(s) executed"
 
       - name: Upload test results
         if: always()
@@ -224,6 +243,26 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s globstar nullglob
+          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
+          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
+          # surely as an empty one — which is the exact hole this gate exists to close
+          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
+          # both attributes sit on the same <testsuite> element.
+          #
+          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
+          # counts were extracted the same way, so a second suite carrying a failure was
+          # silently dropped — that one turns a red build green. Gradle happens to write
+          # one suite per file today (both `test` and `nativeTest`), but a gate should be
+          # right by construction, not by a property of the current report writer.
+          #
+          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
+          # attribute-looking text inside a <system-out> block from being counted, and the
+          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
+          # whose totals would otherwise be added on top of the children they summarise.
+          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
+            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
+              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
+          }
           grand=0
           for mod in featuregen cppfixture; do
             xml=("$mod"/build/test-results/**/*.xml)
@@ -231,26 +270,25 @@ jobs:
               echo "::error::No JUnit XML under $mod/build/test-results — :$mod:nativeTest produced no report at all, so it cannot have run anything."
               exit 1
             fi
-            total=0; failed=0
+            reported=0; skipped=0; failed=0
             for f in "${xml[@]}"; do
-              t=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              e=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              r=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | tr -dc '0-9' || true)
-              total=$((total + ${t:-0}))
-              failed=$((failed + ${e:-0} + ${r:-0}))
+              reported=$((reported + $(sum_attr "$f" tests)))
+              skipped=$((skipped + $(sum_attr "$f" skipped)))
+              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
             done
-            echo "$mod: $total test(s), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$total" -eq 0 ]; then
-              echo "::error::$mod reported ZERO tests. This job would otherwise be green having run nothing — failing it explicitly."
+            executed=$((reported - skipped))
+            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
+            if [ "$executed" -eq 0 ]; then
+              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
               exit 1
             fi
             if [ "$failed" -ne 0 ]; then
               echo "::error::$mod reported test failures/errors in its JUnit XML."
               exit 1
             fi
-            grand=$((grand + total))
+            grand=$((grand + executed))
           done
-          echo "TOTAL: $grand test(s)"
+          echo "TOTAL: $grand test(s) executed"
 
       - name: Upload test results
         if: always()
