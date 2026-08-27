@@ -590,12 +590,18 @@ Machine-checkable gates, per brick:
   the config named in the environment and the runner filtered to one child entry point. That
   indirection is the point — comparing two in-process runs to each other cannot detect a leak
   both sides share, and a missing child fails loudly rather than comparing against nothing.
-  Two traps are worth recording for whoever writes the next such mutation: a lazily-initialised
-  shared fallback can clobber the very baseline the test compares against (producing a red for
-  the wrong reason — a bypass constructor is what keeps the measurement clean), and (c)'s
-  re-entry leg must compare emitted files only, because a ledger belongs to its run and a run
-  used twice has legitimately recorded twice. The drop-ledger report is otherwise compared
-  alongside the emitted files, since it is run-scoped state the sources do not reflect.
+  One trap is worth recording for whoever writes the next such mutation: a lazily-initialised
+  shared fallback can clobber the very baseline the test compares against, producing a red for
+  the wrong reason — a bypass constructor is what keeps the measurement clean.
+
+  All legs of all three tests compare the drop-ledger report alongside the emitted files, since
+  it is run-scoped state the sources do not reflect. An earlier revision of this section
+  exempted (c)'s re-entry leg from the ledger comparison "because a run used twice has recorded
+  twice"; that reason was **false as written** — the config re-entered in that leg records no
+  drops, so its ledger is empty both times and the full comparison holds. The exemption was
+  removed rather than re-justified. It would become genuinely necessary only if that config
+  were given a dropped member, which is accumulation within one run rather than state crossing
+  between runs.
 - **G4** — a cached `WrappedTU`'s `ModelIo.encodeToString` equals a fresh parse's, for
   featuregen's header and for `clang_slice.h`.
 - **G5** — index **coverage** (revised by B2; see the note below): every container-facade

@@ -71,7 +71,7 @@ private const val CHILD_TEST_NAME = "childFreshProcessBaseline"
  * as-is; this file runs the real deserialize -> resolve -> codegen pipeline instead (the path
  * the self-hosted CLI takes from a front-end-produced ModelIo, minus the clang COMPILE).
  *
- * Three tests, and the third is the one B4 exists for:
+ * Four tests, and the fourth is the one B4 exists for:
  *
  *  - [twoInProcessGenerationsAreByteIdentical] — the original guard: same config twice in one
  *    process, byte-identical.
@@ -81,16 +81,28 @@ private const val CHILD_TEST_NAME = "childFreshProcessBaseline"
  *    content is a function of the set and not of the arrival order.
  *  - [twoConfigsInOneProcessMatchFreshProcesses] — **G3(b)**: two DIFFERENT configs run
  *    back-to-back in one process, each compared against **a genuine fresh-process run of the
- *    same config**. This is the direct test of §1.4 and the gate for B4.
+ *    same config**.
+ *  - [interleavedRunLifetimesMatchFreshProcesses] — **G3(c)**: two runs CONSTRUCTED BEFORE
+ *    EITHER GENERATES and then used out of construction order, each still matching its own
+ *    fresh-process run. **This is the gate for B4**, and G3(b) is not.
  *
- * **Why (b) needs a real second process.** A single in-process run proves nothing about
- * leaked state, and neither does comparing two in-process runs to each other: if both sides
- * share the leak the comparison is satisfied and reports nothing. The failure this brick
- * prevents is config A's leftovers changing config B's output *within one process*, so the
- * only baseline that can detect it is one produced where config A never ran. [freshProcess]
- * gets that by re-executing this very test binary (`/proc/self/exe`) with
- * [CHILD_CONFIG_ENV] set, filtered down to [CHILD_TEST_NAME] — the same production code, in a
- * process that has generated nothing else.
+ * **Why G3(b) is not the gate — measured, not argued.** G3(b) runs
+ * `construct A -> use A -> construct B -> use B`, so no two runs are ever configured at the
+ * same time. The actual pre-B4 shape was process globals **reset at construction**
+ * (`IndexedServiceImpl.init` calling `GenerationContext.reset(config.rootPackage,
+ * config.noRtti)`), and every such reset happened after the previous run had already
+ * finished — so that shape **passes** G3(b). Under a construction-time-reset mutation, G3(a),
+ * G3(b) and the same-config guard all stay green and only G3(c) goes red. §1.4's claim is
+ * about runs *alive at once*, which only G3(c) creates. Do not cite G3(b) as this brick's
+ * gate; see docs/design/live-service.md, gate G3.
+ *
+ * **Why (b) and (c) need a real second process.** A single in-process run proves nothing
+ * about leaked state, and neither does comparing two in-process runs to each other: if both
+ * sides share the leak the comparison is satisfied and reports nothing. The only baseline
+ * that can detect it is one produced where the other config never ran. [freshProcess] gets
+ * that by re-executing this very test binary (`/proc/self/exe`) with [CHILD_CONFIG_ENV] set,
+ * filtered down to [CHILD_TEST_NAME] — the same production code, in a process that has
+ * generated nothing else.
  *
  * **What is compared.** Every emitted file, plus the run's drop-ledger report under the
  * `<drop-ledger>` key. The ledger is included deliberately: it is per-run state that the
@@ -338,8 +350,9 @@ class DeterminismTest {
         val written = readlink("/proc/self/exe", buffer, (size - 1).toULong())
         assertTrue(
             written > 0,
-            "readlink(/proc/self/exe) failed — G3(b) cannot produce a fresh-process baseline, " +
-                "and a baseline taken in THIS process would share any leak it is meant to catch"
+            "readlink(/proc/self/exe) failed — G3(b) and G3(c) cannot produce a " +
+                "fresh-process baseline, and a baseline taken in THIS process would share " +
+                "any leak it is meant to catch"
         )
         buffer[written] = 0
         buffer.toKString()
@@ -464,16 +477,21 @@ class DeterminismTest {
     }
 
     /**
-     * **G3(b)** — the brick's gate. Two different configs run back-to-back in ONE process,
-     * each compared against a fresh-process run of the same config.
+     * **G3(b)** — two different configs run back-to-back in ONE process, each compared
+     * against a fresh-process run of the same config.
+     *
+     * **This is NOT the gate for B4** — [interleavedRunLifetimesMatchFreshProcesses] (G3(c))
+     * is. What this pins is the weaker *sequential* property: a run that has finished does
+     * not leak into the next one. That property was already satisfied before B4, because the
+     * process globals were reset at construction; measured, this test stays green under a
+     * construction-time-reset mutation. It earns its place by catching a global with no reset
+     * at all (a shared ledger, a context that ignores later installs), not by gating the
+     * brick.
      *
      * Config A runs first and is the one with drops and no root package; config B follows
      * with a root package, `-fno-rtti`, a different reference policy and different
-     * module/package names. Before B4 the two shared one `GenerationContext`, one
-     * `DropLedger` and one set of `Parsing.kt` vars, and B could only start by destroying
-     * A's — so anything A left in place that B did not overwrite became part of B's output.
-     * Each side is measured against a process where the other config never ran, so a shared
-     * leak cannot satisfy the comparison.
+     * module/package names. Each side is measured against a process where the other config
+     * never ran, so a shared leak cannot satisfy the comparison.
      */
     @Test
     fun twoConfigsInOneProcessMatchFreshProcesses(): Unit = runBlocking {
@@ -534,9 +552,16 @@ class DeterminismTest {
      *  3. **B is used again, after A ran.** Re-entering a still-live run must not have been
      *     disturbed by the run that came between.
      *
-     * Leg 3 compares the emitted FILES only. Its ledger legitimately differs: a ledger belongs
-     * to the run, and a run used twice has recorded twice — that is accumulation WITHIN one
-     * run, which is the ledger doing its job, not state crossing between runs.
+     * All three legs compare the FULL transcript, drop ledger included. An earlier revision
+     * exempted the ledger from leg 3 and justified it with "a run used twice has recorded
+     * twice" — which is **not true of this test**: [Config.B] sets
+     * `withUnresolvableMember = false`, so its ledger is empty on both uses and the stronger
+     * comparison holds. The exemption was removed rather than re-justified.
+     *
+     * Note for whoever changes the fixture: giving [Config.B] a dropped member WOULD make
+     * `bAgain`'s ledger carry two records to `bFirst`'s one. That is accumulation within a
+     * single run — the ledger doing its job, not state crossing between runs — and leg 3
+     * would then genuinely need the exemption it does not need today.
      */
     @Test
     fun interleavedRunLifetimesMatchFreshProcesses(): Unit = runBlocking {
@@ -572,8 +597,8 @@ class DeterminismTest {
                 "per construction fails exactly here and passes G3(b)"
         )
         assertSameGeneration(
-            bFirst.filterKeys { it != ledgerEntry },
-            bAgain.filterKeys { it != ledgerEntry },
+            bFirst,
+            bAgain,
             "run B re-entered after run A generated in between — a live run was disturbed " +
                 "by another run's use"
         )
