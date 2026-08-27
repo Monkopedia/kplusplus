@@ -17,12 +17,12 @@ package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.GenerationContext
-import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER_VAR
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUES_REF
+import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer

@@ -82,39 +82,39 @@ class PolymorphicReferenceTest {
         // `IndexedServiceImpl` does for every service call — brick B4 made that state
         // per-run rather than a process global that had to be reset first.
         KrapperRun.using(KrapperRun(GenerationContext())) {
-        val baseType = WrappedType("Poly::Base")
-        val base = WrappedClass("Base").apply {
-            metadata.hasConstructor = true
-            addChild(WrappedConstructor("Base", baseType, false, true))
-            // Non-virtual instance method — the shape that makes BaseApi an empty marker.
-            addChild(method("get_value", WrappedType("int")))
-        }
-        val derived = WrappedClass("Derived").apply {
-            metadata.hasConstructor = true
-            addChild(WrappedBase(baseType))
-            addChild(WrappedConstructor("Derived", WrappedType("Poly::Derived"), false, true))
-        }
-        val local = WrappedClass("Local").apply {
-            metadata.hasConstructor = true
-            addChild(WrappedConstructor("Local", WrappedType("Poly::Local"), false, true))
-            // operator* (the deref accessor) returns the base by reference.
-            addChild(method("operator*", baseType))
-        }
-        val tu = WrappedTU().also { tu ->
-            tu.addChild(
-                WrappedNamespace("Poly").also { ns ->
-                    ns.parent = tu
-                    listOf(base, derived, local).forEach {
-                        ns.addChild(it)
-                        it.parent = ns
+            val baseType = WrappedType("Poly::Base")
+            val base = WrappedClass("Base").apply {
+                metadata.hasConstructor = true
+                addChild(WrappedConstructor("Base", baseType, false, true))
+                // Non-virtual instance method — the shape that makes BaseApi an empty marker.
+                addChild(method("get_value", WrappedType("int")))
+            }
+            val derived = WrappedClass("Derived").apply {
+                metadata.hasConstructor = true
+                addChild(WrappedBase(baseType))
+                addChild(WrappedConstructor("Derived", WrappedType("Poly::Derived"), false, true))
+            }
+            val local = WrappedClass("Local").apply {
+                metadata.hasConstructor = true
+                addChild(WrappedConstructor("Local", WrappedType("Poly::Local"), false, true))
+                // operator* (the deref accessor) returns the base by reference.
+                addChild(method("operator*", baseType))
+            }
+            val tu = WrappedTU().also { tu ->
+                tu.addChild(
+                    WrappedNamespace("Poly").also { ns ->
+                        ns.parent = tu
+                        listOf(base, derived, local).forEach {
+                            ns.addChild(it)
+                            it.parent = ns
+                        }
                     }
-                }
-            )
-        }
-        val resolver = ParsedResolver(tu)
-        resolver.findClasses { defaultFilter() }
-            .resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
-            .filterIsInstance<ResolvedClass>()
+                )
+            }
+            val resolver = ParsedResolver(tu)
+            resolver.findClasses { defaultFilter() }
+                .resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
+                .filterIsInstance<ResolvedClass>()
         }
     }
 
