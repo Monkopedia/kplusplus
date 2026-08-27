@@ -78,6 +78,10 @@ class PolymorphicReferenceTest {
      * `BaseApi`), and a `Local` wrapper whose `operator*` returns `Base`.
      */
     private fun resolveModel(): List<ResolvedClass> = runBlocking {
+        // Install a fresh per-run KrapperRun (ledger + intern cache + rootPackage), as
+        // `IndexedServiceImpl` does for every service call — brick B4 made that state
+        // per-run rather than a process global that had to be reset first.
+        KrapperRun.using(KrapperRun(GenerationContext())) {
         val baseType = WrappedType("Poly::Base")
         val base = WrappedClass("Base").apply {
             metadata.hasConstructor = true
@@ -107,12 +111,11 @@ class PolymorphicReferenceTest {
                 }
             )
         }
-        DropLedger.reset()
-        GenerationContext.reset(null)
         val resolver = ParsedResolver(tu)
         resolver.findClasses { defaultFilter() }
             .resolveAll(resolver, ReferencePolicy.IGNORE_MISSING)
             .filterIsInstance<ResolvedClass>()
+        }
     }
 
     @Test

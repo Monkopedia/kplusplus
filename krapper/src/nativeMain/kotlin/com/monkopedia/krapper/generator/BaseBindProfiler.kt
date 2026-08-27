@@ -18,8 +18,12 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.generator.Utils.printerrln
 import kotlin.time.TimeSource
 
+private const val PROGRESS_EVERY = 100
+private const val PROGRESS_INTERVAL_MS = 3_000L
+private const val TOP_N = 25
+
 /**
- * Process-scoped, off-by-default profiler for the BASE resolve (`filterAndResolve` / `resolveAll`
+ * Run-scoped, off-by-default profiler for the BASE resolve (`filterAndResolve` / `resolveAll`
  * — the pass that runs BEFORE any forcing). Gated by the `diag.baseBindTiming` experimental flag
  * ([ExperimentalFlags.DIAG_BASE_BIND_TIMING]); when the flag is OFF, every method here is an inert
  * early-return, so a normal run is byte-identical to one with no profiler wired in at all
@@ -41,16 +45,18 @@ import kotlin.time.TimeSource
  *  - it counts INCLUDE_MISSING on-demand materializations and re-entries, to spot repeated work.
  *
  * [report] dumps the final distribution (top-N, walk counters, per-bucket rate curve).
+ *
+ * **One profiler per run, not per process (brick B4, docs/design/live-service.md §1.4).** It
+ * was an `object` with a `reset()` called from `IndexedServiceImpl.init`; its counters now
+ * belong to the [KrapperRun] in scope, so a partial or timed-out run cannot contribute its
+ * counters to a later run in the same process (and a persistent krapper — brick B5 — can
+ * profile two builds without them summing together).
  */
-object BaseBindProfiler {
+class BaseBindProfiler {
     val enabled: Boolean
         get() = ExperimentalFlags.isEnabled(ExperimentalFlags.DIAG_BASE_BIND_TIMING)
 
-    private const val PROGRESS_EVERY = 100
-    private const val PROGRESS_INTERVAL_MS = 3_000L
-    private const val TOP_N = 25
-
-    // ---- run-scoped state (reset per generation run) ----
+    // ---- run-scoped state ----
     private var startMark = TimeSource.Monotonic.markNow()
     private var lastLogMark = startMark
     private var lastLogCount = 0
@@ -73,21 +79,6 @@ object BaseBindProfiler {
 
     // Coarse rate curve: (cumulativeCount, cumulativeElapsedMs) samples at each progress log.
     private val rateCurve = ArrayList<Pair<Int, Double>>()
-
-    /** Reset run-scoped state at the start of each generation run (called from the init block). */
-    fun reset() {
-        if (!enabled) return
-        startMark = TimeSource.Monotonic.markNow()
-        lastLogMark = startMark
-        lastLogCount = 0
-        resolvedCount = 0
-        treeWalks = 0
-        treeNodesVisited = 0L
-        includeMaterializations = 0
-        includeReentries = 0
-        slowest.clear()
-        rateCurve.clear()
-    }
 
     /** Announce the base resolve is starting over [totalFiltered] initially-filtered classes. */
     fun begin(totalFiltered: Int) {

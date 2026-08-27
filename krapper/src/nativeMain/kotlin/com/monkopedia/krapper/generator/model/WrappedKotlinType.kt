@@ -15,9 +15,9 @@
  */
 package com.monkopedia.krapper.generator.model
 
-import com.monkopedia.krapper.generator.DropLedger
 import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.GenerationContext
+import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_FUNCTION
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQUE_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
@@ -307,7 +307,7 @@ private inline fun parseOrOpaqueLeaf(
     name: String,
     parse: () -> WrappedKotlinType
 ): WrappedKotlinType = runCatching(parse).getOrElse {
-    DropLedger.record(
+    dropLedger.record(
         name,
         "Failed to parse template spelling (${it.message}); degraded to opaque leaf",
         DropPhase.PARSE
@@ -422,9 +422,9 @@ fun fullyQualifiedType(name: String, isWrapper: Boolean = false): WrappedKotlinT
     //     namespaced wrappers are left as-is. (Provably identical to historical.)
     //   - rootPackage set: prepend the configured segments to every wrapper package,
     //     replacing the legacy `root` for top-level and prefixing namespaced ones.
-    // Set once per run by GenerationContext.reset (via config.rootPackage), before any
+    // Fixed for the run by its GenerationContext (via config.rootPackage), installed before any
     // resolution — a type's Kotlin package is baked into its ResolvedKotlinType then.
-    val rootSegments = GenerationContext.rootPackage?.split(".")
+    val rootSegments = GenerationContext.current.rootPackage?.split(".")
     val nameList = when {
         !isWrapper -> cased
 

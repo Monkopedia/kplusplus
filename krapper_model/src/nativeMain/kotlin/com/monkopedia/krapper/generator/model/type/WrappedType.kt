@@ -53,7 +53,7 @@ abstract class WrappedType : WrappedElement() {
         override fun invoke(type: String): WrappedType {
             if (type == "void") return VOID
             if (type == "std::size_t") return invoke("size_t")
-            return GenerationContext.internedTypes.getOrPut(type) {
+            return GenerationContext.current.internedTypes.getOrPut(type) {
                 if (type.startsWith("const ")) return const(invoke(type.substring("const ".length)))
                 if (type.startsWith("typename ")) {
                     return WrappedTypename(type.substring("typename ".length))

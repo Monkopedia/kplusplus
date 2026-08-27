@@ -115,21 +115,24 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     // `resolveForcing`'s [forcedContainerKeys] doc.
     private val forcedContainerKeys = mutableSetOf<String>()
 
-    init {
-        // Start each generation run from clean process-scoped state so its output and
-        // report reflect only this run: the drop ledger (shared with any prior run) and the
-        // GenerationContext (the WrappedType intern cache + the rootPackage). Must be reset
-        // BEFORE any resolution (requestInstantiation / filterAndResolve): a type's Kotlin
-        // package is baked into its ResolvedKotlinType at resolve time, so rooting it later
-        // (e.g. in writeTo) would be too late.
-        DropLedger.reset()
-        GenerationContext.reset(config.rootPackage, config.noRtti)
-        // Process-scoped base-resolve profiler (off by default, byte-identical when off). Reset per
-        // run so a partial/timed-out run's counters don't leak into a later in-process run.
-        BaseBindProfiler.reset()
-    }
+    // Everything this generation owns that used to be a process global (brick B4,
+    // docs/design/live-service.md §1.4): the drop ledger, the base-resolve profiler, and the
+    // GenerationContext (the WrappedType intern cache + rootPackage/noRtti), plus the cpp
+    // front-end's -I roots and optional model dump, which used to be set on `Parsing.kt`'s
+    // top-level vars by `KrapperServiceImpl.index`. It is built HERE, at construction, because
+    // the resolve-time config must be in place before ANY resolution (requestInstantiation /
+    // filterAndResolve): a type's Kotlin package is baked into its ResolvedKotlinType at
+    // resolve time, so rooting it later (e.g. in writeTo) would be too late.
+    //
+    // Each service method installs it for the duration of the call. Two services in one
+    // process therefore no longer share this state -- previously the second one's `reset()`
+    // erased the first one's, which is the persistence blocker B5 could not be built over.
+    private val run = KrapperRun(config, request)
 
-    override suspend fun filterAndResolve(filter: FilterDefinition) {
+    override suspend fun filterAndResolve(filter: FilterDefinition) =
+        KrapperRun.using(run) { filterAndResolveInRun(filter) }
+
+    private suspend fun filterAndResolveInRun(filter: FilterDefinition) {
         // Record the explicit allowlist as the requested set (DefaultFilter requests
         // everything, so it contributes nothing to diff against).
         if (filter is AllowListFilter) {
@@ -158,13 +161,19 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         mappings.add(mappingService)
     }
 
-    override suspend fun applyFixups(fixups: List<Fixup>) {
+    override suspend fun applyFixups(fixups: List<Fixup>) =
+        KrapperRun.using(run) { applyFixupsInRun(fixups) }
+
+    private suspend fun applyFixupsInRun(fixups: List<Fixup>) {
         if (fixups.isEmpty()) return
         Log.i("Applying ${fixups.size} fixup(s)")
         FixupApplier.apply(this, fixups)
     }
 
-    override suspend fun requestInstantiation(req: InstantiationRequest) {
+    override suspend fun requestInstantiation(req: InstantiationRequest) =
+        KrapperRun.using(run) { requestInstantiationInRun(req) }
+
+    private suspend fun requestInstantiationInRun(req: InstantiationRequest) {
         val target = req.spec
         requested.add(target)
         // The forcing struct's name + header content are SHARED with the cpp front-end
@@ -256,7 +265,9 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             ).dedupClassesLastWins()
     }
 
-    override suspend fun writeTo(output: String) {
+    override suspend fun writeTo(output: String) = KrapperRun.using(run) { writeToInRun(output) }
+
+    private suspend fun writeToInRun(output: String) {
         if (config.debug) {
             Log.i("Running mapping")
         }
@@ -400,7 +411,7 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             // #86 applies to the generated forcing headers. Rewritten HERE rather than in the
             // ledger so the existing drop report and the diagnostics streamed over the service
             // channel are untouched: this brick must not move a single pre-existing byte.
-            drops = DropLedger.diagnostics().map { diagnostic ->
+            drops = run.drops.diagnostics().map { diagnostic ->
                 val location = diagnostic.location ?: return@map diagnostic
                 diagnostic.copy(
                     location = location.copy(
@@ -453,13 +464,13 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
      */
     private suspend fun reportDrops() {
         val bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
-        Log.i(DropLedger.report(requested, bound))
+        Log.i(run.drops.report(requested, bound))
         // #185: the same ledger, structured — so a remote driver gets each drop as
         // {severity, symbol, file:line:col, reason} instead of having to scrape the report.
-        Log.diagnostics(DropLedger.diagnostics())
-        if (config.failOnDrop && DropLedger.hasDrops()) {
+        Log.diagnostics(run.drops.diagnostics())
+        if (config.failOnDrop && run.drops.hasDrops()) {
             error(
-                "--fail-on-drop: ${DropLedger.drops.size} symbol(s) were dropped " +
+                "--fail-on-drop: ${run.drops.drops.size} symbol(s) were dropped " +
                     "(see the drop ledger above)"
             )
         }

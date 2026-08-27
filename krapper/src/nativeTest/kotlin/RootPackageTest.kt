@@ -17,7 +17,6 @@ package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.generator.model.WrappedKotlinType
 import com.monkopedia.krapper.generator.model.fullyQualifiedType
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -30,21 +29,21 @@ import kotlin.test.assertEquals
  */
 class RootPackageTest {
 
-    @AfterTest
-    fun resetOverride() {
-        // Never leak the override into other tests (single-threaded gen pass).
-        GenerationContext.reset(null)
-    }
+    // Run [body] under a GenerationContext rooted at [rootPackage]. `using` restores the
+    // previous installation on the way out, so — unlike the `reset()`-a-global shape this
+    // replaced (brick B4) — an override cannot leak into another test even if body throws.
+    private fun <T> withRootPackage(rootPackage: String?, body: () -> T): T =
+        GenerationContext.using(GenerationContext(rootPackage), body)
 
     @Test
-    fun unsetTopLevelGoesToRoot() {
+    fun unsetTopLevelGoesToRoot() = withRootPackage(null) {
         val type = fullyQualifiedType("Widget", isWrapper = true)
         assertEquals("root", type.pkg)
         assertEquals("Widget", type.name)
     }
 
     @Test
-    fun unsetNamespaceStaysBare() {
+    fun unsetNamespaceStaysBare() = withRootPackage(null) {
         // A namespaced wrapper (`std::vector` -> `std.Vector`) keeps its bare path.
         val type = fullyQualifiedType("std.Vector", isWrapper = true)
         assertEquals("std", type.pkg)
@@ -52,16 +51,14 @@ class RootPackageTest {
     }
 
     @Test
-    fun setRootRebasesTopLevel() {
-        GenerationContext.reset("com.acme.app")
+    fun setRootRebasesTopLevel() = withRootPackage("com.acme.app") {
         val type = fullyQualifiedType("Widget", isWrapper = true)
         assertEquals("com.acme.app", type.pkg)
         assertEquals("Widget", type.name)
     }
 
     @Test
-    fun setRootPrefixesNamespace() {
-        GenerationContext.reset("com.acme.app")
+    fun setRootPrefixesNamespace() = withRootPackage("com.acme.app") {
         // Mirrors how `std::vector<int>`'s base `std::vector` is packaged: the
         // namespace path is prefixed with the configured root package.
         val type = fullyQualifiedType("std.Vector", isWrapper = true)
@@ -70,8 +67,7 @@ class RootPackageTest {
     }
 
     @Test
-    fun setRootIsIdempotentForAlreadyRootedNames() {
-        GenerationContext.reset("com.acme.app")
+    fun setRootIsIdempotentForAlreadyRootedNames() = withRootPackage("com.acme.app") {
         // The template path re-wraps an already-rooted package (baseType.pkg + the
         // mangled name) back through fullyQualifiedType. Rooting must be idempotent or
         // `std::vector<int>` would double to `com.acme.app.com.acme.app.std.Vector__Int`.
@@ -81,8 +77,7 @@ class RootPackageTest {
     }
 
     @Test
-    fun setRootViaTemplateFactory() {
-        GenerationContext.reset("com.acme.app")
+    fun setRootViaTemplateFactory() = withRootPackage("com.acme.app") {
         // The string factory drives the real codegen path: `std::vector<int>`
         // -> base `std.Vector__Int` in package `com.acme.app.std`.
         val type = WrappedKotlinType("std.Vector__Int")
@@ -90,8 +85,7 @@ class RootPackageTest {
     }
 
     @Test
-    fun setRootDoesNotTouchNativeTypes() {
-        GenerationContext.reset("com.acme.app")
+    fun setRootDoesNotTouchNativeTypes() = withRootPackage("com.acme.app") {
         // Non-wrapper (platform/native) names must never be rebased — they are
         // already correct fully-qualified Kotlin/Native typealiases.
         val type = fullyQualifiedType("platform.posix.size_t", isWrapper = false)

@@ -67,20 +67,21 @@ data class DropRecord(
 )
 
 /**
- * Process-scoped collector for skip-not-crash binding drops.
+ * Run-scoped collector for skip-not-crash binding drops.
  *
  * The breadth strategy drops unmodelable methods/fields/classes with only a log line.
  * Each known drop site funnels its `{symbol, reason}` here so a run can report exactly
  * what it dropped and why — turning "the binding isn't there" from an unanswerable
  * question ("did C++ not have it, or did the generator drop it?") into a diffable list.
  *
- * Modeled as an object (matching the sibling [Log] and [GenerationContext] objects):
- * the generator runs one request at a time under `runBlocking`, so a shared
- * collector is the cohesive carrier without threading a ledger handle through every
- * resolve signature. [reset] clears it between runs (tests and the service path both
- * call it before a fresh generation).
+ * **One ledger per run, not per process (brick B4, docs/design/live-service.md §1.4).**
+ * This was an `object` with a `reset()` the service called before each generation, which
+ * meant a second run could only start clean by erasing the first one's drops — fine while
+ * krapper was one run per process, wrong the moment a process serves successive builds
+ * (brick B5). The ledger now belongs to the [KrapperRun] in scope; drop sites reach it
+ * through [dropLedger] rather than threading a handle through every resolve signature.
  */
-object DropLedger {
+class DropLedger {
     private val records = mutableListOf<DropRecord>()
 
     /** The drops recorded so far, in the order they occurred. */
@@ -124,11 +125,6 @@ object DropLedger {
             phase = record.phase.diagnosticPhase,
             hint = "no Kotlin binding is generated for this symbol"
         )
-    }
-
-    /** Clear all recorded drops. Call before each fresh generation run. */
-    fun reset() {
-        records.clear()
     }
 
     /**

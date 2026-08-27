@@ -132,10 +132,10 @@ suspend fun List<WrappedElement>.resolveAll(
         )
         .withClasses(classes)
         .withPolicy(policy)
-    BaseBindProfiler.begin(classes.size)
+    baseBindProfiler.begin(classes.size)
     classes.forEach {
         if (resolveContext.resolve(it.type) == null) {
-            DropLedger.record(
+            dropLedger.record(
                 it.type.toString(),
                 "Filtered class did not resolve",
                 DropPhase.RESOLVE,
@@ -144,7 +144,7 @@ suspend fun List<WrappedElement>.resolveAll(
             Log.w("Warning: can't resolve filtered class ${it.type}")
         }
     }
-    BaseBindProfiler.report()
+    baseBindProfiler.report()
     val methods = filterIsInstance<WrappedMethod>().mapNotNull { method ->
         (method.parent as? WrappedNamespace)?.let { nm ->
             method.resolve(resolveContext + nm)
@@ -276,7 +276,7 @@ suspend fun List<WrappedElement>.resolveForcing(
     Diag.timed("forcing pass 1 (bind ${boundClasses.size} bound class(es))") {
         boundClasses.forEach {
             if (pass1.resolve(it.type) == null) {
-                DropLedger.record(
+                dropLedger.record(
                     it.type.toString(),
                     "Filtered class did not resolve",
                     DropPhase.RESOLVE,
@@ -299,7 +299,7 @@ suspend fun List<WrappedElement>.resolveForcing(
     Diag.timed("forcing pass 2 (force ${forcingStructs.size} container(s))") {
         forcingStructs.forEach {
             if (pass2.resolve(it.type) == null) {
-                DropLedger.record(
+                dropLedger.record(
                     it.type.toString(),
                     "Forcing struct did not resolve",
                     DropPhase.RESOLVE,
@@ -661,7 +661,7 @@ data class ResolveContext(
         // that fails to resolve returns through here, so recording once covers the
         // method/field/class drop sites uniformly. The (debug-gated) log line stays for
         // the live KRAPPER_DEBUG_RESOLVE trace.
-        DropLedger.record(
+        dropLedger.record(
             symbol = element?.toString() ?: type?.toString() ?: "<unknown>",
             reason = message,
             phase = DropPhase.RESOLVE,
@@ -749,10 +749,10 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
                         // class isn't deduped and resolution descends until the native
                         // stack overflows.
                         if (context.tracker.otherResolved.contains(it.toString())) {
-                            BaseBindProfiler.recordInclude(reentry = true)
+                            baseBindProfiler.recordInclude(reentry = true)
                             return@operateOn ElementUnchanged
                         }
-                        BaseBindProfiler.recordInclude(reentry = false)
+                        baseBindProfiler.recordInclude(reentry = false)
                         context.tracker.otherResolved.add(it.toString())
                         try {
                             // Reference expansion: keep the legacy hard-fail when a

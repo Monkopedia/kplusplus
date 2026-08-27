@@ -251,7 +251,7 @@ private fun WrappedClass.dropConstOverloadDuplicates() {
         val constOverload = overloads.singleOrNull { it.isConst } ?: return@forEach
         val nonConst = overloads.single { it !== constOverload }
         if (nonConst.isConst) return@forEach
-        DropLedger.record(
+        dropLedger.record(
             "$name::${nonConst.name}",
             "Non-const overload duplicates a const overload (kept the const half)",
             DropPhase.DEDUP,
