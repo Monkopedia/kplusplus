@@ -89,19 +89,21 @@ jobs:
           key: gradle-compiler-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'compiler/**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-compiler-${{ runner.os }}-
 
-      # Delete-before-measure: a task that does not run leaves any previous
-      # report exactly where the guard below looks, so "never ran" and "ran and
-      # passed" are indistinguishable on disk. On a fresh checkout there is
-      # nothing to delete; this matters on a re-run of a cached workspace.
       # Executable evidence for the JUnit-XML arithmetic every gate in this repo uses
       # (.github/test-evidence-gate/). An all-skipped suite must read as zero executed,
-      # a <testsuites> wrapper must not be double-counted, a failure in a second suite
-      # must not be dropped, and all five gate sites must still use the tested form.
+      # a <testsuites> wrapper must not be double-counted, and a failure in a second
+      # suite must not be dropped. It also pins all five gate sites to the tested form
+      # AND runs each gate's own `executed = reported - skipped` line in situ, so a gate
+      # that stops subtracting `skipped` fails here rather than shipping green.
       # Runs in about a second and needs nothing but bash, so it sits in the cheapest
       # job in the repo and covers the gates in the three workflows it cannot run.
       - name: Verify the test-evidence gate arithmetic
         run: bash .github/test-evidence-gate/verify.sh
 
+      # Delete-before-measure: a task that does not run leaves any previous
+      # report exactly where the guard below looks, so "never ran" and "ran and
+      # passed" are indistinguishable on disk. On a fresh checkout there is
+      # nothing to delete; this matters on a re-run of a cached workspace.
       - name: Clear stale test reports
         run: rm -rf compiler/*/build/test-results
 

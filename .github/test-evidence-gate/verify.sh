@@ -81,6 +81,48 @@ want "gate sites matching the canonical sum line"     5 "$n2"
 nh=$(grep -n 'head -1' ../workflows/*.yml | grep -v 'clang++ --version' | grep -vc '^\S*:[0-9]*: *#')
 want "XML attribute reads still using head -1"        0 "$nh"
 
+# ---------------------------------------------------------------------------
+# THE ARITHMETIC AS SHIPPED -- and the reason this block exists.
+#
+# Everything above proves a LOCAL copy of `executed = tests - skipped`. Proving a
+# copy is not proving the gates. The five workflow copies of that subtraction were
+# untested in situ, so deleting `- skipped` from a gate left every fixture, every
+# drift check and all of CI green: the guard against the bug had the SAME blind
+# spot as the bug, one level up. Checking a control against a representation of
+# the thing instead of the thing is how this defect survived three reviews; it is
+# not allowed to be how its guard fails too.
+#
+# So: pull each gate's OWN assignment out of the workflow text and RUN it on an
+# all-skipped suite. This tests semantics, not spelling -- reformat the line
+# freely, but a gate that stops subtracting `skipped` reads 9 instead of 0 here.
+# ---------------------------------------------------------------------------
+echo "== each gate's own executed-count line, run on a 9-of-9-skipped suite"
+mapfile -t exec_lines < <(grep -hoE '^ *(total_)?executed=\$\(\([^)]*\)\)' ../workflows/*.yml)
+want "gate sites computing an executed count" 5 "${#exec_lines[@]}"
+zero=0
+for line in "${exec_lines[@]}"; do
+  reported=9 skipped=9 total_reported=9 total_skipped=9
+  unset executed total_executed
+  eval "$line"
+  v=${executed:-${total_executed:-UNSET}}
+  if [ "$v" = 0 ]; then zero=$((zero + 1))
+  else bad "in situ: '${line#"${line%%[![:space:]]*}"}' yields $v on an all-skipped suite, must be 0"; fi
+done
+want "gate sites reading ZERO executed for an all-skipped suite" 5 "$zero"
+
+# The gate must also ACT on that number. Computing `executed` correctly and then
+# testing `reported` would pass everything above and still ship the defect.
+echo "== each gate fails on the EXECUTED count, never the reported one"
+ng=$(grep -cE '^ *if \[ "\$(total_)?executed" -eq 0 \]' ../workflows/*.yml | awk -F: '{n+=$2} END{print n+0}')
+nr=$(grep -cE '^ *if \[ "\$(total_)?reported" -eq 0 \]' ../workflows/*.yml | awk -F: '{n+=$2} END{print n+0}')
+want "gate sites failing when zero tests EXECUTED"      5 "$ng"
+want "gate sites failing on the REPORTED count instead" 0 "$nr"
+
+# Negative control for the two checks above: the broken forms must still be broken
+# here, or the in-situ test has stopped discriminating and says nothing.
+reported=9 skipped=9; unset executed; eval 'executed=$((reported))'
+want "a gate that dropped '- skipped' reads nonzero (so it IS caught)" 9 "$executed"
+
 echo
 [ $rc -eq 0 ] && echo "test-evidence gate arithmetic: OK" || echo "test-evidence gate arithmetic: FAILED"
 exit $rc
