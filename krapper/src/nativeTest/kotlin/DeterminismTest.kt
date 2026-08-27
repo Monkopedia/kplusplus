@@ -224,8 +224,30 @@ class DeterminismTest {
         config: Config,
         modelJson: String,
         filter: FilterDefinition = DefaultFilter
+    ): Map<String, String> = generateWith(runFor(config), config, modelJson, filter)
+
+    /**
+     * The [KrapperRun] a service would build for [config] — CONSTRUCTION ONLY, deliberately
+     * separated from use.
+     *
+     * G3(b) constructs each run on the line before it installs it, so the sequence there is
+     * `construct A -> use A -> construct B -> use B` and the two runs are never configured at
+     * the same time. That is enough to catch a global with no reset at all, but a global that
+     * is **reset at construction** — the actual pre-B4 shape, where `IndexedServiceImpl.init`
+     * called `GenerationContext.reset(config.rootPackage, config.noRtti)` — is invisible to
+     * it, because each construction happens after the previous run is already finished.
+     * G3(c) exists to make the overlap real, and it needs this seam to do it.
+     */
+    private fun runFor(config: Config) =
+        KrapperRun(GenerationContext(config.rootPackage, config.noRtti))
+
+    /** Generate with an ALREADY-CONSTRUCTED [run]; see [generateOnce] for what it emits. */
+    private suspend fun generateWith(
+        run: KrapperRun,
+        config: Config,
+        modelJson: String,
+        filter: FilterDefinition = DefaultFilter
     ): Map<String, String> {
-        val run = KrapperRun(GenerationContext(config.rootPackage, config.noRtti))
         return KrapperRun.using(run) {
             val tu = ModelIo.decodeFromString(modelJson)
             val resolver = ParsedResolver(tu)
@@ -487,6 +509,75 @@ class DeterminismTest {
             inProcessB,
             "config B run AFTER config A in-process vs. its own fresh process — run-scoped " +
                 "state leaked from A into B (docs/design/live-service.md §1.4, brick B4)"
+        )
+    }
+
+    /**
+     * **G3(c)** — INTERLEAVED LIFETIMES: two runs configured and alive AT THE SAME TIME, used
+     * out of construction order, each still matching its own fresh-process baseline.
+     *
+     * This exists because G3(b), as the design doc originally specified it, does not gate what
+     * B4 actually fixed. G3(b) runs `construct A -> use A -> construct B -> use B`, so no two
+     * runs are ever configured at once — and the pre-B4 code satisfies that, because
+     * `IndexedServiceImpl.init` reset the process globals AT CONSTRUCTION and each
+     * construction happened after the previous run had finished. A shared global that is reset
+     * per construction passes G3(b). It cannot pass this.
+     *
+     * The claim being gated is [GenerationContext]'s own: *two runs alive at once would
+     * silently share an intern cache and a root package.* So both runs are built BEFORE either
+     * generates, and then:
+     *
+     *  1. **B is used first, though A was constructed first.** Under a construction-time reset
+     *     the shared state holds B's config here, which is the one ordering that would still
+     *     look right — so it is the control, not the catch.
+     *  2. **A is used second, long after B's construction overwrote the global.** This is the
+     *     catch: a shared, construction-reset global makes A emit B's root package, and A
+     *     diverges from its own fresh-process baseline.
+     *  3. **B is used again, after A ran.** Re-entering a still-live run must not have been
+     *     disturbed by the run that came between.
+     *
+     * Leg 3 compares the emitted FILES only. Its ledger legitimately differs: a ledger belongs
+     * to the run, and a run used twice has recorded twice — that is accumulation WITHIN one
+     * run, which is the ledger doing its job, not state crossing between runs.
+     */
+    @Test
+    fun interleavedRunLifetimesMatchFreshProcesses(): Unit = runBlocking {
+        val freshA = freshProcess(Config.A)
+        val freshB = freshProcess(Config.B)
+        assertTrue(
+            freshA != freshB,
+            "the two configs must generate different output for this gate to mean anything"
+        )
+
+        val modelA = ModelIo.encodeToString(buildModel(Config.A))
+        val modelB = ModelIo.encodeToString(buildModel(Config.B))
+
+        // BOTH runs configured before EITHER generates — the overlap G3(b) never creates.
+        val runA = runFor(Config.A)
+        val runB = runFor(Config.B)
+
+        val bFirst = generateWith(runB, Config.B, modelB)
+        val aSecond = generateWith(runA, Config.A, modelA)
+        val bAgain = generateWith(runB, Config.B, modelB)
+
+        assertSameGeneration(
+            freshB,
+            bFirst,
+            "run B used first (constructed second) vs. its own fresh process"
+        )
+        assertSameGeneration(
+            freshA,
+            aSecond,
+            "run A used SECOND, after run B was constructed and used, vs. its own fresh " +
+                "process — the two runs were alive at the same time and A read B's state " +
+                "(docs/design/live-service.md §1.4, brick B4). A shared global that is reset " +
+                "per construction fails exactly here and passes G3(b)"
+        )
+        assertSameGeneration(
+            bFirst.filterKeys { it != ledgerEntry },
+            bAgain.filterKeys { it != ledgerEntry },
+            "run B re-entered after run A generated in between — a live run was disturbed " +
+                "by another run's use"
         )
     }
 }
