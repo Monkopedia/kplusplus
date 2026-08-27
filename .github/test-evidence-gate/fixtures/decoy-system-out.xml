@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Captured stdout can contain attribute-looking text. Reading the whole file rather
+     than the <testsuite ...> START TAG would count these. executed = 3 - 1 = 2. -->
+<testsuite name="Chatty" tests="3" skipped="1" failures="0" errors="0" time="0.1">
+  <testcase name="t1" classname="Chatty" time="0.1">
+    <system-out><![CDATA[the tool logged: tests="999" skipped="999" failures="999"]]></system-out>
+  </testcase>
+</testsuite>

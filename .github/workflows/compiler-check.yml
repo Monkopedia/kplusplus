@@ -46,6 +46,12 @@ on:
       - 'samples/minimal/build.gradle.kts'
       - 'samples/multiproject/bindings/build.gradle.kts'
       - '.github/workflows/compiler-check.yml'
+      # The gate arithmetic below is pinned by executable fixtures; run them when
+      # either the fixtures or ANY workflow carrying a gate changes.
+      - '.github/test-evidence-gate/**'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/root-build.yml'
+      - '.github/workflows/samples-minimal.yml'
   push:
     branches: [main]
 
@@ -87,6 +93,15 @@ jobs:
       # report exactly where the guard below looks, so "never ran" and "ran and
       # passed" are indistinguishable on disk. On a fresh checkout there is
       # nothing to delete; this matters on a re-run of a cached workspace.
+      # Executable evidence for the JUnit-XML arithmetic every gate in this repo uses
+      # (.github/test-evidence-gate/). An all-skipped suite must read as zero executed,
+      # a <testsuites> wrapper must not be double-counted, a failure in a second suite
+      # must not be dropped, and all five gate sites must still use the tested form.
+      # Runs in about a second and needs nothing but bash, so it sits in the cheapest
+      # job in the repo and covers the gates in the three workflows it cannot run.
+      - name: Verify the test-evidence gate arithmetic
+        run: bash .github/test-evidence-gate/verify.sh
+
       - name: Clear stale test reports
         run: rm -rf compiler/*/build/test-results
 

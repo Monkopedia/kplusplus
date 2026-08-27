@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- THE defect. `tests=` counts skipped testcases, so an entirely @Ignore'd suite
+     reports a full, healthy tests="9" with failures=0 errors=0. Gating on `tests`
+     passes this file having executed nothing. executed = 9 - 9 = 0 -> must go RED. -->
+<testsuite name="AllIgnored" tests="9" skipped="9" failures="0" errors="0" time="0.0">
+  <testcase name="t1" classname="AllIgnored"><skipped/></testcase>
+</testsuite>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The second, independent defect. Reading attributes with `head -1` sees only the
+     FIRST <testsuite>. Applied to `failures=`/`errors=` that DROPS a real failure and
+     turns a red build green -- strictly worse than undercounting passes.
+     tests = 10, skipped = 0, failures = 1. -->
+<testsuite name="A" tests="4" skipped="0" failures="0" errors="0" time="0.1">
+  <testcase name="ok" classname="A" time="0.1"/>
+</testsuite>
+<testsuite name="B" tests="6" skipped="0" failures="1" errors="0" time="0.1">
+  <testcase name="boom" classname="B" time="0.1"><failure message="boom">boom</failure></testcase>
+</testsuite>

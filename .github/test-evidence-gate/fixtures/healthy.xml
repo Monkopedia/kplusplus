@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Positive control: an ordinary suite. executed = 9. -->
+<testsuite name="Healthy" tests="9" skipped="0" failures="0" errors="0" time="0.1">
+  <testcase name="t1" classname="Healthy" time="0.1"/>
+</testsuite>
