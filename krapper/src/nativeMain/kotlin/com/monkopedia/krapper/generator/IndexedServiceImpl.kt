@@ -506,15 +506,22 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
     }
 
     private suspend fun executeMappings() {
+        // This ResolverService is handed OUT to each mapping, so — unlike everything else
+        // reachable from writeTo — its methods can be entered from outside this run's
+        // `using` scope: a remote MappingService calls back over the channel and is
+        // dispatched on the connection's coroutine, not inside our frame. Today's only
+        // mappings are FixupApplier's, which run inline and are already in scope; installing
+        // the run here is what keeps a remote one reading THIS run's intern cache and root
+        // package instead of the detached fallback.
         val resolver = object : ResolverService {
             override suspend fun resolvedType(typeStr: String): ResolvedType =
-                toResolvedCppType(WrappedType(typeStr))
+                KrapperRun.using(run) { toResolvedCppType(WrappedType(typeStr)) }
 
             override suspend fun resolvedKotlinType(typeStr: String): ResolvedKotlinType =
-                toResolvedKotlinType(WrappedType(typeStr).kotlinType)
+                KrapperRun.using(run) { toResolvedKotlinType(WrappedType(typeStr).kotlinType) }
 
             override suspend fun resolvedCType(typeStr: String): ResolvedCType =
-                toResolvedCType(WrappedType(typeStr).cType)
+                KrapperRun.using(run) { toResolvedCType(WrappedType(typeStr).cType) }
         }
         Log.i("Resolving ${mappings.size} mapping filters")
         val mappingsAndFilters = mappings.map {
