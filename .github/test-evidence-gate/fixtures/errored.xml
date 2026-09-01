@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The third defect, and the one every other fixture is blind to: JUnit records a
+     test that BLEW UP (exception, crash, missing fixture) as an error, not a failure,
+     and the two are separate attributes. Every other fixture here carries a zero
+     error count, so the gates' `+ $(sum_attr "$f" errors)` term was satisfied by a
+     fixture set that could not tell it from its absence -- deleting the term left all
+     of CI green (Refs #243). Errors live only in the SECOND suite, so a first-suite
+     read scores 0 here too.
+     executed = 7 - 1 = 6, failures = 0, errors = 2 -> the gate must go RED. -->
+<testsuite name="Fine" tests="3" skipped="0" failures="0" errors="0" time="0.1">
+  <testcase name="ok" classname="Fine" time="0.1"/>
+</testsuite>
+<testsuite name="Exploded" tests="4" skipped="1" failures="0" errors="2" time="0.1">
+  <testcase name="boom" classname="Exploded" time="0.1"><error message="NPE">boom</error></testcase>
+  <testcase name="bang" classname="Exploded" time="0.1"><error message="OOM">bang</error></testcase>
+  <testcase name="ign" classname="Exploded"><skipped/></testcase>
+</testsuite>
