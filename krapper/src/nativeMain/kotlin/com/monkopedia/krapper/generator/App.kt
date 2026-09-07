@@ -150,12 +150,14 @@ class Krapper : CliktCommand() {
     ).flag()
     val strictDiagnostics by option(
         "--strict-diagnostics",
-        help = "Abort the whole run on ANY parse `error:` diagnostic (the historical " +
-            "behavior, for curated clean headers). Default: lenient — an error attributable " +
-            "to a single declaration drops THAT symbol into the drop ledger and binding " +
-            "continues, so one bad symbol in a real library doesn't take the import down. " +
-            "Fatal / translation-unit-level errors (missing include, unattributable) abort " +
-            "regardless."
+        help = "Abort the whole run on ANY parse `error:` diagnostic (for curated, " +
+            "known-clean headers). Default: lenient — an error clang could attribute to one " +
+            "source position drops that position into the drop ledger (PARSE phase) and " +
+            "binding continues over the rest of the header, so one un-parseable declaration " +
+            "in a real library doesn't take the import down; the drop is reported and makes " +
+            "--fail-on-drop fire. Fatal (missing include, `too many errors`) and " +
+            "unattributable errors abort regardless of this flag — clang stopped there, so " +
+            "the rest of the translation unit is absent from the recovered AST."
     ).flag()
     val noRtti by option(
         "--no-rtti",

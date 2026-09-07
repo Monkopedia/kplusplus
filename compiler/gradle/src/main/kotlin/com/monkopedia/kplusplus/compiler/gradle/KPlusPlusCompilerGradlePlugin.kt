@@ -103,6 +103,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.property("cppStandard", e.cppStandard ?: "")
                 it.inputs.property("noRtti", e.noRtti)
                 it.inputs.property("rootPackage", e.rootPackage ?: "")
+                it.inputs.property("failOnDrop", e.failOnDrop)
+                it.inputs.property("strictDiagnostics", e.strictDiagnostics)
+                it.inputs.property("debug", e.debug)
                 it.inputs.property("llvmConfig", e.llvmConfig ?: "")
                 it.inputs.property("only", e.only.sorted())
                 it.inputs.property("onlyFile", e.onlyFile ?: "")
@@ -332,9 +335,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 referencePolicy = ReferencePolicy.valueOf(
                     ext?.referencePolicy ?: ReferencePolicy.INCLUDE_MISSING.name
                 ),
-                debug = false,
+                debug = ext?.debug == true,
                 cppStandard = std,
                 rootPackage = ext?.rootPackage,
+                // The two opt-in binding-quality gates (#224). Both default to false, so a
+                // build that sets neither behaves exactly as before; a build that sets one
+                // can finally make degraded bindings fail instead of going green.
+                failOnDrop = ext?.failOnDrop == true,
+                strictDiagnostics = ext?.strictDiagnostics == true,
                 noRtti = ext?.noRtti == true
             ),
             request = request,

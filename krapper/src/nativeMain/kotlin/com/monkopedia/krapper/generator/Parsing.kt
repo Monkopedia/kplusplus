@@ -108,6 +108,28 @@ private suspend fun prepareParsed(tu: WrappedTU): ParsedResolver {
     return ParsedResolver(tu)
 }
 
+/**
+ * THE ONE PARSE ENTRY POINT (#224). Parse [code] as [filename] under the run's `-I` roots,
+ * then apply the parse-error policy to the diagnostics that parse produced
+ * ([applyParseDiagnostics]).
+ *
+ * Both parses in this file go through here on purpose: clang::tooling RECOVERS from an error
+ * and hands back an AST missing whatever it could not read, so a parse whose errors nobody
+ * looks at is indistinguishable from a clean one — which is what made `--strict-diagnostics`
+ * a flag that read nothing.
+ */
+private suspend fun parseTu(code: String, filename: String, std: String): WrappedTU {
+    val run = KrapperRun.current
+    val tu = CppParser.parse(code, filename, CppParser.driverArgs(std, run.includeDirs))
+    applyParseDiagnostics(
+        source = filename,
+        diagnostics = CppParser.lastDiagnostics(),
+        strict = run.strictDiagnostics,
+        ledger = run.drops
+    )
+    return tu
+}
+
 // Write [tu] to <KrapperRun.dumpModelDir>/<name> when --dump-model asked for it; otherwise a
 // no-op. The dump dir is per-run state (brick B4), not a process global.
 private suspend fun dumpModel(name: String, tu: WrappedTU) {
@@ -138,11 +160,7 @@ internal suspend fun parseForcingModel(
     std: String
 ): ParsedResolver {
     val forceName = ForcingHeader.forceName(target)
-    val tu = CppParser.parse(
-        ForcingHeader.contentFor(target, userHeaders),
-        "$forceName.cc",
-        CppParser.driverArgs(std, KrapperRun.current.includeDirs)
-    )
+    val tu = parseTu(ForcingHeader.contentFor(target, userHeaders), "$forceName.cc", std)
     dumpModel("$forceName.json", tu)
     val resolver = prepareParsed(tu)
     KrapperRun.current.baseModelTu?.let { base -> reorderToFirstSeen(resolver.tu, base) }
@@ -581,11 +599,7 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
  */
 suspend fun parseHeader(headerPath: String, std: String): Resolver {
     Log.i("cpp front-end: parsing $headerPath (std=$std)")
-    val tu = CppParser.parse(
-        File(headerPath).readText(),
-        BASE_TU_FILENAME,
-        CppParser.driverArgs(std, KrapperRun.current.includeDirs)
-    )
+    val tu = parseTu(File(headerPath).readText(), BASE_TU_FILENAME, std)
     dumpModel("base_model.json", tu)
     KrapperRun.current.baseModelTu = tu
     return prepareParsed(tu)

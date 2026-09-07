@@ -89,6 +89,41 @@ open class KPlusPlusExtension {
     var rootPackage: String? = null
 
     /**
+     * BINDING-QUALITY GATE (#224): fail `kplusplusSync` if the generator dropped ANY
+     * unmodelable symbol (skip-not-crash). Forwarded to krapper as `--fail-on-drop`.
+     *
+     * Drops are ALWAYS logged and reported in the end-of-run drop ledger; by default
+     * (`false`) they do not fail the build, so a run that silently lost a binding still
+     * goes green. Turn this on for a module whose C++ surface is supposed to bind
+     * completely, and a lost symbol becomes a build failure with the ledger attached
+     * instead of a Kotlin API that is quietly missing a method.
+     */
+    var failOnDrop: Boolean = false
+
+    /**
+     * BINDING-QUALITY GATE (#224): abort the run on ANY `error:` parse diagnostic, rather
+     * than dropping the affected declaration and binding the rest of the header. Forwarded
+     * to krapper as `--strict-diagnostics`.
+     *
+     * Default (`false`) is lenient: an error clang could attribute to one source position
+     * drops that position into the drop ledger and binding continues, so one un-parseable
+     * declaration in a real-world library does not take the whole import down (and, with
+     * [failOnDrop] on, still fails the build). Turn this on for curated, known-clean headers
+     * where any parse error at all means the build is wrong. Fatal and unattributable
+     * diagnostics — a missing `#include`, "too many errors" — abort either way.
+     */
+    var strictDiagnostics: Boolean = false
+
+    /**
+     * Verbose generator logging (#224): forwarded to krapper as `--debug`, which turns on the
+     * per-phase "resolving these classes / resolved these classes / executing this mapping"
+     * traces. Off by default — they are large and only useful when diagnosing a binding that
+     * did not come out the way the header reads. The plugin used to hardcode this off, so
+     * those traces were unreachable from any build.
+     */
+    var debug: Boolean = false
+
+    /**
      * Reference policy for types referenced-but-not-listed (forwarded to krapper
      * as `-r`/`--referencePolicy`). One of `INCLUDE_MISSING` (default — recursively bind
      * referenced types), `IGNORE_MISSING` (drop them), `OPAQUE_MISSING` (bind as opaque

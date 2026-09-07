@@ -27,10 +27,13 @@ public class com/monkopedia/kplusplus/compiler/gradle/KPlusPlusExtension {
 	public final fun fixup (Lorg/gradle/api/Action;)V
 	public final fun getCompiler ()Ljava/lang/String;
 	public final fun getCppStandard ()Ljava/lang/String;
+	public final fun getDebug ()Z
+	public final fun getFailOnDrop ()Z
 	public final fun getLlvmConfig ()Ljava/lang/String;
 	public final fun getNoRtti ()Z
 	public final fun getReferencePolicy ()Ljava/lang/String;
 	public final fun getRootPackage ()Ljava/lang/String;
+	public final fun getStrictDiagnostics ()Z
 	public final fun header (Ljava/lang/String;)V
 	public final fun headerDirectory (Ljava/lang/String;)V
 	public final fun instantiate (Ljava/lang/String;)V
@@ -39,9 +42,12 @@ public class com/monkopedia/kplusplus/compiler/gradle/KPlusPlusExtension {
 	public final fun onlyFile (Ljava/lang/String;)V
 	public final fun setCompiler (Ljava/lang/String;)V
 	public final fun setCppStandard (Ljava/lang/String;)V
+	public final fun setDebug (Z)V
+	public final fun setFailOnDrop (Z)V
 	public final fun setLlvmConfig (Ljava/lang/String;)V
 	public final fun setNoRtti (Z)V
 	public final fun setReferencePolicy (Ljava/lang/String;)V
 	public final fun setRootPackage (Ljava/lang/String;)V
+	public final fun setStrictDiagnostics (Z)V
 }
 

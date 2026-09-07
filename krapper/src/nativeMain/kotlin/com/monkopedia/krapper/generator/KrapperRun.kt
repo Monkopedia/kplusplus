@@ -71,7 +71,13 @@ class KrapperRun(
      * inspecting the tree the resolver consumed — this format used to BE the inter-process
      * handoff, and is off the hot path now.
      */
-    val dumpModelDir: String? = null
+    val dumpModelDir: String? = null,
+    /**
+     * `--strict-diagnostics`: abort the run on ANY `error:` parse diagnostic rather than
+     * dropping the affected declaration and continuing (#224). Read by `Parsing.parseTu`
+     * through [applyParseDiagnostics]; a fatal / unattributable diagnostic aborts either way.
+     */
+    val strictDiagnostics: Boolean = false
 ) {
     /** This run's skip-not-crash drop ledger. */
     val drops = DropLedger()
@@ -94,7 +100,8 @@ class KrapperRun(
     constructor(config: KrapperConfig, request: IndexRequest) : this(
         generation = GenerationContext(config.rootPackage, config.noRtti),
         includeDirs = request.includeDirs,
-        dumpModelDir = request.dumpModelDir
+        dumpModelDir = request.dumpModelDir,
+        strictDiagnostics = config.strictDiagnostics
     )
 
     companion object {

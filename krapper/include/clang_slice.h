@@ -13,6 +13,9 @@
 #include <clang/AST/Type.h>
 #include <clang/Tooling/Tooling.h>
 #include <clang/Lex/Lexer.h>
+#include <clang/Basic/Diagnostic.h>
+#include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/SmallString.h>
 
 #include <string>
 #include <vector>
@@ -34,6 +37,62 @@
 // "nullptr", "Palette()"); a spaced default (`= Palette ( )`) diverges — Phase C
 // normalizer entry: compare default values with whitespace stripped.
 namespace kppbridge {
+// Collector for the parse diagnostics the bridge below hands back to Kotlin (#224).
+// Internal to the bridge — nothing here is bound; only kppbridge::lastParseDiagnostics is.
+namespace detail {
+class ParseDiagCollector : public clang::DiagnosticConsumer {
+public:
+    // Accumulated records in the wire format documented on lastParseDiagnostics().
+    std::string records;
+
+    // Overrides DiagnosticConsumer::clear(), which zeroes the base tallies; keep that
+    // behaviour and drop the previous parse's records with it.
+    void clear() override {
+        clang::DiagnosticConsumer::clear();
+        records.clear();
+    }
+
+    void HandleDiagnostic(clang::DiagnosticsEngine::Level level,
+                          const clang::Diagnostic &info) override {
+        // Keep the base class's error/warning tallies accurate for anything that reads them.
+        clang::DiagnosticConsumer::HandleDiagnostic(level, info);
+        if (level < clang::DiagnosticsEngine::Error) return;
+        llvm::SmallString<256> text;
+        info.FormatDiagnostic(text);
+        std::string message(text.str());
+        for (char &c : message) {
+            if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+        }
+        std::string loc;
+        if (info.hasSourceManager() && info.getLocation().isValid()) {
+            clang::PresumedLoc presumed =
+                info.getSourceManager().getPresumedLoc(info.getLocation());
+            if (presumed.isValid() && presumed.getFilename()) {
+                loc = std::string(presumed.getFilename()) + ":" +
+                      std::to_string(presumed.getLine()) + ":" +
+                      std::to_string(presumed.getColumn());
+            }
+        }
+        records += (level == clang::DiagnosticsEngine::Fatal) ? "fatal" : "error";
+        records += '\t';
+        records += loc;
+        records += '\t';
+        records += message;
+        records += '\n';
+    }
+};
+
+// One collector per process, CLEARED at the start of every buildASTWithArgs. A run parses the
+// root header plus one forcing TU per --instantiate, strictly one at a time on one thread, and
+// the records are drained immediately after each parse returns — so "last parse" is
+// unambiguous. A function-local static (not a namespace-scope object) so the header stays
+// header-only across the TUs that include it.
+inline ParseDiagCollector &parseDiagCollector() {
+    static ParseDiagCollector instance;
+    return instance;
+}
+} // namespace detail
+
 // brick-3 BRIDGE (#45, instantiation forcing): the forcing-parse fixture #includes std
 // headers (<vector>), which clang::tooling can only resolve with real driver arguments —
 // at minimum `-resource-dir` (the tool name "clang-tool" defeats the relative resource-dir
@@ -57,8 +116,38 @@ inline clang::ASTUnit *buildASTWithArgs(const char *code, const char *filename,
         }
     }
     if (!current.empty()) args.push_back(current);
-    return clang::tooling::buildASTFromCodeWithArgs(code, args, filename).release();
+    // The parse's own error diagnostics are COLLECTED (see lastParseDiagnostics below)
+    // rather than printed and forgotten: passing the collector as the DiagnosticConsumer
+    // is what lets --strict-diagnostics be a real gate. Everything before it is
+    // buildASTFromCodeWithArgs' own default argument, respelled because C++ has no way to
+    // skip to the last parameter.
+    detail::parseDiagCollector().clear();
+    return clang::tooling::buildASTFromCodeWithArgs(
+               code, args, filename, "clang-tool",
+               std::make_shared<clang::PCHContainerOperations>(),
+               clang::tooling::getClangStripDependencyFileAdjuster(),
+               clang::tooling::FileContentMappings(), &detail::parseDiagCollector())
+        .release();
 }
+
+// #224 BRIDGE: the ERROR-severity diagnostics of the most recent buildASTWithArgs call.
+//
+// With the default `DiagConsumer = nullptr`, clang::tooling prints every parse error through
+// a TextDiagnosticPrinter to stderr and the tool keeps whatever AST clang recovered — so the
+// generator cannot tell a clean parse from one that lost half a class to a bad include, and
+// --strict-diagnostics had nothing to read. DiagnosticsEngine / clang::Diagnostic /
+// PresumedLoc are not bindable surfaces (they drag in SourceManager and most of Basic/), so
+// the collection happens C++-side and the result comes back as ONE string, in the same
+// "smallest bridge" shape as declLocation above.
+//
+// WIRE FORMAT — one record per line, `severity \t file:line:col \t message`:
+//   * severity is `fatal` or `error` (warnings and notes are the front-end's normal noise
+//     and are not collected);
+//   * the location is EMPTY when the diagnostic has none — a command-line-level or
+//     otherwise unattributable error, which the Kotlin side treats as un-recoverable;
+//   * tabs and newlines inside a message are folded to spaces so the framing holds.
+// Decoded by com.monkopedia.krapper.generator.decodeParseDiagnostics.
+inline std::string lastParseDiagnostics() { return detail::parseDiagCollector().records; }
 
 // brick-3 BRIDGE (#45, instantiation forcing): mirror libclang's GetTemplateArguments
 // (CXType.cpp) — the template-argument read that PREFERS the sugared
