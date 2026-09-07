@@ -15,6 +15,8 @@
  */
 package com.monkopedia.krapper.parser
 
+import com.monkopedia.krapper.generator.ParseDiagnostic
+import com.monkopedia.krapper.generator.decodeParseDiagnostics
 import com.monkopedia.krapper.generator.model.ModelIo
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedConstructor
@@ -28,6 +30,7 @@ import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toKString
 import kppbridge.buildASTWithArgs
+import kppbridge.lastParseDiagnostics
 import platform.posix.fgets
 import platform.posix.pclose
 import platform.posix.popen
@@ -81,6 +84,18 @@ object CppParser {
                 ?: fail("clang could not build an AST for $filename")
         )
     }
+
+    /**
+     * The `error:`-severity diagnostics the MOST RECENT [parse] emitted (#224).
+     *
+     * clang::tooling recovers from a parse error and hands back an AST missing whatever it
+     * could not read, so without this the tool cannot tell a clean parse from one that lost
+     * half a class. The bridge collects them C++-side (clang_slice.h) and clears the
+     * collection at the start of every parse, so this is always THIS parse's set; the caller
+     * (`Parsing.parseTu`) applies the `--strict-diagnostics` policy to it.
+     */
+    internal fun lastDiagnostics(): List<ParseDiagnostic> =
+        decodeParseDiagnostics(lastParseDiagnostics().orEmpty())
 }
 
 // ---- #101: the NONCOPYABLE special-member determinism guard --------------------------------

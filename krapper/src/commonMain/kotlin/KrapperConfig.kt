@@ -52,14 +52,15 @@ data class KrapperConfig(
     // (default false) so existing green runs keep succeeding: drops are always logged
     // and ledgered, but only this flag turns a drop into a non-zero exit.
     val failOnDrop: Boolean = false,
-    // When true, ANY `error:`-severity parse diagnostic aborts the whole run (the
-    // historical behavior — appropriate for curated, known-clean headers). Opt-in
-    // (default false): by default an error diagnostic that is attributable to a single
-    // declaration drops THAT symbol into the drop ledger and binding continues over the
-    // rest of the header, so one un-bindable symbol in a real-world library no longer
-    // takes the entire import down. Translation-unit-level / fatal diagnostics (a missing
-    // include, "too many errors", an error with no attributable cursor) abort regardless,
-    // since the recovered AST can't be trusted past them.
+    // When true, ANY `error:`-severity parse diagnostic aborts the whole run — appropriate
+    // for curated, known-clean headers. Opt-in (default false): by default an error clang
+    // could attribute to a single source position drops that position into the drop ledger
+    // (PARSE phase) and binding continues over the rest of the header, so one un-parseable
+    // declaration in a real-world library no longer takes the entire import down (and the
+    // resulting drop makes [failOnDrop] fire). Translation-unit-level / fatal diagnostics (a
+    // missing include, "too many errors", an error with no attributable position) abort
+    // regardless, since the recovered AST can't be trusted past them. Read by
+    // `KrapperRun.strictDiagnostics` -> `Parsing.parseTu` -> `applyParseDiagnostics`.
     val strictDiagnostics: Boolean = false,
     // When true, the target C++ library is built `-fno-rtti` (e.g. v8's monolith), so it
     // exports no `typeinfo` symbols. The generated generic `dynamic_cast<D*>` down-cast

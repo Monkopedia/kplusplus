@@ -283,6 +283,12 @@ kplusplus {
         // -resource-dir + -std), the smallest bridge until std::vector<std::string> params are
         // bindable (see clang_slice.h).
         "kppbridge::buildASTWithArgs",
+        // #224: the error diagnostics THAT parse produced. clang::tooling recovers from a
+        // parse error and returns an AST missing whatever it couldn't read, so without this
+        // the tool cannot tell a clean parse from a silently-degraded one (which is why
+        // --strict-diagnostics had nothing to read). DiagnosticsEngine/PresumedLoc aren't a
+        // bindable surface; the collection is C++-side and comes back as one string.
+        "kppbridge::lastParseDiagnostics",
         // The CIndex GetTemplateArguments mirror — written-args preference + dependent-
         // specialization decode (see clang_slice.h).
         "kppbridge::numTemplateArgs",
