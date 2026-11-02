@@ -105,6 +105,48 @@ class InvalidDeclTest {
         assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
     }
 
+    // Through a TYPEDEF clang marks only the typedef invalid (as `int`), never its users:
+    // `void f(H2 h)` is a valid decl to clang. The walk follows each signature's typedef
+    // chain, so a parameter / return / field reaching an invalid typedef is dropped too —
+    // through two levels here, so a one-level check would fail.
+    @Test
+    fun a_signature_through_an_invalid_typedef_chain_is_not_emitted_and_is_ledgered() {
+        val out = generate(
+            "namespace p {\ntypedef Handle H2;\ntypedef H2 H3;\n" +
+                "struct W { void f(H2 h); H3 g(); void k(H3* h); int ok(); };\n" +
+                "struct S { H3 v; int w; };\n}\n"
+        )
+        for (name in listOf("f", "g", "k")) {
+            assertFalse(
+                "fun $name(" in out.kotlin,
+                "`$name` reaches the invalid typedef and must not be bound:\n${out.kotlin}"
+            )
+            assertEquals(
+                1,
+                out.drops.count { it.symbol == "p::W::$name" },
+                "`p::W::$name` must be ledgered exactly once: ${out.drops}"
+            )
+        }
+        assertTrue("fun ok(" in out.kotlin, "the valid sibling still binds:\n${out.kotlin}")
+        assertTrue("p::S" in out.bound, "the record itself is valid and binds: ${out.bound}")
+        assertFalse("var v:" in out.kotlin, "the field `v` must not be bound:\n${out.kotlin}")
+        assertTrue("var w:" in out.kotlin, "the valid field `w` still binds:\n${out.kotlin}")
+        assertEquals(1, out.drops.count { it.symbol == "p::S::v" }, "${out.drops}")
+        // `H3` is valid to clang but aliases the invalid `H2`: it is dropped with it.
+        assertEquals(1, out.drops.count { it.symbol == "p::H3" }, "${out.drops}")
+    }
+
+    // MUST DIFFER for the chain: the same two-level chain over a KNOWN type binds through.
+    @Test
+    fun a_valid_typedef_chain_binds_with_its_real_type() {
+        val out = generate(
+            "namespace p {\ntypedef long H1;\ntypedef H1 H2;\ntypedef H2 H3;\n" +
+                "struct W { void f(H3 h); };\n}\n"
+        )
+        assertTrue("fun f(h: Long)" in out.kotlin, "a valid chain binds:\n${out.kotlin}")
+        assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
+    }
+
     // Propagation: clang marks a RECORD invalid when one of its fields is (its layout is
     // unknown, so no wrapper could allocate it). The whole class is skipped and ledgered
     // once, by name; an unrelated valid class beside it still binds.

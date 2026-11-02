@@ -137,8 +137,9 @@ private suspend fun parseTu(code: String, filename: String, std: String): Wrappe
     val tu = CppParser.parse(code, filename, CppParser.driverArgs(std, run.includeDirs)) {
         run.drops.record(
             symbol = it.symbol,
-            reason = "invalid declaration: clang could not parse it (see the parse error " +
-                "ledgered beside it) and recovered a substitute, which is not bound",
+            reason = "invalid declaration: clang could not parse it, or a typedef it uses " +
+                "(see the parse error ledgered beside it), and recovered a substitute, " +
+                "which is not bound",
             phase = DropPhase.PARSE,
             location = it.location
         )

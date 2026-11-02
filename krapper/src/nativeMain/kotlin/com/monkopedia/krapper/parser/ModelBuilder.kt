@@ -172,19 +172,37 @@ private class ModelBuilder(
     // a record the DEFINING redeclaration, since a forward declaration is never marked
     // invalid even when its definition is.
     //
-    // Propagation is clang's own: Sema already marks a function invalid when a parameter or
-    // return type is, and a record invalid when one of its fields is (its layout is then
-    // unknown, so no wrapper could allocate it). Reading the flag at every walked decl
-    // therefore drops exactly the declarations clang could not read — a whole class only
-    // when clang itself gave up on it — and nothing else.
+    // Propagation is clang's own, plus one step clang does not take. Sema already marks a
+    // function invalid when a parameter or return type is, and a record invalid when one of
+    // its fields is (its layout is then unknown, so no wrapper could allocate it) — a whole
+    // class goes only when clang itself gave up on it. But through a TYPEDEF clang marks
+    // only the typedef (`typedef Handle H2;` becomes an invalid `int`), never its users, so
+    // [usesInvalidTypedef] also drops a function / field / typedef whose own signature
+    // reaches an invalid typedef down its chain. That drops the member, not its class: the
+    // class itself is valid to clang.
     private fun skippedAsInvalid(decl: Decl, named: Decl = decl): Boolean {
-        if (!named.isInvalidDecl()) return false
+        if (!named.isInvalidDecl() && !named.usesInvalidTypedef()) return false
         if (reportedInvalid.add(named.cppUsr())) {
             val symbol = decl.asNamedDecl()?.let { qualifiedName(it) }?.takeIf { it.isNotEmpty() }
                 ?: "<unnamed ${decl.getDeclKindName()} declaration>"
             onInvalid(InvalidDecl(symbol, declLocation(named)?.let(SourceLocation::parse)))
         }
         return true
+    }
+
+    // A function's return/parameter types, a field's type, or a typedef's underlying type
+    // reaching an invalid typedef (TypeBuilder.reachesInvalidTypedef).
+    private fun Decl.usesInvalidTypedef(): Boolean = with(memScope) {
+        asFunctionDecl()?.let { function ->
+            if (function.getReturnType().reachesInvalidTypedef()) return true
+            return (0u until function.getNumParams()).any { i ->
+                val param = function.getParamDecl(i)?.let { ParmVarDecl(it.ptr) }
+                param != null && param.asValueDecl().getType().reachesInvalidTypedef()
+            }
+        }
+        asFieldDecl()?.let { return it.getType().reachesInvalidTypedef() }
+        asTypedefNameDecl()?.let { return it.getUnderlyingType().reachesInvalidTypedef() }
+        false
     }
 
     // Walk one DeclContext (the TU, a namespace, or a linkage-spec block) and add its
