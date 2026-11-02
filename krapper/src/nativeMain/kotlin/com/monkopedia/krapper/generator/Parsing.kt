@@ -96,6 +96,17 @@ typealias ElementFilter = WrappedElement.() -> Boolean
 private const val BASE_TU_FILENAME = "parity_base.cc"
 
 /**
+ * Prefix [this] header text with a `#line` directive naming [path], so every position clang
+ * reports for it — parse diagnostics and declaration locations, hence every drop-ledger row —
+ * names the user's header rather than the virtual [BASE_TU_FILENAME] it is parsed under
+ * (#252). Line numbers are unchanged: `#line 1` makes the line after the directive line 1.
+ * Presumed locations only; the parse still runs as [BASE_TU_FILENAME], so language inference
+ * and include lookup are untouched.
+ */
+private fun String.underPresumedName(path: String): String =
+    "#line 1 \"${path.replace("\\", "\\\\").replace("\"", "\\\"")}\"\n" + this
+
+/**
  * Prepare a freshly parsed [tu] for resolution: run the pre-resolution rewrites, then wrap it
  * in a ParsedResolver. Shared by the base parse ([parseHeader]) and the per-instantiation
  * forcing parse ([parseForcingModel]). No cursor->element memo exists across the separately
@@ -120,7 +131,19 @@ private suspend fun prepareParsed(tu: WrappedTU): ParsedResolver {
  */
 private suspend fun parseTu(code: String, filename: String, std: String): WrappedTU {
     val run = KrapperRun.current
-    val tu = CppParser.parse(code, filename, CppParser.driverArgs(std, run.includeDirs))
+    // #252: a declaration clang error-recovered is SKIPPED by the walk (binding it would emit
+    // clang's `int` substitute), and ledgered here by name so the ledger lists exactly what
+    // the output lacks. Recorded before the policy below, which may abort.
+    val tu = CppParser.parse(code, filename, CppParser.driverArgs(std, run.includeDirs)) {
+        run.drops.record(
+            symbol = it.symbol,
+            reason = "invalid declaration: clang could not parse it, or a declaration its type " +
+                "uses (see the parse error ledgered beside it), and recovered a " +
+                "substitute, which is not bound",
+            phase = DropPhase.PARSE,
+            location = it.location
+        )
+    }
     applyParseDiagnostics(
         source = filename,
         diagnostics = CppParser.lastDiagnostics(),
@@ -599,7 +622,8 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
  */
 suspend fun parseHeader(headerPath: String, std: String): Resolver {
     Log.i("cpp front-end: parsing $headerPath (std=$std)")
-    val tu = parseTu(File(headerPath).readText(), BASE_TU_FILENAME, std)
+    val code = File(headerPath).readText().underPresumedName(headerPath)
+    val tu = parseTu(code, BASE_TU_FILENAME, std)
     dumpModel("base_model.json", tu)
     KrapperRun.current.baseModelTu = tu
     return prepareParsed(tu)

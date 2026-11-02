@@ -10,11 +10,13 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Type.h>
 #include <clang/Tooling/Tooling.h>
 #include <clang/Lex/Lexer.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallString.h>
 
 #include <string>
@@ -91,6 +93,52 @@ inline ParseDiagCollector &parseDiagCollector() {
     static ParseDiagCollector instance;
     return instance;
 }
+
+// The walk behind kppbridge::reachesInvalidDecl (#252). Clang's own RecursiveASTVisitor does
+// the structural part, so every type node that contains another type is covered BY
+// CONSTRUCTION rather than by a hand list: pointer / reference / member-pointer (pointee AND
+// class), function prototypes (return + each parameter, through the ParenType of `(*)(...)`),
+// every array kind's element, template-specialization arguments, and the qualified /
+// attributed / decltype / typeof / using wrappers. Walking the TypeLoc (not just the type)
+// also traverses the parameter DECLS inside a function declarator, which is where clang puts
+// the invalid flag for `typedef void (*Cb)(Handle)` — the typedef stays valid and its type is
+// a plain `void (*)(int)`, so no type-only walk could see it.
+//
+// The one step RecursiveASTVisitor does not take is INTO a typedef (it visits a TypedefType
+// leaf without descending to the alias's own declarator), and clang marks only the typedef it
+// could not read invalid, never its users; followAlias adds that step. A tag type stops the
+// walk (a record's members are its own declarations, checked where the record is walked) —
+// only its own invalid flag counts. Template instantiations are not entered: a use like
+// `Box<H>` is judged by its written arguments.
+class InvalidDeclFinder : public clang::RecursiveASTVisitor<InvalidDeclFinder> {
+public:
+    bool found = false;
+
+    bool shouldVisitTemplateInstantiations() const { return false; }
+
+    // Any declaration met inside the declarator: a parameter of a function type, most often.
+    bool VisitDecl(clang::Decl *decl) { return check(decl); }
+
+    bool VisitTagType(clang::TagType *type) { return check(type->getDecl()); }
+
+    bool VisitTypedefType(clang::TypedefType *type) { return followAlias(type->getDecl()); }
+
+private:
+    llvm::SmallPtrSet<const clang::Decl *, 8> followed;
+
+    bool check(const clang::Decl *decl) {
+        if (decl && decl->isInvalidDecl()) found = true;
+        return !found; // false aborts the traversal: one invalid decl is the answer
+    }
+
+    bool followAlias(clang::TypedefNameDecl *alias) {
+        if (!alias || !followed.insert(alias).second) return true;
+        if (!check(alias)) return false;
+        if (clang::TypeSourceInfo *info = alias->getTypeSourceInfo())
+            return TraverseTypeLoc(info->getTypeLoc());
+        return TraverseType(alias->getUnderlyingType());
+    }
+};
 } // namespace detail
 
 // brick-3 BRIDGE (#45, instantiation forcing): the forcing-parse fixture #includes std
@@ -247,6 +295,39 @@ inline std::string defaultArgText(clang::ParmVarDecl *parm) {
                clang::CharSourceRange::getTokenRange(parm->getDefaultArgRange()),
                ctx.getSourceManager(), ctx.getLangOpts())
         .str();
+}
+
+// #252 BRIDGE: does [decl]'s written type reach an INVALID declaration anywhere inside it?
+//
+// For a function that is its return and parameter types, for a field or variable its type,
+// for a typedef / alias its underlying type — each walked through the typedefs it names and
+// every type node they contain (detail::InvalidDeclFinder). Clang marks only the declaration
+// it could not read invalid, substituting `int` for the unknown type, so a function whose
+// parameter is `Cb` (`typedef void (*Cb)(H2)`, `typedef Handle H2`) is valid to clang yet
+// would bind as `(Int) -> Unit`. A decl kind with no written type (records, namespaces)
+// answers false: those are judged by their own isInvalidDecl(). The type walk needs
+// RecursiveASTVisitor and TypeLoc, neither a bindable surface, hence one bound bool.
+inline bool reachesInvalidDecl(const clang::Decl *decl) {
+    if (!decl) return false;
+    auto *mutableDecl = const_cast<clang::Decl *>(decl);
+    clang::TypeSourceInfo *info = nullptr;
+    clang::QualType type;
+    if (auto *declarator = llvm::dyn_cast<clang::DeclaratorDecl>(mutableDecl)) {
+        info = declarator->getTypeSourceInfo();
+        type = declarator->getType();
+    } else if (auto *alias = llvm::dyn_cast<clang::TypedefNameDecl>(mutableDecl)) {
+        info = alias->getTypeSourceInfo();
+        type = alias->getUnderlyingType();
+    } else {
+        return false;
+    }
+    detail::InvalidDeclFinder finder;
+    if (info) {
+        finder.TraverseTypeLoc(info->getTypeLoc());
+    } else {
+        finder.TraverseType(type);
+    }
+    return finder.found;
 }
 
 // #185 BRIDGE: the presumed `file:line:col` of a declaration, as one string.
