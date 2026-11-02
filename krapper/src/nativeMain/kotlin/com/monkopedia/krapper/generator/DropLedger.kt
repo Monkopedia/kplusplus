@@ -25,12 +25,14 @@ import com.monkopedia.krapper.SourceLocation
  * cursor-level skip-not-crash decisions made while building the [WrappedElement]
  * model (no [ResolveContext] exists yet); RESOLVE drops are made while resolving a
  * built element against the type graph; DEDUP drops are the post-resolve model
- * cleanups (e.g. const-overload de-duplication).
+ * cleanups (e.g. const-overload de-duplication); GENERATE drops are elements a code
+ * writer failed on under `ErrorPolicy.LOG` and left out of the emitted bindings.
  */
 enum class DropPhase {
     PARSE,
     RESOLVE,
-    DEDUP;
+    DEDUP,
+    GENERATE;
 
     /** The protocol-level phase this drop is reported as over the service channel. */
     val diagnosticPhase: DiagnosticPhase
@@ -38,6 +40,7 @@ enum class DropPhase {
             PARSE -> DiagnosticPhase.PARSE
             RESOLVE -> DiagnosticPhase.RESOLVE
             DEDUP -> DiagnosticPhase.DEDUP
+            GENERATE -> DiagnosticPhase.GENERATE
         }
 }
 

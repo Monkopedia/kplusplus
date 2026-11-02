@@ -166,8 +166,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             val clsFile =
                 File(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_") + ".kt")
             val builder = KotlinCodeBuilder()
-            builder.generate(cls)
-            clsFile.writeText(builder.toString())
+            // A failed class is ledgered by the policy; writing its partial builder would
+            // leave a truncated, uncompilable `.kt` (e.g. a dangling annotation).
+            if (builder.generate(cls)) clsFile.writeText(builder.toString())
         }
         val methodsByPkg = classes.filterIsInstance<ResolvedMethod>().groupBy { it.qualified }
         for ((qualified, methods) in methodsByPkg) {
