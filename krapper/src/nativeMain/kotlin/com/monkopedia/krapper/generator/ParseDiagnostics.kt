@@ -37,9 +37,11 @@ internal data class ParseDiagnostic(
 ) {
     /**
      * True when this error can be pinned to ONE source position, so the damage is bounded:
-     * clang recovered, skipped the declaration it was reading, and carried on parsing the
-     * rest of the header. That is exactly the case the lenient default handles by dropping
-     * that position into the drop ledger and continuing.
+     * clang recovered and carried on parsing the rest of the header. Recovery does NOT remove
+     * the declaration it was reading — clang keeps it marked invalid with a substitute (an
+     * unknown type becomes `int`) — so the walk skips every invalid declaration and ledgers it
+     * by name (#252, ModelBuilder's invalid-decl gate). That is the case the lenient default
+     * handles by dropping that position into the drop ledger and continuing.
      *
      * A [fatal] diagnostic is never attributable no matter how good its position, because
      * the position is where clang STOPPED, not what it skipped: the rest of the translation

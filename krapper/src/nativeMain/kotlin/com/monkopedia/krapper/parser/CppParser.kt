@@ -75,13 +75,22 @@ object CppParser {
      * Each parse gets its own [memScoped]: the wrappers around Clang's AST objects register
      * their destructors there, so the whole `ASTUnit` is released when the parse returns. The
      * constructed [WrappedTU] is pure Kotlin data and outlives it.
+     *
+     * Each declaration clang error-recovered is left out of the tree and passed to
+     * [onInvalid] instead (#252, see [InvalidDecl]).
      */
-    fun parse(code: String, filename: String, args: String): WrappedTU = memScoped {
+    fun parse(
+        code: String,
+        filename: String,
+        args: String,
+        onInvalid: (InvalidDecl) -> Unit = {}
+    ): WrappedTU = memScoped {
         buildWrappedTU(
             buildASTWithArgs(code, filename, args)
                 ?.getASTContext()
                 ?.getTranslationUnitDecl()
-                ?: fail("clang could not build an AST for $filename")
+                ?: fail("clang could not build an AST for $filename"),
+            onInvalid
         )
     }
 

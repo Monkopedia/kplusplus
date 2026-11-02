@@ -58,6 +58,7 @@ import kotlinx.cinterop.MemScope
 import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
+import kppbridge.qualifiedName
 
 // The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
@@ -114,18 +115,37 @@ private val NEW_DELETE_OPERATORS = listOf(
 )
 
 /**
+ * A declaration clang ERROR-RECOVERED (#252): it failed to parse, so clang kept it marked
+ * `isInvalidDecl()` with whatever it could not read replaced (an unknown type becomes `int`).
+ * The walk skips it rather than binding the mutated shape, and reports it here so the drop
+ * ledger names exactly what the output lacks.
+ *
+ * @param symbol the declaration's qualified name (`p::W::set`)
+ * @param location where it is declared, when clang has a position for it
+ */
+data class InvalidDecl(val symbol: String, val location: SourceLocation?)
+
+/**
  * Construct a WrappedTU from the parsed translation unit. Top-level shape matches the
  * libclang front-end (ModelFactories.mapAll): a WrappedNamespace per (named) namespace, a
  * WrappedClass per record, and a MethodType.STATIC WrappedMethod per free function.
+ *
+ * Every declaration clang marked invalid is left out of the tree and passed to [onInvalid]
+ * instead, once per declaration (see [InvalidDecl]).
  */
 context(scope: MemScope)
-fun buildWrappedTU(tuDecl: TranslationUnitDecl): WrappedTU =
-    WrappedTU().also { ModelBuilder(scope).addContextDecls(tuDecl.asDeclContext(), it) }
+fun buildWrappedTU(tuDecl: TranslationUnitDecl, onInvalid: (InvalidDecl) -> Unit = {}): WrappedTU =
+    WrappedTU().also {
+        ModelBuilder(scope, onInvalid).addContextDecls(tuDecl.asDeclContext(), it)
+    }
 
 // The former per-wrapper `memScope` field is gone from the generated bindings; the ONE
 // ambient MemScope for this parse (from the enclosing `memScoped { }`) is threaded in here
 // and used wherever an allocating/`context(scope: MemScope)` binding member is called.
-private class ModelBuilder(private val memScope: MemScope) {
+private class ModelBuilder(
+    private val memScope: MemScope,
+    private val onInvalid: (InvalidDecl) -> Unit
+) {
     // Mirrors ModelFactories' USR-keyed elementLookup memo for namespaces: every block of
     // `namespace geo { }` shares one libclang USR, so they all collapse into ONE
     // WrappedNamespace that accumulates all the blocks' members. The canonical-Decl
@@ -141,6 +161,31 @@ private class ModelBuilder(private val memScope: MemScope) {
     // redecl's own children).
     private val classes = mutableMapOf<String, WrappedClass>()
     private val templates = mutableMapOf<String, WrappedTemplate>()
+
+    // Canonical ids of the invalid declarations already reported, so a record met through
+    // several redeclarations (forward decl + invalid definition) is ledgered once.
+    private val reportedInvalid = mutableSetOf<String>()
+
+    // #252 — THE INVALID-DECL GATE. True (and reported) when clang error-recovered [decl]:
+    // binding it would emit clang's substitute (`set(Handle)` as `set(h: Int)`), so the
+    // caller skips it. [named] is the declaration whose flag decides — [decl] itself, or for
+    // a record the DEFINING redeclaration, since a forward declaration is never marked
+    // invalid even when its definition is.
+    //
+    // Propagation is clang's own: Sema already marks a function invalid when a parameter or
+    // return type is, and a record invalid when one of its fields is (its layout is then
+    // unknown, so no wrapper could allocate it). Reading the flag at every walked decl
+    // therefore drops exactly the declarations clang could not read — a whole class only
+    // when clang itself gave up on it — and nothing else.
+    private fun skippedAsInvalid(decl: Decl, named: Decl = decl): Boolean {
+        if (!named.isInvalidDecl()) return false
+        if (reportedInvalid.add(named.cppUsr())) {
+            val symbol = decl.asNamedDecl()?.let { qualifiedName(it) }?.takeIf { it.isNotEmpty() }
+                ?: "<unnamed ${decl.getDeclKindName()} declaration>"
+            onInvalid(InvalidDecl(symbol, declLocation(named)?.let(SourceLocation::parse)))
+        }
+        return true
+    }
 
     // Walk one DeclContext (the TU, a namespace, or a linkage-spec block) and add its
     // children to [parent]. [attach] mirrors libclang's LinkageSpecDecl semantics (D2,
@@ -161,6 +206,7 @@ private class ModelBuilder(private val memScope: MemScope) {
             // Skip implicit decls (the builtin TU members like __int128_t,
             // __builtin_va_list) — libclang's cursor walk never surfaces them.
             if (decl.isImplicit()) continue
+            if (skippedAsInvalid(decl)) continue
             if (decl.getKind() == Kind.LinkageSpec) {
                 val specContext = with(Decl.Companion) {
                     castToDeclContext(decl)
@@ -264,6 +310,8 @@ private class ModelBuilder(private val memScope: MemScope) {
     ) {
         val record = templateDecl.getTemplatedDecl()
             ?.let { CXXRecordDecl(it.ptr) } ?: return
+        // Clang marks the PATTERN record invalid, never the ClassTemplateDecl around it.
+        record.definitionOrNull()?.let { if (skippedAsInvalid(decl, it.asDecl())) return }
         val name = record.asNamedDecl().getNameAsString() ?: return
         val template = templates.getOrPut(decl.cppUsr()) { WrappedTemplate(name) }
             .locatedAt(decl)
@@ -360,6 +408,7 @@ private class ModelBuilder(private val memScope: MemScope) {
             ?: RecordDecl(record.ptr).getTypedefNameForAnonDecl()
                 ?.getNameAsString()?.takeIf { it.isNotEmpty() }
             ?: return
+        record.definitionOrNull()?.let { if (skippedAsInvalid(decl, it.asDecl())) return }
         // ModelFactories' WrappedClass factory: name via wrapName (= the bare name for a
         // non-template class; template-args spelling is brick-4+) + the isAbstract flag.
         // hasDefinition() guards a never-defined record, whose definition-data accessors
@@ -575,6 +624,10 @@ private class ModelBuilder(private val memScope: MemScope) {
             recordFilteredMember(decl, metadata)
             return
         }
+        // After the access filter: a private member is never bound, so an invalid one is not
+        // a drop. (A nested record met through a valid forward declaration is caught by its
+        // definition in addClass.)
+        if (skippedAsInvalid(decl)) return
         val constructor = decl.asCXXConstructorDecl()
         if (constructor != null) {
             parent.addChild(buildConstructor(constructor).locatedAt(decl))

@@ -179,9 +179,11 @@ class ParseDiagnosticsTest {
 
     // ---- the real front-end, through the bridge -------------------------------------------
 
-    // A recoverable error: clang skips `struct B` and parses `struct A`/`struct C` around it,
-    // so the diagnostic is a non-fatal, LOCATED one — the case the lenient default keeps
-    // binding through.
+    // A recoverable error: clang does NOT skip `struct B` — it keeps it, minus the base it
+    // could not name — and parses `struct A`/`struct C` around it, so the diagnostic is a
+    // non-fatal, LOCATED one: the case the lenient default keeps binding through. This pins
+    // only the diagnostic; what the walk binds from an error-recovered declaration is
+    // InvalidDeclTest's job (#252).
     @Test
     fun real_clang_attributable_error_is_recoverable() {
         CppParser.parse(
