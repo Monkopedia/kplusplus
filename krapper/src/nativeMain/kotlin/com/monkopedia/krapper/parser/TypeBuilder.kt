@@ -74,32 +74,6 @@ private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companio
     if (classof(this@asTypedefTypeOrNull)) TypedefType(ptr) else null
 }
 
-/**
- * #252 — true when [this] type reaches an INVALID typedef through its sugar: the typedef
- * chain itself (`typedef Handle H2; typedef H2 H3;` — `H3` is valid to clang, `H2` is not)
- * and the pointee of any pointer/reference along the way. Clang marks only the typedef it
- * could not read invalid (as `int`), never the declarations that use it, so ModelBuilder's
- * invalid-decl gate needs this to see that `void f(H3 h)` is really `f(<unknown>)`.
- */
-context(scope: MemScope)
-internal fun QualType.reachesInvalidTypedef(): Boolean {
-    var current = this
-    while (true) {
-        val ty = current.typePtr() ?: return false
-        val typedef = ty.asTypedefTypeOrNull()?.getDecl()
-        current = when {
-            typedef != null -> {
-                if (typedef.isInvalidDecl()) return true
-                typedef.getUnderlyingType()
-            }
-
-            ty.isPointerType() || ty.isReferenceType() -> ty.getPointeeType()
-
-            else -> return false
-        }
-    }
-}
-
 // TypeFactories.maybeConst: every shape gets the type's OWN const qualifier re-applied
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
 private fun WrappedType.maybeConst(isConst: Boolean): WrappedType =

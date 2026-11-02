@@ -147,6 +147,74 @@ class InvalidDeclTest {
         assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
     }
 
+    // Every type constructor that CONTAINS a type must be walked, not just typedef sugar and
+    // pointees. Each shape runs twice over the same `H`: once aliasing the unknown `Handle`
+    // (dropped + ledgered by name) and once aliasing `long` (no PARSE drop; bound when krapper
+    // binds that shape at all). The valid half is what proves the walk does not over-drop.
+    private fun assertShape(decl: String, bindsWhenValid: Boolean, prelude: String = "") {
+        fun header(target: String) = "namespace p {\ntypedef $target H;\n$prelude\n" +
+            "struct M { int m; };\ntemplate <class T> struct Box { T t; };\n" +
+            "struct W { $decl; int ok(); };\n}\n"
+        val bad = generate(header("Handle"))
+        assertFalse("fun f(" in bad.kotlin, "[$decl] must not bind over `Handle`:\n${bad.kotlin}")
+        assertTrue("fun ok(" in bad.kotlin, "[$decl] the valid sibling still binds")
+        assertEquals(
+            1,
+            bad.drops.count { it.symbol == "p::W::f" && it.phase == DropPhase.PARSE },
+            "[$decl] `p::W::f` must be ledgered once as a PARSE drop: ${bad.drops}"
+        )
+        val good = generate(header("long"))
+        assertEquals(
+            emptyList(),
+            good.drops.filter { it.phase == DropPhase.PARSE },
+            "[$decl] over `long` nothing is a parse drop"
+        )
+        if (bindsWhenValid) {
+            assertTrue("fun f(" in good.kotlin, "[$decl] must bind over `long`:\n${good.kotlin}")
+        }
+    }
+
+    @Test
+    fun a_function_pointer_parameter_type_is_walked() =
+        assertShape("void f(Cb c)", bindsWhenValid = true, prelude = "typedef void (*Cb)(H);")
+
+    @Test
+    fun a_function_pointer_return_type_is_walked() =
+        assertShape("void f(Cb c)", bindsWhenValid = true, prelude = "typedef H (*Cb)(int);")
+
+    @Test
+    fun an_array_typedef_element_is_walked() =
+        assertShape("void f(Arr* a)", bindsWhenValid = true, prelude = "typedef H Arr[4];")
+
+    @Test
+    fun a_pointer_to_array_element_is_walked() =
+        assertShape("void f(H (*a)[4])", bindsWhenValid = true)
+
+    @Test
+    fun a_member_pointer_pointee_is_walked() =
+        assertShape("void f(H M::* m)", bindsWhenValid = false)
+
+    @Test
+    fun a_template_argument_is_walked() = assertShape("void f(Box<H>* b)", bindsWhenValid = false)
+
+    // The DIRECT case no type walk can see: clang marks the PARAMETER inside the typedef's
+    // declarator invalid, not the typedef, and the typedef's type is a plain `int (*)(int)`.
+    // Only the typedef's source-level declarator (its TypeSourceInfo) carries the flag.
+    @Test
+    fun an_invalid_parameter_inside_a_function_pointer_typedef_is_seen() {
+        val bad = generate(
+            "namespace p {\ntypedef void (*Cb)(Handle);\nstruct W { void f(Cb c); int ok(); };\n}\n"
+        )
+        assertFalse("fun f(" in bad.kotlin, "`f` must not bind:\n${bad.kotlin}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::W::f" }, "${bad.drops}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::Cb" }, "${bad.drops}")
+        val good = generate(
+            "namespace p {\ntypedef void (*Cb)(long);\nstruct W { void f(Cb c); int ok(); };\n}\n"
+        )
+        assertTrue("fun f(" in good.kotlin, "`f` binds over long:\n${good.kotlin}")
+        assertEquals(emptyList(), good.drops, "a clean parse ledgers nothing")
+    }
+
     // Propagation: clang marks a RECORD invalid when one of its fields is (its layout is
     // unknown, so no wrapper could allocate it). The whole class is skipped and ledgered
     // once, by name; an unrelated valid class beside it still binds.

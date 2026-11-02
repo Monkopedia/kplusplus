@@ -59,6 +59,7 @@ import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
 import kppbridge.qualifiedName
+import kppbridge.reachesInvalidDecl
 
 // The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
@@ -175,34 +176,20 @@ private class ModelBuilder(
     // Propagation is clang's own, plus one step clang does not take. Sema already marks a
     // function invalid when a parameter or return type is, and a record invalid when one of
     // its fields is (its layout is then unknown, so no wrapper could allocate it) — a whole
-    // class goes only when clang itself gave up on it. But through a TYPEDEF clang marks
-    // only the typedef (`typedef Handle H2;` becomes an invalid `int`), never its users, so
-    // [usesInvalidTypedef] also drops a function / field / typedef whose own signature
-    // reaches an invalid typedef down its chain. That drops the member, not its class: the
-    // class itself is valid to clang.
+    // class goes only when clang itself gave up on it. But clang marks only the declaration
+    // it could not read: through a typedef (`typedef Handle H2;` is an invalid `int`) or a
+    // function-pointer typedef's parameter, every USER stays valid. So a function / field /
+    // typedef whose written type reaches an invalid declaration anywhere inside it is dropped
+    // too ([reachesInvalidDecl], a structural walk over every type node — see
+    // clang_slice.h). That drops the member, not its class: the class is valid to clang.
     private fun skippedAsInvalid(decl: Decl, named: Decl = decl): Boolean {
-        if (!named.isInvalidDecl() && !named.usesInvalidTypedef()) return false
+        if (!named.isInvalidDecl() && !reachesInvalidDecl(named)) return false
         if (reportedInvalid.add(named.cppUsr())) {
             val symbol = decl.asNamedDecl()?.let { qualifiedName(it) }?.takeIf { it.isNotEmpty() }
                 ?: "<unnamed ${decl.getDeclKindName()} declaration>"
             onInvalid(InvalidDecl(symbol, declLocation(named)?.let(SourceLocation::parse)))
         }
         return true
-    }
-
-    // A function's return/parameter types, a field's type, or a typedef's underlying type
-    // reaching an invalid typedef (TypeBuilder.reachesInvalidTypedef).
-    private fun Decl.usesInvalidTypedef(): Boolean = with(memScope) {
-        asFunctionDecl()?.let { function ->
-            if (function.getReturnType().reachesInvalidTypedef()) return true
-            return (0u until function.getNumParams()).any { i ->
-                val param = function.getParamDecl(i)?.let { ParmVarDecl(it.ptr) }
-                param != null && param.asValueDecl().getType().reachesInvalidTypedef()
-            }
-        }
-        asFieldDecl()?.let { return it.getType().reachesInvalidTypedef() }
-        asTypedefNameDecl()?.let { return it.getUnderlyingType().reachesInvalidTypedef() }
-        false
     }
 
     // Walk one DeclContext (the TU, a namespace, or a linkage-spec block) and add its
