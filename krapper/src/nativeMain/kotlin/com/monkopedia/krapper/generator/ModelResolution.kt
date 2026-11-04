@@ -180,10 +180,11 @@ suspend fun WrappedClass.resolve(resolverContext: ResolveContext): ResolvedClass
         // If the primary base can't resolve (e.g. an unlisted/unbindable
         // intermediate base), a top-level (listed/found) class drops it to a
         // non-modeled/borrowed base rather than failing the whole class —
-        // exactly like the `allBaseClasses` path below silently drops
+        // exactly like the `allBaseClasses` path below drops
         // unresolvable secondary bases. The class loses that base's flattened
         // members + `.asBase()`, but its own members and any resolvable bases
         // still bind. (Don't require the full base-closure in every allowlist.)
+        // The loss is ledgered once, by the `allBaseClasses` loop below.
         //
         // A class pulled ONLY as an INCLUDE_MISSING reference keeps the legacy
         // hard-fail (dropUnresolvablePrimaryBase == false): resurrecting such a
@@ -205,9 +206,23 @@ suspend fun WrappedClass.resolve(resolverContext: ResolveContext): ResolvedClass
         // Resolve EVERY direct base (primary + secondary). A base whose type can't
         // be resolved is dropped from the list rather than failing the whole class
         // (it can't be flattened anyway); the first base mirrors `baseClass` above.
+        // A dropped PUBLIC base is real C++ API missing from the binding (its members
+        // and the upcast), so it is ledgered; a non-public base exposes nothing.
         allBaseClasses = this.baseClasses.mapNotNull { base ->
             val baseType = base.type ?: return@mapNotNull null
-            val resolved = resolverContext.resolve(baseType) ?: return@mapNotNull null
+            val resolved = resolverContext.resolve(baseType)
+            if (resolved == null) {
+                if (base.isPublic) {
+                    dropLedger.record(
+                        type.toString(),
+                        "Base class $baseType did not resolve: its inherited members " +
+                            "and upcast are not bound",
+                        DropPhase.RESOLVE,
+                        sourceLocation
+                    )
+                }
+                return@mapNotNull null
+            }
             ResolvedMultiBase(
                 type = resolved,
                 isPublic = base.isPublic,

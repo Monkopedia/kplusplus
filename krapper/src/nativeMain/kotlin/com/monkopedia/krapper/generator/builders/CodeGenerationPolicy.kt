@@ -15,7 +15,9 @@
  */
 package com.monkopedia.krapper.generator.builders
 
+import com.monkopedia.krapper.generator.DropPhase
 import com.monkopedia.krapper.generator.Utils.printerrln
+import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
@@ -54,29 +56,31 @@ object ThrowPolicy : CodeGenerationPolicy {
     override fun onGenerateClassFailed(cls: ResolvedClass, t: Throwable) = throw t
 }
 
+/**
+ * Skip-not-crash for code generation: log the failure, and ledger the element as a GENERATE
+ * drop so `failOnDrop` sees it (#253). A class-level failure is reported back by
+ * [CodeGeneratorBase.generate], so the Kotlin writer can discard the half-written class.
+ */
 object LogPolicy : CodeGenerationPolicy {
     override fun onGenerateModuleFailed(
         moduleName: String,
         headers: List<String>,
         classes: List<ResolvedElement>,
         t: Throwable
-    ) {
-        printerrln("Error while generating module $moduleName ($headers $classes)")
-        printerrln(t.stackTraceToString())
-    }
+    ) = drop(moduleName, t)
 
-    override fun onGenerateMethodFailed(cls: ResolvedClass?, method: ResolvedMethod, t: Throwable) {
-        printerrln("Error while generating method $cls#$method")
-        printerrln(t.stackTraceToString())
-    }
+    override fun onGenerateMethodFailed(cls: ResolvedClass?, method: ResolvedMethod, t: Throwable) =
+        drop("${cls?.type ?: method.qualified}::${method.name}", t)
 
-    override fun onGenerateFieldFailed(cls: ResolvedClass, field: ResolvedField, t: Throwable) {
-        printerrln("Error while generating field $cls#$field")
-        printerrln(t.stackTraceToString())
-    }
+    override fun onGenerateFieldFailed(cls: ResolvedClass, field: ResolvedField, t: Throwable) =
+        drop("${cls.type}::${field.name}", t)
 
-    override fun onGenerateClassFailed(cls: ResolvedClass, t: Throwable) {
-        printerrln("Error while generating class $cls#$cls")
+    override fun onGenerateClassFailed(cls: ResolvedClass, t: Throwable) =
+        drop(cls.type.toString(), t)
+
+    private fun drop(symbol: String, t: Throwable) {
+        printerrln("Error while generating $symbol")
         printerrln(t.stackTraceToString())
+        dropLedger.record(symbol, "Code generation failed: ${t.message}", DropPhase.GENERATE)
     }
 }
