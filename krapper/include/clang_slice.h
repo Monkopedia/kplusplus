@@ -19,6 +19,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallString.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -99,23 +100,49 @@ inline ParseDiagCollector &parseDiagCollector() {
     return instance;
 }
 
+// Where [member] ends AS WRITTEN. Its AST range stops at the declarator when clang REJECTED
+// the initializer — `int x = undeclared;` and `static constexpr int k = undeclared;` lose
+// the initializer from the AST — so a variable or field runs on to its `;` (the first one
+// outside brackets). Anything else's AST range is already its written extent.
+inline clang::SourceLocation writtenEnd(const clang::Decl *member, const clang::SourceManager &sm,
+                                        const clang::LangOptions &lang) {
+    clang::SourceLocation end = sm.getExpansionRange(member->getSourceRange().getEnd()).getEnd();
+    if (!llvm::isa<clang::FieldDecl>(member) && !llvm::isa<clang::VarDecl>(member)) return end;
+    int depth = 0;
+    for (clang::SourceLocation at = end;;) {
+        std::optional<clang::Token> token = clang::Lexer::findNextToken(at, sm, lang);
+        if (!token || token->is(clang::tok::eof)) return end;
+        if (token->isOneOf(clang::tok::l_paren, clang::tok::l_square, clang::tok::l_brace)) {
+            ++depth;
+        } else if (token->isOneOf(clang::tok::r_paren, clang::tok::r_square,
+                                  clang::tok::r_brace)) {
+            if (depth-- == 0) return end; // the enclosing body closed: no `;` of its own
+        } else if (token->is(clang::tok::semi) && depth == 0) {
+            return token->getLocation();
+        }
+        at = token->getLocation();
+    }
+}
+
 // #257: does a parse error of the last parse belong to [tag] itself? It does when the error
-// lies inside the tag's written source range and outside every member declaration's: the
-// INNERMOST declaration whose range holds an error owns it. That is what catches the shapes
+// lies inside the tag's written source range and outside every member's written extent: the
+// INNERMOST declaration whose source holds an error owns it. That is what catches the shapes
 // clang recovers without marking anything invalid — `enum E : Handle` (E keeps an `int`
 // underlying type) and `struct B : NotAThing` (the base specifier is dropped from the AST),
 // and any member clang discarded outright. An error inside a member (a nested record, a
-// method's signature or body, a static_assert) is that member's, never the enclosing tag's;
-// an error between declarations belongs to no tag.
+// method's signature or body, a field's rejected initializer, a static_assert) is that
+// member's, never the enclosing record's; an error between declarations belongs to no tag.
+// A rejected enumerator value leaves the AST too, so it is the enum's — its values ARE it.
 inline bool ownsParseError(const clang::TagDecl *tag) {
     const std::vector<clang::SourceLocation> &errors = parseDiagCollector().errorLocations;
     if (errors.empty()) return false;
     const clang::SourceManager &sm = tag->getASTContext().getSourceManager();
+    const clang::LangOptions &lang = tag->getASTContext().getLangOpts();
     auto holds = [&](const clang::Decl *decl, clang::SourceLocation loc) {
         clang::SourceRange range = decl->getSourceRange();
         return range.isValid() &&
                sm.isPointWithin(loc, sm.getExpansionLoc(range.getBegin()),
-                                sm.getExpansionRange(range.getEnd()).getEnd());
+                                writtenEnd(decl, sm, lang));
     };
     for (clang::SourceLocation error : errors) {
         if (!holds(tag, error)) continue;

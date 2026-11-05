@@ -321,6 +321,43 @@ class InvalidDeclTest {
         }
     }
 
+    // MUST DIFFER (ownership): clang REMOVES a rejected initializer from the AST, so the
+    // member's AST range no longer covers its error. The member still owns it — by its
+    // written extent, through the `;` — so the class binds, only the member is affected.
+    @Test
+    fun a_rejected_member_initializer_drops_only_the_member() {
+        val out = generate(
+            "namespace p {\nstruct D { int x = undeclared; int m(); };\n" +
+                "struct S { static constexpr int k = undeclared; int n(); };\n}\n"
+        )
+        for (name in listOf("p::D", "p::S")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertTrue("fun m(" in out.kotlin && "fun n(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::D::x" }, "${out.drops}")
+    }
+
+    // ...while an error no member's written extent covers — a member clang discarded
+    // outright — is still the class's: it would bind missing that member.
+    @Test
+    fun a_discarded_member_drops_the_class() {
+        val out = generate("namespace p {\nstruct W { int a; 42; int b(); };\n}\n")
+        assertFalse("p::W" in out.bound, "W must not bind missing a member: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::W" }, "${out.drops}")
+    }
+
+    // A rejected enumerator value leaves the AST like any initializer; no enumerator's range
+    // covers it, so the enum owns it and drops (with its users) rather than bind a guess.
+    @Test
+    fun an_enum_with_a_rejected_enumerator_value_is_not_emitted() {
+        val out = generate(
+            "namespace p {\nenum E { A = undeclared, B };\nstruct W { void f(E e); int ok(); };\n}\n"
+        )
+        assertFalse("fun f(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::E" }, "${out.drops}")
+    }
+
     // The ledger names the user's header, not the virtual `parity_base.cc` the base parse
     // runs under — both the parse-error rows and the per-declaration rows.
     @Test
