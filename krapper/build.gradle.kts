@@ -279,10 +279,11 @@ kplusplus {
         // #185: a decl's presumed `file:line:col`, so a dropped binding can be reported
         // against real C++ source (SourceManager/PresumedLoc are not a bindable surface).
         "kppbridge::declLocation",
-        // #252: whether a decl's written type reaches an invalid declaration (an
-        // error-recovered typedef or parameter) anywhere inside it. The walk is clang's
-        // RecursiveASTVisitor over the TypeLoc, which is not a bindable surface.
-        "kppbridge::reachesInvalidDecl",
+        // #252/#257: whether clang error-recovered a decl without marking it invalid — a
+        // record / enum owning a parse error by source range, or a written type reaching an
+        // error-recovered declaration. The walk is clang's RecursiveASTVisitor over the
+        // TypeLoc plus the collected diagnostics, neither a bindable surface.
+        "kppbridge::reachesRecoveredDecl",
         // The forcing-parse entry point — buildASTFromCode with REAL driver args ('\n'-joined;
         // -resource-dir + -std), the smallest bridge until std::vector<std::string> params are
         // bindable (see clang_slice.h).

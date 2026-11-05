@@ -19,6 +19,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallString.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,12 +47,16 @@ class ParseDiagCollector : public clang::DiagnosticConsumer {
 public:
     // Accumulated records in the wire format documented on lastParseDiagnostics().
     std::string records;
+    // The same errors' expansion locations, for ownsParseError (#257). Valid only against the
+    // SourceManager of the parse that produced them, which is the AST the walk reads.
+    std::vector<clang::SourceLocation> errorLocations;
 
     // Overrides DiagnosticConsumer::clear(), which zeroes the base tallies; keep that
     // behaviour and drop the previous parse's records with it.
     void clear() override {
         clang::DiagnosticConsumer::clear();
         records.clear();
+        errorLocations.clear();
     }
 
     void HandleDiagnostic(clang::DiagnosticsEngine::Level level,
@@ -67,6 +72,7 @@ public:
         }
         std::string loc;
         if (info.hasSourceManager() && info.getLocation().isValid()) {
+            errorLocations.push_back(info.getSourceManager().getExpansionLoc(info.getLocation()));
             clang::PresumedLoc presumed =
                 info.getSourceManager().getPresumedLoc(info.getLocation());
             if (presumed.isValid() && presumed.getFilename()) {
@@ -94,7 +100,75 @@ inline ParseDiagCollector &parseDiagCollector() {
     return instance;
 }
 
-// The walk behind kppbridge::reachesInvalidDecl (#252). Clang's own RecursiveASTVisitor does
+// Where [member] ends AS WRITTEN. Its AST range stops at the declarator when clang REJECTED
+// the initializer — `int x = undeclared;` and `static constexpr int k = undeclared;` lose
+// the initializer from the AST — so a variable or field runs on to its `;` (the first one
+// outside brackets). Anything else's AST range is already its written extent.
+inline clang::SourceLocation writtenEnd(const clang::Decl *member, const clang::SourceManager &sm,
+                                        const clang::LangOptions &lang) {
+    clang::SourceLocation end = sm.getExpansionRange(member->getSourceRange().getEnd()).getEnd();
+    if (!llvm::isa<clang::FieldDecl>(member) && !llvm::isa<clang::VarDecl>(member)) return end;
+    int depth = 0;
+    for (clang::SourceLocation at = end;;) {
+        std::optional<clang::Token> token = clang::Lexer::findNextToken(at, sm, lang);
+        if (!token || token->is(clang::tok::eof)) return end;
+        if (token->isOneOf(clang::tok::l_paren, clang::tok::l_square, clang::tok::l_brace)) {
+            ++depth;
+        } else if (token->isOneOf(clang::tok::r_paren, clang::tok::r_square,
+                                  clang::tok::r_brace)) {
+            if (depth-- == 0) return end; // the enclosing body closed: no `;` of its own
+        } else if (token->is(clang::tok::semi) && depth == 0) {
+            return token->getLocation();
+        }
+        at = token->getLocation();
+    }
+}
+
+// #257: does a parse error of the last parse belong to [tag] itself? It does when the error
+// lies inside the tag's written source range and outside every member's written extent: the
+// INNERMOST declaration whose source holds an error owns it. That is what catches the shapes
+// clang recovers without marking anything invalid — `enum E : Handle` (E keeps an `int`
+// underlying type) and `struct B : NotAThing` (the base specifier is dropped from the AST),
+// and any member clang discarded outright. An error inside a member (a nested record, a
+// method's signature or body, a field's rejected initializer, a static_assert) is that
+// member's, never the enclosing record's; an error between declarations belongs to no tag.
+// A rejected enumerator value leaves the AST too, so it is the enum's — its values ARE it.
+inline bool ownsParseError(const clang::TagDecl *tag) {
+    const std::vector<clang::SourceLocation> &errors = parseDiagCollector().errorLocations;
+    if (errors.empty()) return false;
+    const clang::SourceManager &sm = tag->getASTContext().getSourceManager();
+    const clang::LangOptions &lang = tag->getASTContext().getLangOpts();
+    auto holds = [&](const clang::Decl *decl, clang::SourceLocation loc) {
+        clang::SourceRange range = decl->getSourceRange();
+        return range.isValid() &&
+               sm.isPointWithin(loc, sm.getExpansionLoc(range.getBegin()),
+                                writtenEnd(decl, sm, lang));
+    };
+    for (clang::SourceLocation error : errors) {
+        if (!holds(tag, error)) continue;
+        bool inMember = false;
+        for (const clang::Decl *member : tag->decls()) {
+            if (!member->isImplicit() && holds(member, error)) {
+                inMember = true;
+                break;
+            }
+        }
+        if (!inMember) return true;
+    }
+    return false;
+}
+
+// Clang's invalid flag, or for a tag type a parse error it owns (judged on the definition,
+// the redeclaration whose range spans the body and bases).
+inline bool isErrorRecovered(const clang::Decl *decl) {
+    if (decl->isInvalidDecl()) return true;
+    const auto *tag = llvm::dyn_cast<clang::TagDecl>(decl);
+    if (!tag) return false;
+    const clang::TagDecl *definition = tag->getDefinition();
+    return ownsParseError(definition ? definition : tag);
+}
+
+// The walk behind kppbridge::reachesRecoveredDecl (#252). Clang's own RecursiveASTVisitor does
 // the structural part, so every type node that contains another type is covered BY
 // CONSTRUCTION rather than by a hand list: pointer / reference / member-pointer (pointee AND
 // class), function prototypes (return + each parameter, through the ParenType of `(*)(...)`),
@@ -108,7 +182,7 @@ inline ParseDiagCollector &parseDiagCollector() {
 // leaf without descending to the alias's own declarator), and clang marks only the typedef it
 // could not read invalid, never its users; followAlias adds that step. A tag type stops the
 // walk (a record's members are its own declarations, checked where the record is walked) —
-// only its own invalid flag counts. Template instantiations are not entered: a use like
+// only the tag itself counts (isErrorRecovered: `f(E)` over `enum E : Handle` drops with E). Template instantiations are not entered: a use like
 // `Box<H>` is judged by its written arguments.
 class InvalidDeclFinder : public clang::RecursiveASTVisitor<InvalidDeclFinder> {
 public:
@@ -127,7 +201,7 @@ private:
     llvm::SmallPtrSet<const clang::Decl *, 8> followed;
 
     bool check(const clang::Decl *decl) {
-        if (decl && decl->isInvalidDecl()) found = true;
+        if (decl && isErrorRecovered(decl)) found = true;
         return !found; // false aborts the traversal: one invalid decl is the answer
     }
 
@@ -297,18 +371,22 @@ inline std::string defaultArgText(clang::ParmVarDecl *parm) {
         .str();
 }
 
-// #252 BRIDGE: does [decl]'s written type reach an INVALID declaration anywhere inside it?
+// #252/#257 BRIDGE: did clang error-recover [decl] without marking it invalid?
 //
-// For a function that is its return and parameter types, for a field or variable its type,
-// for a typedef / alias its underlying type — each walked through the typedefs it names and
-// every type node they contain (detail::InvalidDeclFinder). Clang marks only the declaration
-// it could not read invalid, substituting `int` for the unknown type, so a function whose
+// A record or enum: does it own a parse error (detail::ownsParseError, #257)? Anything else:
+// does its written type reach an error-recovered declaration anywhere inside it? For a
+// function that is its return and parameter types, for a field or variable its type, for a
+// typedef / alias its underlying type — each walked through the typedefs it names and every
+// type node they contain (detail::InvalidDeclFinder). Clang marks only the declaration it
+// could not read invalid, substituting `int` for the unknown type, so a function whose
 // parameter is `Cb` (`typedef void (*Cb)(H2)`, `typedef Handle H2`) is valid to clang yet
-// would bind as `(Int) -> Unit`. A decl kind with no written type (records, namespaces)
-// answers false: those are judged by their own isInvalidDecl(). The type walk needs
-// RecursiveASTVisitor and TypeLoc, neither a bindable surface, hence one bound bool.
-inline bool reachesInvalidDecl(const clang::Decl *decl) {
+// would bind as `(Int) -> Unit`. Other kinds (namespaces) answer false: those are judged by
+// their own isInvalidDecl(). The walk needs RecursiveASTVisitor, TypeLoc and the collected
+// diagnostics, none a bindable surface, hence one bound bool.
+inline bool reachesRecoveredDecl(const clang::Decl *decl) {
     if (!decl) return false;
+    if (const auto *tag = llvm::dyn_cast<clang::TagDecl>(decl))
+        return detail::isErrorRecovered(tag);
     auto *mutableDecl = const_cast<clang::Decl *>(decl);
     clang::TypeSourceInfo *info = nullptr;
     clang::QualType type;

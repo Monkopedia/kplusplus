@@ -43,6 +43,7 @@ class InvalidDeclTest {
     private class Outcome(
         val kotlin: String,
         val bound: List<String>,
+        val classes: List<ResolvedClass>,
         val drops: List<DropRecord>,
         val headerPath: String
     )
@@ -61,6 +62,7 @@ class InvalidDeclTest {
                 Outcome(
                     kotlin = buildString { collectKotlin(srcDir, this) },
                     bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() },
+                    classes = classes.filterIsInstance<ResolvedClass>(),
                     drops = run.drops.drops.toList(),
                     headerPath = headerFile.path
                 )
@@ -243,6 +245,117 @@ class InvalidDeclTest {
             out.drops.count { it.symbol == "p::Fwd" },
             "`p::Fwd` must be ledgered exactly once: ${out.drops}"
         )
+    }
+
+    // #257 — clang marks NEITHER of the next two shapes invalid, and no type walk reaches the
+    // loss: the declaration owns the parse error by SOURCE RANGE (it lies inside the decl's
+    // written range and outside every member's), which is what drops it.
+
+    // `enum E : Handle` with `Handle` undeclared: clang keeps E with an `int` underlying type,
+    // a guessed C boundary width. E is ledgered by name, and its users drop with it.
+    @Test
+    fun an_enum_with_an_unknown_underlying_type_is_not_emitted_and_is_ledgered() {
+        val out = generate(
+            "namespace p {\nenum E : Handle { A, B };\nstruct W { void f(E e); int ok(); };\n}\n"
+        )
+        assertFalse("fun f(" in out.kotlin, "`f(E)` must not bind over a guessed E:\n${out.kotlin}")
+        assertTrue("fun ok(" in out.kotlin, "the valid sibling still binds:\n${out.kotlin}")
+        assertEquals(1, out.drops.count { it.symbol == "p::E" }, "${out.drops}")
+        assertEquals(1, out.drops.count { it.symbol == "p::W::f" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: a KNOWN underlying type binds at its real width.
+    @Test
+    fun an_enum_with_a_known_underlying_type_binds_at_its_width() {
+        val out = generate(
+            "namespace p {\nenum E : long { A, B };\nstruct W { void f(E e); int ok(); };\n}\n"
+        )
+        assertTrue("fun f(e: E)" in out.kotlin, "`f(E)` binds:\n${out.kotlin}")
+        assertTrue("value: Long" in out.kotlin, "E is Long-backed:\n${out.kotlin}")
+        assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
+    }
+
+    // `struct B : NotAThing`: clang DROPS the bad base specifier, so B is valid to clang and
+    // would bind missing its base's API. B is not emitted and is ledgered by name.
+    @Test
+    fun a_class_with_an_unknown_base_is_not_emitted_and_is_ledgered() {
+        val out = generate("namespace p {\nstruct B : NotAThing { int m(); };\n}\n")
+        assertFalse("p::B" in out.bound, "B must not bind without its base: ${out.bound}")
+        assertFalse("fun m(" in out.kotlin, "no member of B is emitted:\n${out.kotlin}")
+        assertEquals(1, out.drops.count { it.symbol == "p::B" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: a known base binds, base API included.
+    @Test
+    fun a_class_with_a_known_base_binds_with_it() {
+        val out = generate(
+            "namespace p {\nstruct ValidBase { int v(); };\nstruct B : ValidBase { int m(); };\n}\n"
+        )
+        assertTrue("p::B" in out.bound, "B binds: ${out.bound}")
+        val b = out.classes.single { it.type.toString() == "p::B" }
+        assertTrue("ValidBase" in b.baseClass.toString(), "B keeps its base: ${b.baseClass}")
+        assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
+    }
+
+    // MUST DIFFER (ownership): an error is owned by the INNERMOST declaration whose range holds
+    // it. A sibling's error, a nested record's error, and an error inside a method body all
+    // leave the enclosing / neighbouring declaration bound and unledgered.
+    @Test
+    fun an_error_owned_by_another_declaration_drops_nothing_else() {
+        val out = generate(
+            "namespace p {\nstruct Bad : NotAThing { int m(); };\n" +
+                "struct Clean { int x; int y(); };\n" +
+                "void g(Unknown u);\n" +
+                "struct Outer { struct Inner : NotAThing { int i(); }; int o(); };\n" +
+                "struct Body { int f() { return undeclared(); } int h(); };\n}\n"
+        )
+        for (name in listOf("p::Clean", "p::Outer", "p::Body")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        for (name in listOf("y", "o", "f", "h")) {
+            assertTrue("fun $name(" in out.kotlin, "`$name` must still bind:\n${out.kotlin}")
+        }
+        for (name in listOf("p::Bad", "p::Outer::Inner", "p::g")) {
+            assertEquals(1, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+    }
+
+    // MUST DIFFER (ownership): clang REMOVES a rejected initializer from the AST, so the
+    // member's AST range no longer covers its error. The member still owns it — by its
+    // written extent, through the `;` — so the class binds, only the member is affected.
+    @Test
+    fun a_rejected_member_initializer_drops_only_the_member() {
+        val out = generate(
+            "namespace p {\nstruct D { int x = undeclared; int m(); };\n" +
+                "struct S { static constexpr int k = undeclared; int n(); };\n}\n"
+        )
+        for (name in listOf("p::D", "p::S")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertTrue("fun m(" in out.kotlin && "fun n(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::D::x" }, "${out.drops}")
+    }
+
+    // ...while an error no member's written extent covers — a member clang discarded
+    // outright — is still the class's: it would bind missing that member.
+    @Test
+    fun a_discarded_member_drops_the_class() {
+        val out = generate("namespace p {\nstruct W { int a; 42; int b(); };\n}\n")
+        assertFalse("p::W" in out.bound, "W must not bind missing a member: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::W" }, "${out.drops}")
+    }
+
+    // A rejected enumerator value leaves the AST like any initializer; no enumerator's range
+    // covers it, so the enum owns it and drops (with its users) rather than bind a guess.
+    @Test
+    fun an_enum_with_a_rejected_enumerator_value_is_not_emitted() {
+        val out = generate(
+            "namespace p {\nenum E { A = undeclared, B };\nstruct W { void f(E e); int ok(); };\n}\n"
+        )
+        assertFalse("fun f(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::E" }, "${out.drops}")
     }
 
     // The ledger names the user's header, not the virtual `parity_base.cc` the base parse

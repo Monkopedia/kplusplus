@@ -59,7 +59,7 @@ import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
 import kppbridge.qualifiedName
-import kppbridge.reachesInvalidDecl
+import kppbridge.reachesRecoveredDecl
 
 // The C++-AST front-end's model construction (#44 bricks 2-5): walk a parsed Clang AST on
 // the kplusplus-generated libclang-cpp bindings and build :krapper_model's parse-output
@@ -180,10 +180,16 @@ private class ModelBuilder(
     // it could not read: through a typedef (`typedef Handle H2;` is an invalid `int`) or a
     // function-pointer typedef's parameter, every USER stays valid. So a function / field /
     // typedef whose written type reaches an invalid declaration anywhere inside it is dropped
-    // too ([reachesInvalidDecl], a structural walk over every type node — see
+    // too ([reachesRecoveredDecl], a structural walk over every type node — see
     // clang_slice.h). That drops the member, not its class: the class is valid to clang.
+    //
+    // #257: some recoveries mark NOTHING invalid — `enum E : Handle` keeps E with an `int`
+    // underlying type, `struct B : NotAThing` loses the base specifier from the AST. A record
+    // or enum is therefore also skipped when a parse error lies inside its written source and
+    // outside every member's (the innermost declaration holding an error owns it), and a
+    // signature naming such an enum or record drops with it.
     private fun skippedAsInvalid(decl: Decl, named: Decl = decl): Boolean {
-        if (!named.isInvalidDecl() && !reachesInvalidDecl(named)) return false
+        if (!named.isInvalidDecl() && !reachesRecoveredDecl(named)) return false
         if (reportedInvalid.add(named.cppUsr())) {
             val symbol = decl.asNamedDecl()?.let { qualifiedName(it) }?.takeIf { it.isNotEmpty() }
                 ?: "<unnamed ${decl.getDeclKindName()} declaration>"
