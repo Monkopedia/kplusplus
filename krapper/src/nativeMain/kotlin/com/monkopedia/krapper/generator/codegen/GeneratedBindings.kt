@@ -17,10 +17,12 @@ package com.monkopedia.krapper.generator.codegen
 
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
 
 /** What [generateBindings] emitted: the `.h` and `.cc` text, and the model all writers used. */
 class GeneratedBindings(val header: String, val wrapper: String, val emitted: List<ResolvedElement>)
@@ -33,12 +35,14 @@ class GeneratedBindings(val header: String, val wrapper: String, val emitted: Li
  * defines, and `binding-index.json` advertises the Kotlin classes. So when [policy] swallows a
  * writer's failure (`ErrorPolicy.LOG`), the failed element is removed from the model and every
  * writer runs again without it, until a pass fails on nothing. A failed class leaves every
- * output; a failed method or field leaves every output while its class keeps the rest. Nothing
- * a writer half-wrote survives, and each failure is ledgered once. A clean model takes one pass.
+ * output; a failed method or field leaves every output while its class keeps the rest, except
+ * for the members a class cannot ship without (see [FailureCollector]). Nothing a writer
+ * half-wrote survives, and each failure is ledgered once. A clean model takes one pass.
  *
- * Each pass only removes elements, so this terminates. A later pass fails on something new
- * only because of an earlier removal (a derived class whose base was dropped), and that is
- * dropped and ledgered in turn.
+ * Every failure names an element of the model, so each failing pass removes at least one and
+ * this terminates. A writer that fails on something only because an earlier pass removed it
+ * (a derived class whose base was dropped) is dropped and ledgered in turn. A class that merely
+ * REFERENCES a dropped class is not: its signatures still name the missing binding.
  */
 fun generateBindings(
     moduleName: String,
@@ -63,13 +67,22 @@ fun generateBindings(
         }.toString()
         KotlinWriter(kotlinPkg, failures).generate(srcDir, model)
         if (failures.failed.isEmpty()) return GeneratedBindings(header, wrapper, model)
-        model = model.without(failures.failed)
+        val remaining = model.without(failures.failed)
+        check(remaining.recursiveSequence().count() < model.recursiveSequence().count()) {
+            "a failing generation pass removed nothing: ${failures.failed}"
+        }
+        model = remaining
     }
 }
 
 /**
  * Remembers every element a writer failed on, and reports each to [policy] the first time
  * only, so an element two writers fail on is ledgered once.
+ *
+ * A failed destructor, `size_of` or `align_of` fails its whole class. Without the destructor
+ * the binding's scoped constructor registers no cleanup, so the C++ destructor would silently
+ * never run (destruction is scope-bound and deterministic); without size/align the binding
+ * cannot allocate. Constructors, other methods and fields are safe to drop alone.
  */
 private class FailureCollector(private val policy: CodeGenerationPolicy) : CodeGenerationPolicy {
     val failed = mutableListOf<ResolvedElement>()
@@ -85,7 +98,11 @@ private class FailureCollector(private val policy: CodeGenerationPolicy) : CodeG
     ) = policy.onGenerateModuleFailed(moduleName, headers, classes, t)
 
     override fun onGenerateMethodFailed(cls: ResolvedClass?, method: ResolvedMethod, t: Throwable) {
-        if (isNew(method)) policy.onGenerateMethodFailed(cls, method, t)
+        if (cls != null && method.methodType in CLASS_CRITICAL) {
+            onGenerateClassFailed(cls, IllegalStateException("${method.name}: ${t.message}", t))
+        } else if (isNew(method)) {
+            policy.onGenerateMethodFailed(cls, method, t)
+        }
     }
 
     override fun onGenerateFieldFailed(cls: ResolvedClass, field: ResolvedField, t: Throwable) {
@@ -94,6 +111,10 @@ private class FailureCollector(private val policy: CodeGenerationPolicy) : CodeG
 
     override fun onGenerateClassFailed(cls: ResolvedClass, t: Throwable) {
         if (isNew(cls)) policy.onGenerateClassFailed(cls, t)
+    }
+
+    private companion object {
+        val CLASS_CRITICAL = setOf(MethodType.DESTRUCTOR, MethodType.SIZE_OF, MethodType.ALIGN_OF)
     }
 }
 

@@ -30,6 +30,7 @@ import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.generateBindings
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
@@ -66,6 +67,7 @@ class LossPathLedgerTest {
         struct Derived : Base { int dv(); };
         struct Val { int x; };
         struct Holder { int hv(); Val make(); Val v; };
+        struct Res { ~Res(); int rv(); };
         }
     """.trimIndent()
 
@@ -200,6 +202,30 @@ class LossPathLedgerTest {
     }
 
     @Test
+    fun class_whose_destructor_fails_is_dropped_whole() {
+        // Only CppWriter rejects the destructor (its `thiz` is not a pointer). Dropping just
+        // the destructor would ship a Res whose scoped constructor registers no cleanup, so
+        // the C++ destructor would silently never run (scope-bound destruction is the memory
+        // model). The whole class must go instead.
+        val out = generate(listOf("p::Res", "p::Val"), ReferencePolicy.OPAQUE_MISSING) { model ->
+            val res = model.filterIsInstance<ResolvedClass>().single {
+                it.type.toString() ==
+                    "p::Res"
+            }
+            res.children.filterIsInstance<ResolvedMethod>()
+                .single { it.methodType == MethodType.DESTRUCTOR }
+                .args.first().needsDereference = false
+        }
+        assertFalse("p_Res" in out.all, "no part of Res may ship:\n${out.all}")
+        assertEquals(
+            listOf("p::Res" to DropPhase.GENERATE),
+            out.drops.map { it.symbol to it.phase },
+            "a failed destructor is ledgered as its class"
+        )
+        assertTrue("p_Val.kt" in out.kotlin, "the clean class in the same run is untouched")
+    }
+
+    @Test
     fun clean_model_emits_exactly_what_the_writers_do() = runBlocking {
         val run = KrapperRun(GenerationContext())
         val dir = File.createTempDir("krapper_loss_path_clean")
@@ -210,7 +236,9 @@ class LossPathLedgerTest {
             KrapperRun.using(run) {
                 val resolver = parseHeader(headerFile.path, "c++14")
                 val classes = resolver.findClasses(
-                    AllowListFilter(listOf("p::Base", "p::Derived", "p::Holder", "p::Val"))
+                    AllowListFilter(
+                        listOf("p::Base", "p::Derived", "p::Holder", "p::Res", "p::Val")
+                    )
                         .wrapperFilter()
                 ).resolveAll(resolver, ReferencePolicy.OPAQUE_MISSING)
                 val direct = File(dir, "direct")
