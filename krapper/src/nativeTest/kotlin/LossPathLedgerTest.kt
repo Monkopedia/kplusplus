@@ -57,6 +57,8 @@ import kotlinx.serialization.json.Json
  */
 class LossPathLedgerTest {
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     private val header = """
         #pragma once
         namespace p {
@@ -267,7 +269,7 @@ class LossPathLedgerTest {
             val indexed = service.index(IndexRequest(listOf(headerFile.path), emptyList()))
             indexed.filterAndResolve(AllowListFilter(listOf("p::Derived", "p::Val")))
             indexed.writeTo(out.path)
-            val index = Json { ignoreUnknownKeys = true }.decodeFromString(
+            val index = json.decodeFromString(
                 BindingIndex.serializer(),
                 File(out, BindingIndex.FILE_NAME).readText()
             )
