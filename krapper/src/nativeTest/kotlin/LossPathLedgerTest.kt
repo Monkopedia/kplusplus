@@ -203,25 +203,40 @@ class LossPathLedgerTest {
         assertTrue("p_Holder_make" in out.cWrapper && "p_Holder_hv" in out.cWrapper)
     }
 
-    @Test
-    fun class_whose_destructor_fails_is_dropped_whole() {
-        // Only CppWriter rejects the destructor (its `thiz` is not a pointer). Dropping just
-        // the destructor would ship a Res whose scoped constructor registers no cleanup, so
-        // the C++ destructor would silently never run (scope-bound destruction is the memory
-        // model). The whole class must go instead.
+    /**
+     * A failed destructor, `size_of` or `align_of` must drop the whole class, ledgered once
+     * against it: a Res with no destructor would register no cleanup, so the C++ destructor
+     * would silently never run (scope-bound destruction is the memory model), and one with no
+     * size/align cannot allocate.
+     */
+    private fun assertResDroppedWhole(breakMember: (ResolvedMethod) -> Unit, type: MethodType) {
         val out = generate(listOf("p::Res", "p::Val"), ReferencePolicy.OPAQUE_MISSING) { model ->
-            model.cls("p::Res").children.filterIsInstance<ResolvedMethod>()
-                .single { it.methodType == MethodType.DESTRUCTOR }
-                .args.first().needsDereference = false
+            breakMember(
+                model.cls("p::Res").children.filterIsInstance<ResolvedMethod>()
+                    .single { it.methodType == type }
+            )
         }
         assertFalse("p_Res" in out.all, "no part of Res may ship:\n${out.all}")
         assertEquals(
             listOf("p::Res" to DropPhase.GENERATE),
             out.drops.map { it.symbol to it.phase },
-            "a failed destructor is ledgered as its class"
+            "a failed $type is ledgered once, as its class"
         )
         assertTrue("p_Val.kt" in out.kotlin, "the clean class in the same run is untouched")
     }
+
+    @Test
+    fun class_whose_destructor_fails_is_dropped_whole() =
+        // Only CppWriter rejects it: its `thiz` is not a pointer.
+        assertResDroppedWhole({ it.args.first().needsDereference = false }, MethodType.DESTRUCTOR)
+
+    @Test
+    fun class_whose_size_of_fails_is_dropped_whole() =
+        assertResDroppedWhole({ it.uniqueCName = null }, MethodType.SIZE_OF)
+
+    @Test
+    fun class_whose_align_of_fails_is_dropped_whole() =
+        assertResDroppedWhole({ it.uniqueCName = null }, MethodType.ALIGN_OF)
 
     @Test
     fun clean_model_emits_exactly_what_the_writers_do() = runBlocking {
