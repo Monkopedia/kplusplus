@@ -58,8 +58,8 @@ object ThrowPolicy : CodeGenerationPolicy {
 
 /**
  * Skip-not-crash for code generation: log the failure, and ledger the element as a GENERATE
- * drop so `failOnDrop` sees it (#253). A class-level failure is reported back by
- * [CodeGeneratorBase.generate], so the Kotlin writer can discard the half-written class.
+ * drop so `failOnDrop` sees it (#253). The writer's output for the failed element may be
+ * partial; `generateBindings` removes the element from every writer and regenerates (#260).
  */
 object LogPolicy : CodeGenerationPolicy {
     override fun onGenerateModuleFailed(
