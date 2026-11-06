@@ -118,8 +118,10 @@ class LossPathLedgerTest {
         }
     }
 
-    private fun List<ResolvedElement>.holder() =
-        filterIsInstance<ResolvedClass>().single { it.type.toString() == "p::Holder" }
+    private fun List<ResolvedElement>.cls(spec: String) =
+        filterIsInstance<ResolvedClass>().single { it.type.toString() == spec }
+
+    private fun List<ResolvedElement>.holder() = cls("p::Holder")
 
     private fun List<ResolvedElement>.holderMethod(name: String) =
         holder().children.filterIsInstance<ResolvedMethod>().single { it.name == name }
@@ -208,11 +210,7 @@ class LossPathLedgerTest {
         // the C++ destructor would silently never run (scope-bound destruction is the memory
         // model). The whole class must go instead.
         val out = generate(listOf("p::Res", "p::Val"), ReferencePolicy.OPAQUE_MISSING) { model ->
-            val res = model.filterIsInstance<ResolvedClass>().single {
-                it.type.toString() ==
-                    "p::Res"
-            }
-            res.children.filterIsInstance<ResolvedMethod>()
+            model.cls("p::Res").children.filterIsInstance<ResolvedMethod>()
                 .single { it.methodType == MethodType.DESTRUCTOR }
                 .args.first().needsDereference = false
         }
