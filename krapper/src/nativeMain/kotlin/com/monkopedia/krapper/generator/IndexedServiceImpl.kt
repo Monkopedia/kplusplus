@@ -35,14 +35,11 @@ import com.monkopedia.krapper.RemoveParent
 import com.monkopedia.krapper.ReplaceChild
 import com.monkopedia.krapper.ReplaceParent
 import com.monkopedia.krapper.ResolverService
-import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.CppCompiler
-import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.DefWriter
 import com.monkopedia.krapper.generator.codegen.File
-import com.monkopedia.krapper.generator.codegen.HeaderWriter
-import com.monkopedia.krapper.generator.codegen.KotlinWriter
 import com.monkopedia.krapper.generator.codegen.NameHandler
+import com.monkopedia.krapper.generator.codegen.generateBindings
 import com.monkopedia.krapper.generator.model.ForcingHeader
 import com.monkopedia.krapper.generator.model.WrappedClass
 import com.monkopedia.krapper.generator.model.WrappedElement
@@ -302,30 +299,21 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         }
         val headers = request.headers + syntheticHeaders
         val namer = NameHandler()
-        Log.i("Generating header file")
-        File(outputBase, "${config.moduleName}.h").writeText(
-            CppCodeBuilder().also {
-                HeaderWriter(
-                    it,
-                    policy = config.errorPolicy.policy
-                ).generate(config.moduleName!!, headers, classes)
-            }.toString()
-        )
-        Log.i("Generating C++ wrapper")
+        Log.i("Generating header, C++ wrapper and Kotlin bindings")
         val cppFile = File(outputBase, "${config.moduleName}.cc")
-        cppFile.writeText(
-            // qualifyFunctionPointers: the .cc wrapper names namespace-scoped
-            // function-pointer typedefs with their fully-qualified spelling so they
-            // resolve in C++ (the .h header keeps the unqualified extern-"C" form).
-            CppCodeBuilder(qualifyFunctionPointers = true).also {
-                CppWriter(cppFile, it, policy = config.errorPolicy.policy).generate(
-                    config.moduleName!!,
-                    headers,
-                    classes
-                )
-            }.toString()
-        )
+        val srcDir = File(outputBase, "src")
         val pkg = config.pkg
+        val bindings = generateBindings(
+            config.moduleName!!,
+            headers,
+            classes,
+            cppFile,
+            "$pkg.internal",
+            srcDir,
+            config.errorPolicy.policy
+        )
+        File(outputBase, "${config.moduleName}.h").writeText(bindings.header)
+        cppFile.writeText(bindings.wrapper)
         File(outputBase, "${config.moduleName}.def").writeText(
             DefWriter(namer).generateDef(
                 outputBase,
@@ -351,18 +339,9 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             // resolve only if the module's headerDirectory(...) roots are on -I.
             request.headerDirectories
         )
-        Log.i("Generating Kotlin bindings")
-        val srcDir = File(outputBase, "src")
-        KotlinWriter(
-            "$pkg.internal",
-            policy = config.errorPolicy.policy
-        ).generate(
-            srcDir,
-            classes
-        )
         writeCppBindingAnnotation(srcDir)
-        writeBindingIndex(outputBase)
-        reportDrops()
+        writeBindingIndex(outputBase, bindings.emitted)
+        reportDrops(bindings.emitted)
         Log.i("Code generation complete")
     }
 
@@ -382,8 +361,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
      * `simpleName` is derived from it rather than fetched separately so the three fields cannot
      * disagree with each other.
      */
-    private fun writeBindingIndex(outputBase: File) {
-        val bindings = classes.filterIsInstance<ResolvedClass>().map { cls ->
+    private fun writeBindingIndex(outputBase: File, emitted: List<ResolvedElement>) {
+        val bindings = emitted.filterIsInstance<ResolvedClass>().map { cls ->
             val spec = cls.type.toString()
             val kotlinType = cls.type.kotlinType
             val fullyQualified = kotlinType.fullyQualified
@@ -462,8 +441,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
      * the run if anything was dropped. Default (failOnDrop=false) only logs, so existing
      * green runs are unchanged: drops are surfaced but never fatal unless opted in.
      */
-    private suspend fun reportDrops() {
-        val bound = classes.filterIsInstance<ResolvedClass>().map { it.type.toString() }
+    private suspend fun reportDrops(emitted: List<ResolvedElement>) {
+        val bound = emitted.filterIsInstance<ResolvedClass>().map { it.type.toString() }
         Log.i(run.drops.report(requested, bound))
         // #185: the same ledger, structured — so a remote driver gets each drop as
         // {severity, symbol, file:line:col, reason} instead of having to scrape the report.

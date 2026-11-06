@@ -60,11 +60,7 @@ abstract class CodeGeneratorBase<T : CodeBuilder<*>>(
     abstract fun T.onGenerate(method: ResolvedMethod)
     abstract fun T.onGenerate(cls: ResolvedClass, field: ResolvedField)
 
-    /**
-     * Generate [cls]; false if the policy swallowed a class-level failure, in which case
-     * whatever the builder holds for [cls] is partial and must not be emitted.
-     */
-    fun T.generate(cls: ResolvedClass): Boolean {
+    fun T.generate(cls: ResolvedClass) {
         try {
             onGenerate(cls) {
                 onGenerateMethods(cls)
@@ -78,9 +74,7 @@ abstract class CodeGeneratorBase<T : CodeBuilder<*>>(
             }
         } catch (t: Throwable) {
             codeGenerationPolicy.onGenerateClassFailed(cls, t)
-            return false
         }
-        return true
     }
 
     protected open fun T.onGenerateMethods(cls: ResolvedClass) {

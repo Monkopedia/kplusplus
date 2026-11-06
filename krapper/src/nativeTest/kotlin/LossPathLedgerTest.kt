@@ -16,47 +16,77 @@
 package com.monkopedia.krapper.generator
 
 import com.monkopedia.krapper.AllowListFilter
+import com.monkopedia.krapper.BindingIndex
+import com.monkopedia.krapper.DiagnosticPhase
+import com.monkopedia.krapper.ErrorPolicy
+import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.builders.LogPolicy
+import com.monkopedia.krapper.generator.builders.ThrowPolicy
+import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.HeaderWriter
 import com.monkopedia.krapper.generator.codegen.KotlinWriter
+import com.monkopedia.krapper.generator.codegen.generateBindings
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedClass
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
+import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
+import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 
 /**
- * The two ways a binding used to lose API with an EMPTY drop ledger, so `failOnDrop` (which
- * reads only the ledger) could not see them (#253). Driven through the real parse ->
- * resolve -> emit path the plugin runs, under [LogPolicy] (the plugin's hardcoded
+ * The ways a binding used to lose API silently or leave broken output, driven through the real
+ * parse -> resolve -> emit path the plugin runs, under [LogPolicy] (the plugin's hardcoded
  * `ErrorPolicy.LOG`).
  *
  *  - Path 1 (IGNORE_MISSING): an unlisted public base is unresolvable, so the derived class
- *    loses its inherited members and `asBase()`. That must be a RESOLVE drop.
- *  - Path 2 (OPAQUE_MISSING): the Kotlin writer throws on the class; LOG swallowed it and
- *    left a `.kt` ending in a dangling annotation. That must be a GENERATE drop, and the
- *    half-written class must be discarded rather than written.
- *  - The must-differ case: listing both classes drops nothing.
+ *    loses its inherited members and `asBase()`. That must be a RESOLVE drop (#253).
+ *  - Path 2 (OPAQUE_MISSING): the Kotlin writer throws on the class. It must be a GENERATE
+ *    drop, and absent from EVERY output, binding-index.json included (#253, #260).
+ *  - A member one writer fails on, or fails on half-way, must be absent from every output
+ *    while its class keeps the rest (#260).
+ *  - The must-differ cases: a clean config drops nothing and emits exactly what the writers do.
  */
 class LossPathLedgerTest {
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     private val header = """
+        #pragma once
         namespace p {
         struct Base { int bv(); };
         struct Derived : Base { int dv(); };
+        struct Val { int x; };
+        struct Holder { int hv(); Val make(); Val v; };
+        struct Res { ~Res(); int rv(); };
         }
     """.trimIndent()
 
     private class Output(
         val drops: List<DropRecord>,
         val cHeader: String,
+        val cWrapper: String,
         val kotlin: Map<String, String>
-    )
+    ) {
+        /** Every emitted output, for "absent everywhere" checks. */
+        val all: String
+            get() = cHeader + cWrapper + kotlin.values.joinToString("")
+    }
 
-    private fun generate(only: List<String>, policy: ReferencePolicy): Output = runBlocking {
+    private fun generate(
+        only: List<String>,
+        policy: ReferencePolicy,
+        breakModel: (List<ResolvedElement>) -> Unit = {}
+    ): Output = runBlocking {
         val run = KrapperRun(GenerationContext())
         val dir = File.createTempDir("krapper_loss_path")
         try {
@@ -65,14 +95,21 @@ class LossPathLedgerTest {
                 val resolver = parseHeader(headerFile.path, "c++14")
                 val classes = resolver.findClasses(AllowListFilter(only).wrapperFilter())
                     .resolveAll(resolver, policy)
-                val cHeader = CppCodeBuilder().also {
-                    HeaderWriter(it, LogPolicy).generate("P", listOf(headerFile.path), classes)
-                }.toString()
+                breakModel(classes)
                 val srcDir = File(dir, "src")
-                KotlinWriter("p.internal", LogPolicy).generate(srcDir, classes)
+                val bindings = generateBindings(
+                    "P",
+                    listOf(headerFile.path),
+                    classes,
+                    File(dir, "P.cc"),
+                    "p.internal",
+                    srcDir,
+                    LogPolicy
+                )
                 Output(
                     run.drops.drops.toList(),
-                    cHeader,
+                    bindings.header,
+                    bindings.wrapper,
                     srcDir.listFiles().associate { it.name to it.readText() }
                 )
             }
@@ -80,6 +117,17 @@ class LossPathLedgerTest {
             dir.rmR()
         }
     }
+
+    private fun List<ResolvedElement>.cls(spec: String) =
+        filterIsInstance<ResolvedClass>().single { it.type.toString() == spec }
+
+    private fun List<ResolvedElement>.holder() = cls("p::Holder")
+
+    private fun List<ResolvedElement>.holderMethod(name: String) =
+        holder().children.filterIsInstance<ResolvedMethod>().single { it.name == name }
+
+    private fun List<ResolvedElement>.holderField(name: String) =
+        holder().children.filterIsInstance<ResolvedField>().single { it.name == name }
 
     @Test
     fun both_classes_listed_binds_inherited_members_and_drops_nothing() {
@@ -104,17 +152,180 @@ class LossPathLedgerTest {
     }
 
     @Test
-    fun codegen_failure_is_ledgered_and_the_half_written_class_discarded() {
-        val out = generate(listOf("p::Derived"), ReferencePolicy.OPAQUE_MISSING)
-        val drop = out.drops.singleOrNull { it.symbol == "p::Derived" }
-        assertTrue(
-            drop != null && drop.phase == DropPhase.GENERATE,
-            "the class the Kotlin writer failed on must be ledgered: ${out.drops}"
+    fun class_a_writer_fails_on_is_ledgered_once_and_absent_from_every_output() {
+        val out = generate(listOf("p::Derived", "p::Val"), ReferencePolicy.OPAQUE_MISSING)
+        assertEquals(
+            listOf("p::Derived" to DropPhase.GENERATE),
+            out.drops.map { it.symbol to it.phase },
+            "the class the Kotlin writer failed on must be ledgered once"
         )
+        assertFalse("p_Derived.kt" in out.kotlin, "no .kt for the failed class")
         assertFalse(
-            "p_Derived.kt" in out.kotlin,
-            "the half-written class must be discarded, not left truncated:\n" +
-                out.kotlin["p_Derived.kt"]
+            "Derived" in out.cHeader + out.cWrapper,
+            "the C side must not keep wrappers for a class Kotlin cannot bind:\n" +
+                out.cHeader + out.cWrapper
         )
+        // Must-differ: the clean class in the same run is untouched.
+        assertTrue("p_Val.kt" in out.kotlin && "p_Val_x_get" in out.cWrapper, out.all)
+    }
+
+    @Test
+    fun member_only_the_cpp_writer_fails_on_is_dropped_from_every_output() {
+        // An ARG_CAST return whose ret slot is not a pointer: only CppWriter rejects it, so the
+        // header and the Kotlin would otherwise reference a symbol the .cc never defines.
+        val out = generate(listOf("p::Holder", "p::Val"), ReferencePolicy.OPAQUE_MISSING) {
+            val make = it.holderMethod("make")
+            check(make.returnStyle == ReturnStyle.ARG_CAST) { "precondition: $make" }
+            make.argCastNeedsPointer = false
+        }
+        assertEquals(
+            listOf("p::Holder::make" to DropPhase.GENERATE),
+            out.drops.map { it.symbol to it.phase }
+        )
+        assertFalse("p_Holder_make" in out.all, "make must be gone from every output:\n${out.all}")
+        assertTrue("p_Holder_hv" in out.cWrapper, "the class keeps its other members")
+        assertTrue("fun hv(" in out.kotlin.getValue("p_Holder.kt"))
+    }
+
+    @Test
+    fun member_a_writer_fails_on_half_way_leaves_no_fragment() {
+        // A by-value field whose setter is unnamed: every writer emits the getter, then throws
+        // on the setter, so the field would otherwise ship as a getter-only fragment.
+        val out = generate(listOf("p::Holder", "p::Val"), ReferencePolicy.OPAQUE_MISSING) {
+            it.holderField("v").setter.uniqueCName = null
+        }
+        assertEquals(
+            listOf("p::Holder::v" to DropPhase.GENERATE),
+            out.drops.map { it.symbol to it.phase },
+            "one failed field is one drop, however many writers threw on it"
+        )
+        assertFalse("p_Holder_v_" in out.all, "no fragment of v may remain:\n${out.all}")
+        assertTrue("p_Holder_make" in out.cWrapper && "p_Holder_hv" in out.cWrapper)
+    }
+
+    /**
+     * A failed destructor, `size_of` or `align_of` must drop the whole class, ledgered once
+     * against it: a Res with no destructor would register no cleanup, so the C++ destructor
+     * would silently never run (scope-bound destruction is the memory model), and one with no
+     * size/align cannot allocate.
+     */
+    private fun assertResDroppedWhole(breakMember: (ResolvedMethod) -> Unit, type: MethodType) {
+        val out = generate(listOf("p::Res", "p::Val"), ReferencePolicy.OPAQUE_MISSING) { model ->
+            breakMember(
+                model.cls("p::Res").children.filterIsInstance<ResolvedMethod>()
+                    .single { it.methodType == type }
+            )
+        }
+        assertFalse("p_Res" in out.all, "no part of Res may ship:\n${out.all}")
+        assertEquals(
+            listOf("p::Res" to DropPhase.GENERATE),
+            out.drops.map { it.symbol to it.phase },
+            "a failed $type is ledgered once, as its class"
+        )
+        assertTrue("p_Val.kt" in out.kotlin, "the clean class in the same run is untouched")
+    }
+
+    @Test
+    fun class_whose_destructor_fails_is_dropped_whole() =
+        // Only CppWriter rejects it: its `thiz` is not a pointer.
+        assertResDroppedWhole({ it.args.first().needsDereference = false }, MethodType.DESTRUCTOR)
+
+    @Test
+    fun class_whose_size_of_fails_is_dropped_whole() =
+        assertResDroppedWhole({ it.uniqueCName = null }, MethodType.SIZE_OF)
+
+    @Test
+    fun class_whose_align_of_fails_is_dropped_whole() =
+        assertResDroppedWhole({ it.uniqueCName = null }, MethodType.ALIGN_OF)
+
+    @Test
+    fun clean_model_emits_exactly_what_the_writers_do() = runBlocking {
+        val run = KrapperRun(GenerationContext())
+        val dir = File.createTempDir("krapper_loss_path_clean")
+        try {
+            val headerFile = File(dir, "p.h").also { it.writeText(header) }
+            val headers = listOf(headerFile.path)
+            val cppFile = File(dir, "P.cc")
+            KrapperRun.using(run) {
+                val resolver = parseHeader(headerFile.path, "c++14")
+                val classes = resolver.findClasses(
+                    AllowListFilter(
+                        listOf("p::Base", "p::Derived", "p::Holder", "p::Res", "p::Val")
+                    )
+                        .wrapperFilter()
+                ).resolveAll(resolver, ReferencePolicy.OPAQUE_MISSING)
+                val direct = File(dir, "direct")
+                KotlinWriter("p.internal", ThrowPolicy).generate(direct, classes)
+                val viaBindings = File(dir, "bindings")
+                val bindings = generateBindings(
+                    "P",
+                    headers,
+                    classes,
+                    cppFile,
+                    "p.internal",
+                    viaBindings,
+                    LogPolicy
+                )
+                assertEquals(
+                    CppCodeBuilder().also {
+                        HeaderWriter(it, ThrowPolicy).generate("P", headers, classes)
+                    }.toString(),
+                    bindings.header
+                )
+                assertEquals(
+                    CppCodeBuilder(qualifyFunctionPointers = true).also {
+                        CppWriter(cppFile, it, ThrowPolicy).generate("P", headers, classes)
+                    }.toString(),
+                    bindings.wrapper
+                )
+                assertEquals(
+                    direct.listFiles().associate { it.name to it.readText() },
+                    viaBindings.listFiles().associate { it.name to it.readText() }
+                )
+                assertTrue(bindings.emitted === classes, "a clean model is emitted as given")
+                assertEquals(emptyList(), run.drops.drops.toList())
+            }
+        } finally {
+            dir.rmR()
+        }
+    }
+
+    @Test
+    fun binding_index_leaves_out_a_class_a_writer_failed_on() = runBlocking {
+        val dir = File.createTempDir("krapper_loss_path_index")
+        try {
+            val headerFile = File(dir, "p.h").also { it.writeText(header) }
+            val out = File(dir, "out")
+            val service = KrapperServiceImpl()
+            service.setConfig(
+                KrapperConfig(
+                    pkg = "p",
+                    compiler = "clang++",
+                    moduleName = "P",
+                    errorPolicy = ErrorPolicy.LOG,
+                    referencePolicy = ReferencePolicy.OPAQUE_MISSING,
+                    debug = false
+                )
+            )
+            val indexed = service.index(IndexRequest(listOf(headerFile.path), emptyList()))
+            indexed.filterAndResolve(AllowListFilter(listOf("p::Derived", "p::Val")))
+            indexed.writeTo(out.path)
+            val index = json.decodeFromString(
+                BindingIndex.serializer(),
+                File(out, BindingIndex.FILE_NAME).readText()
+            )
+            assertEquals(
+                listOf("p::Val"),
+                index.bindings.map { it.spec },
+                "the index must not advertise a class with no .kt"
+            )
+            assertEquals(
+                listOf("p::Derived" to DiagnosticPhase.GENERATE),
+                index.drops.map { it.symbol to it.phase }
+            )
+            assertFalse("Derived" in File(out, "P.h").readText() + File(out, "P.cc").readText())
+        } finally {
+            dir.rmR()
+        }
     }
 }
