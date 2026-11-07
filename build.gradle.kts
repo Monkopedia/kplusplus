@@ -1,3 +1,6 @@
+import org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.ktlint)
@@ -6,6 +9,10 @@ plugins {
 repositories {
     mavenCentral()
 }
+
+// #262: the native-runner form of a Gradle test pattern (see the KotlinNativeTest block below).
+fun withSimpleNames(patterns: Set<String>) =
+    patterns.flatMap { if (it.first().isUpperCase()) listOf(it, "*.$it") else listOf(it) }
 
 subprojects {
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
@@ -46,6 +53,62 @@ subprojects {
     // root build's classpath; matching a task that is not klinker's would only order it.
     tasks.withType<org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask>().configureEach {
         mustRunAfter(provider { tasks.matching { it.name.startsWith("generateKotlinSource") } })
+    }
+
+    // #262: KotlinNativeTest hands `--tests` patterns VERBATIM to test.kexe
+    // (`--ktest_gradle_filter`), which matches only the FULLY-QUALIFIED class or test name.
+    // Gradle also matches a pattern that starts upper-case against the SIMPLE class name, so
+    // `--tests InvalidDeclTest` selected nothing — and KGP sets failOnNoMatchingTests=false,
+    // so Gradle never objected: BUILD SUCCESSFUL, zero tests. Fix both halves: add the
+    // package-wildcard form Gradle implies, and fail a filtered run that executed (ran, not
+    // skipped) nothing. Unfiltered runs are untouched (CI guards those itself).
+    val testsOnCommandLine =
+        gradle.startParameter.taskRequests.any { request ->
+            request.args.any { it == "--tests" || it.startsWith("--tests=") }
+        }
+    tasks.withType<KotlinNativeTest>().configureEach {
+        // Internal API: the `--tests` patterns are only writable through the DefaultTestFilter.
+        val testFilter = filter as DefaultTestFilter
+        var executed = 0
+        addTestListener(
+            object : TestListener {
+                override fun beforeSuite(suite: TestDescriptor) {}
+
+                override fun afterSuite(
+                    suite: TestDescriptor,
+                    result: TestResult,
+                ) {}
+
+                override fun beforeTest(testDescriptor: TestDescriptor) {}
+
+                override fun afterTest(
+                    testDescriptor: TestDescriptor,
+                    result: TestResult,
+                ) {
+                    if (result.resultType != TestResult.ResultType.SKIPPED) executed++
+                }
+            },
+        )
+        doFirst {
+            setTestNameIncludePatterns(withSimpleNames(testFilter.commandLineIncludePatterns))
+            testFilter.setIncludePatterns(
+                *withSimpleNames(testFilter.includePatterns).toTypedArray(),
+            )
+            executed = 0
+        }
+        doLast {
+            // The same getter KGP builds `--ktest_gradle_filter` from, so the guard cannot
+            // disagree with the run about what was filtered.
+            val patterns = includePatterns
+            if (testsOnCommandLine && patterns.isEmpty()) {
+                throw GradleException(
+                    "$path: `--tests` was given but no include patterns were read",
+                )
+            }
+            if (patterns.isNotEmpty() && executed == 0) {
+                throw GradleException("$path executed zero tests for filter $patterns")
+            }
+        }
     }
 }
 
