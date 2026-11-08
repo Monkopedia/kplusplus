@@ -310,7 +310,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             cppFile,
             "$pkg.internal",
             srcDir,
-            config.errorPolicy.policy
+            config.errorPolicy.policy,
+            config.referencePolicy
         )
         File(outputBase, "${config.moduleName}.h").writeText(bindings.header)
         cppFile.writeText(bindings.wrapper)
