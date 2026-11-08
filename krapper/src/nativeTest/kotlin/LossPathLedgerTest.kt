@@ -38,6 +38,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.ReturnStyle
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -54,6 +55,8 @@ import kotlinx.serialization.json.Json
  *    drop, and absent from EVERY output, binding-index.json included (#253, #260).
  *  - A member one writer fails on, or fails on half-way, must be absent from every output
  *    while its class keeps the rest (#260).
+ *  - An element that names a class dropped at codegen follows the run's ReferencePolicy, as an
+ *    unlisted reference does, and is ledgered with that class as its cause (#265).
  *  - The must-differ cases: a clean config drops nothing and emits exactly what the writers do.
  */
 class LossPathLedgerTest {
@@ -65,6 +68,7 @@ class LossPathLedgerTest {
         namespace p {
         struct Base { int bv(); };
         struct Derived : Base { int dv(); };
+        struct User { Derived* d(); void take(Derived* x); int u(); };
         struct Val { int x; };
         struct Holder { int hv(); Val make(); Val v; };
         struct Res { ~Res(); int rv(); };
@@ -104,7 +108,8 @@ class LossPathLedgerTest {
                     File(dir, "P.cc"),
                     "p.internal",
                     srcDir,
-                    LogPolicy
+                    LogPolicy,
+                    policy
                 )
                 Output(
                     run.drops.drops.toList(),
@@ -250,7 +255,7 @@ class LossPathLedgerTest {
                 val resolver = parseHeader(headerFile.path, "c++14")
                 val classes = resolver.findClasses(
                     AllowListFilter(
-                        listOf("p::Base", "p::Derived", "p::Holder", "p::Res", "p::Val")
+                        listOf("p::Base", "p::Derived", "p::Holder", "p::Res", "p::User", "p::Val")
                     )
                         .wrapperFilter()
                 ).resolveAll(resolver, ReferencePolicy.OPAQUE_MISSING)
@@ -264,7 +269,8 @@ class LossPathLedgerTest {
                     cppFile,
                     "p.internal",
                     viaBindings,
-                    LogPolicy
+                    LogPolicy,
+                    ReferencePolicy.OPAQUE_MISSING
                 )
                 assertEquals(
                     CppCodeBuilder().also {
@@ -327,5 +333,80 @@ class LossPathLedgerTest {
         } finally {
             dir.rmR()
         }
+    }
+
+    /** Generate User with its referenced classes listed, and [spec]'s `size_of` broken. */
+    private fun generateUserWithDropped(spec: String, policy: ReferencePolicy) =
+        generate(listOf("p::Base", "p::Derived", "p::User"), policy) { model ->
+            model.cls(spec).children.filterIsInstance<ResolvedMethod>()
+                .single { it.methodType == MethodType.SIZE_OF }.uniqueCName = null
+        }
+
+    /**
+     * A class dropped at codegen is treated as unlisted on the next pass (#265): a member that
+     * names it would otherwise keep `fun d(): Derived?` in a `.kt` that cannot compile.
+     */
+    private fun assertUserLosesWhatReferencesDerived(policy: ReferencePolicy) {
+        val out = generateUserWithDropped("p::Derived", policy)
+        val user = out.kotlin.getValue("p_User.kt")
+        assertFalse("Derived" in user, "User must not name the dropped class:\n$user")
+        assertFalse(
+            "p_User_d" in out.all || "p_User_take" in out.all,
+            "the referencing members must be gone from every output:\n${out.all}"
+        )
+        assertTrue("fun u(" in user && "p_User_u" in out.cWrapper, "User keeps the rest")
+        assertEquals(
+            listOf("p::Derived", "p::User::d", "p::User::take"),
+            out.drops.map { it.symbol }
+        )
+        for (drop in out.drops.drop(1)) {
+            assertEquals(DropPhase.GENERATE, drop.phase)
+            assertTrue(
+                "references p::Derived, which was dropped" in drop.reason,
+                "the ledger must name the root cause: $drop"
+            )
+        }
+    }
+
+    @Test
+    fun member_naming_a_dropped_class_is_dropped_under_ignore_missing() =
+        assertUserLosesWhatReferencesDerived(ReferencePolicy.IGNORE_MISSING)
+
+    @Test
+    fun member_naming_a_dropped_class_is_dropped_under_opaque_missing() =
+        assertUserLosesWhatReferencesDerived(ReferencePolicy.OPAQUE_MISSING)
+
+    @Test
+    fun member_naming_a_dropped_class_is_dropped_under_include_missing() =
+        assertUserLosesWhatReferencesDerived(ReferencePolicy.INCLUDE_MISSING)
+
+    @Test
+    fun member_naming_a_dropped_class_fails_the_run_under_throw_missing() {
+        val e = assertFailsWith<IllegalStateException> {
+            generateUserWithDropped("p::Derived", ReferencePolicy.THROW_MISSING)
+        }
+        assertTrue("p::Derived" in e.message.orEmpty(), "name the dropped class: ${e.message}")
+    }
+
+    @Test
+    fun drops_cascade_through_a_dropped_base_and_each_names_its_cause() {
+        val out = generateUserWithDropped("p::Base", ReferencePolicy.IGNORE_MISSING)
+        assertEquals(
+            listOf("p::Base", "p::Derived", "p::User::d", "p::User::take"),
+            out.drops.map { it.symbol }
+        )
+        val reasons = out.drops.associate { it.symbol to it.reason }
+        for ((symbol, cause) in listOf(
+            "p::Derived" to "p::Base",
+            "p::User::d" to "p::Derived",
+            "p::User::take" to "p::Derived"
+        )) {
+            assertTrue(
+                "references $cause, which was dropped" in reasons.getValue(symbol),
+                "$symbol must name $cause as its cause: ${reasons[symbol]}"
+            )
+        }
+        assertEquals(listOf("p_User.kt"), out.kotlin.keys.toList())
+        assertFalse("Derived" in out.all || "Base" in out.all, out.all)
     }
 }

@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.codegen
 
+import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.builders.CodeGenerationPolicy
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
@@ -23,6 +24,8 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedElement
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedField
 import com.monkopedia.krapper.generator.resolvedmodel.ResolvedMethod
 import com.monkopedia.krapper.generator.resolvedmodel.recursiveSequence
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedCppType
+import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedKotlinType
 
 /** What [generateBindings] emitted: the `.h` and `.cc` text, and the model all writers used. */
 class GeneratedBindings(val header: String, val wrapper: String, val emitted: List<ResolvedElement>)
@@ -39,10 +42,17 @@ class GeneratedBindings(val header: String, val wrapper: String, val emitted: Li
  * for the members a class cannot ship without (see [FailureCollector]). Nothing a writer
  * half-wrote survives, and each failure is ledgered once. A clean model takes one pass.
  *
+ * A dropped class is then treated as unlisted, under the run's [referencePolicy] (#265): an
+ * element that names it (a member's signature, a class's base or template argument) would
+ * otherwise emit a reference to a binding that no longer exists. Under `THROW_MISSING` that
+ * fails the run, as an unlisted reference fails resolution; under every other policy the
+ * element is dropped too, ledgered with the dropped class as its cause. (`OPAQUE_MISSING`
+ * would retype it to `void*` at resolve time, but that rewrite does not compile in the C++
+ * wrapper for a class reference, so it is not reproduced here.) A class dropped this way is
+ * a cause in turn; each round removes what it reports, so the cascade ends within the pass.
+ *
  * Every failure names an element of the model, so each failing pass removes at least one and
- * this terminates. A writer that fails on something only because an earlier pass removed it
- * (a derived class whose base was dropped) is dropped and ledgered in turn. A class that merely
- * REFERENCES a dropped class is not: its signatures still name the missing binding.
+ * this terminates.
  */
 fun generateBindings(
     moduleName: String,
@@ -51,9 +61,12 @@ fun generateBindings(
     cppFile: File,
     kotlinPkg: String,
     srcDir: File,
-    policy: CodeGenerationPolicy
+    policy: CodeGenerationPolicy,
+    referencePolicy: ReferencePolicy
 ): GeneratedBindings {
     var model = classes
+    // Kotlin FQ name -> C++ spec of every class dropped so far.
+    val dropped = mutableMapOf<String, String>()
     while (true) {
         val failures = FailureCollector(policy)
         val header = CppCodeBuilder().also {
@@ -67,7 +80,15 @@ fun generateBindings(
         }.toString()
         KotlinWriter(kotlinPkg, failures).generate(srcDir, model)
         if (failures.failed.isEmpty()) return GeneratedBindings(header, wrapper, model)
-        val remaining = model.without(failures.failed)
+        var remaining = model
+        var removed = 0
+        while (failures.failed.size > removed) {
+            removed = failures.failed.size
+            failures.failed.filterIsInstance<ResolvedClass>()
+                .associateTo(dropped) { it.type.kotlinType.fullyQualified to it.type.toString() }
+            remaining = remaining.without(failures.failed)
+            remaining.failReferencesTo(dropped, referencePolicy, failures)
+        }
         check(remaining.recursiveSequence().count() < model.recursiveSequence().count()) {
             "a failing generation pass removed nothing: ${failures.failed}"
         }
@@ -116,6 +137,60 @@ private class FailureCollector(private val policy: CodeGenerationPolicy) : CodeG
     private companion object {
         val CLASS_CRITICAL = setOf(MethodType.DESTRUCTOR, MethodType.SIZE_OF, MethodType.ALIGN_OF)
     }
+}
+
+/**
+ * Report to [failures] every element that names a class in [dropped] (Kotlin FQ name -> C++
+ * spec), or fail the run under `THROW_MISSING`. A class that names one is reported whole, so
+ * its members are not inspected.
+ */
+private fun List<ResolvedElement>.failReferencesTo(
+    dropped: Map<String, String>,
+    referencePolicy: ReferencePolicy,
+    failures: FailureCollector
+) {
+    for (element in this) {
+        val cause = element.namedKotlinTypes().flatMap { it.fqNames }
+            .firstNotNullOfOrNull { dropped[it] }
+        if (cause == null) {
+            element.children.failReferencesTo(dropped, referencePolicy, failures)
+            continue
+        }
+        val reason = "references $cause, which was dropped"
+        if (referencePolicy == ReferencePolicy.THROW_MISSING) error("$element $reason")
+        val t = IllegalStateException(reason)
+        when (element) {
+            is ResolvedClass -> failures.onGenerateClassFailed(element, t)
+
+            is ResolvedMethod -> failures.onGenerateMethodFailed(
+                element.parent as? ResolvedClass,
+                element,
+                t
+            )
+
+            is ResolvedField -> failures.onGenerateFieldFailed(
+                element.parent as ResolvedClass,
+                element,
+                t
+            )
+        }
+    }
+}
+
+/** The Kotlin types [this] itself names in the generated bindings, its children excluded. */
+private fun ResolvedElement.namedKotlinTypes(): List<ResolvedKotlinType> = when (this) {
+    is ResolvedClass ->
+        (listOfNotNull(baseClass) + allBaseClasses.map { it.type })
+            .filterIsInstance<ResolvedCppType>().map { it.kotlinType } + type.kotlinType.templates
+
+    is ResolvedMethod ->
+        (args.flatMap { listOf(it.type, it.signatureType) } + returnType).map { it.kotlinType }
+
+    is ResolvedField ->
+        listOf(kotlinType, getter.returnType.kotlinType) +
+            setter.argument.flatMap { listOf(it.type.kotlinType, it.signatureType.kotlinType) }
+
+    else -> emptyList()
 }
 
 /**
