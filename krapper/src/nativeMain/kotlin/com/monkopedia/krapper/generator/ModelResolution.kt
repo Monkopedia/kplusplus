@@ -33,6 +33,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.qualified
+import com.monkopedia.krapper.generator.model.type.WrappedOpaqueType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
@@ -90,6 +91,14 @@ val ResolvedElement.parentClass: ResolvedClass?
     get() = (parent as? ResolvedClass) ?: parent?.parentClass
 val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
+
+// A copy of an unlisted class would need an owner the Kotlin side can neither size nor
+// destroy, so only its address is bound (#268).
+private const val OPAQUE_BY_VALUE =
+    "Unlisted class by value: OPAQUE_MISSING binds only a pointer or reference to it"
+
+private val WrappedType.isOpaqueValue: Boolean
+    get() = (if (this is WrappedPrefixedType) baseType else this) is WrappedOpaqueType
 
 // The else branch covers WrappedBase / WrappedArgument / WrappedTemplateParam, which
 // have no standalone resolution (they resolve as part of their owning class/method).
@@ -550,6 +559,9 @@ private suspend fun WrappedMethod.resolvePlainMethod(
         } else {
             mapped
         }
+    if (rawMapping.isOpaqueValue) {
+        return resolverContext.notifyFailed(this@resolvePlainMethod, returnType, OPAQUE_BY_VALUE)
+    }
     val returnStyle = determineReturnStyle(rawMapping, resolverContext)
     // A by-value class return is copy-constructed into a scope-bound Holder via
     // placement-new (ARG_CAST). Two element-type problems make that emission
@@ -773,6 +785,9 @@ suspend fun WrappedField.resolve(resolverContext: ResolveContext): ResolvedField
     with(resolverContext.currentNamer) {
         val (mappedType, resolvedType) = resolverContext.mapAndResolve(type)
             ?: return resolverContext.notifyFailed(this@resolve, type, "Field type")
+        if (mappedType.isOpaqueValue) {
+            return resolverContext.notifyFailed(this@resolve, type, OPAQUE_BY_VALUE)
+        }
         val type =
             if (mappedType.isReference) {
                 val unreferenced = mappedType.unreferenced

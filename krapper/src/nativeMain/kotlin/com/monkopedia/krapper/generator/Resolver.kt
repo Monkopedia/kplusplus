@@ -32,6 +32,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.kotlinType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
 import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
+import com.monkopedia.krapper.generator.model.type.WrappedOpaqueType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -710,12 +711,16 @@ private fun typeMapper(policy: ReferencePolicy): TypeMapping {
             }
         }
 
+        // Keep the C++ spelling (the wrapper casts its `void*` back to it) but give the
+        // unresolvable class no binding; a by-value use is dropped where it is resolved
+        // (#268). Replacing the class with `void*` made `T*` a `void**` the wrapper could
+        // not pass to `T*`.
         ReferencePolicy.OPAQUE_MISSING -> { t, context ->
             t.operateOn {
-                if (context.tracker.canResolve(it, context)) {
+                if (it is WrappedOpaqueType || context.tracker.canResolve(it, context)) {
                     ElementUnchanged
                 } else {
-                    ReplaceWith(pointerTo(WrappedType.VOID))
+                    ReplaceWith(WrappedOpaqueType(it))
                 }
             }
         }

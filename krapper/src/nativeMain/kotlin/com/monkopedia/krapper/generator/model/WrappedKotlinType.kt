@@ -26,6 +26,7 @@ import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
+import com.monkopedia.krapper.generator.model.type.WrappedOpaqueType
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
 import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -162,6 +163,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 }
         )
     }
+    if (type is WrappedOpaqueType) return fullyQualifiedType(C_OPAQUE_POINTER)
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     // An enum with recoverable constants surfaces as a generated Kotlin `enum
     // class` (named after the enum's C++ spelling, in the same package a wrapper
@@ -185,6 +187,8 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
         if (baseType == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
         }
+        // The address of a class OPAQUE_MISSING keeps unbound (#268).
+        if (baseType is WrappedOpaqueType) return nullable(fullyQualifiedType(C_OPAQUE_POINTER))
         if (baseType.isPointer && baseType.pointed.isNative) {
             if (baseType.pointed == WrappedType.VOID) {
                 return nullable(
