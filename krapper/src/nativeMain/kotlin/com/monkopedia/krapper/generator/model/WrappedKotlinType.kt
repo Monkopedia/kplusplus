@@ -163,6 +163,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
                 }
         )
     }
+    // A class OPAQUE_MISSING leaves unbound (#268); a pointer to one is nullable, below.
     if (type is WrappedOpaqueType) return fullyQualifiedType(C_OPAQUE_POINTER)
     if (type is WrappedTemplateRef) throw IllegalArgumentException("Can't convert $type to kotlin")
     // An enum with recoverable constants surfaces as a generated Kotlin `enum
@@ -187,8 +188,6 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
         if (baseType == WrappedType.VOID) {
             return fullyQualifiedType(C_OPAQUE_POINTER)
         }
-        // The address of a class OPAQUE_MISSING keeps unbound (#268).
-        if (baseType is WrappedOpaqueType) return nullable(fullyQualifiedType(C_OPAQUE_POINTER))
         if (baseType.isPointer && baseType.pointed.isNative) {
             if (baseType.pointed == WrappedType.VOID) {
                 return nullable(
