@@ -92,8 +92,10 @@ val ResolvedElement.parentClass: ResolvedClass?
 val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
 
-// A copy of an unlisted class would need an owner the Kotlin side can neither size nor
-// destroy, so only its address is bound (#268).
+// Only the address of an unlisted class is bound (#268). A by-value return or field would need
+// an owner the Kotlin side can neither size nor destroy, and a by-value argument is copied
+// from `*arg` in the wrapper, which does not compile for a forward-declared or non-copyable
+// class and fails the whole module.
 private const val OPAQUE_BY_VALUE =
     "Unlisted class by value: OPAQUE_MISSING binds only a pointer or reference to it"
 
@@ -715,6 +717,9 @@ suspend fun WrappedArgument.resolveArgument(resolverContext: ResolveContext): Re
     val mapped =
         resolverContext.mapAndResolve(unreferencedType)
             ?: return resolverContext.notifyFailed(this, unreferencedType, "Missing type $type")
+    if (!type.isReference && mapped.first.isOpaqueValue) {
+        return resolverContext.notifyFailed(this, type, OPAQUE_BY_VALUE)
+    }
     var type = mapped.first
     var resolved = mapped.second
     // A TOP-LEVEL `const` on a POINTER passed by value is meaningless (the wrapper

@@ -37,10 +37,12 @@ import kotlinx.serialization.json.Json
  */
 class OpaqueMissingTest {
 
-    private val header = """
+    /** [derived] declares `p::Derived`: forward only, as an unlisted class often is, or defined. */
+    private fun header(derived: String) = """
         #pragma once
         namespace p {
-        struct Derived { int dv(); };
+        $derived
+        struct Val { int x; };
         struct User {
             Derived* d();
             void take(Derived* x);
@@ -53,7 +55,7 @@ class OpaqueMissingTest {
             void takeVal(Derived x);
             Derived byval();
             const Derived cbyval();
-            Derived f;
+            Val f;
             Derived* fp;
             int u();
         };
@@ -63,10 +65,14 @@ class OpaqueMissingTest {
     private class Output(val index: BindingIndex, val wrapper: String, val user: String)
 
     /** Generate and compile [only] under [policy]; the wrapper compile throws if it fails. */
-    private fun generate(only: List<String>, policy: ReferencePolicy): Output = runBlocking {
+    private fun generate(
+        only: List<String>,
+        policy: ReferencePolicy,
+        derived: String = "struct Derived;"
+    ): Output = runBlocking {
         val dir = File.createTempDir("krapper_opaque_missing")
         try {
-            val headerFile = File(dir, "p.h").also { it.writeText(header) }
+            val headerFile = File(dir, "p.h").also { it.writeText(header(derived)) }
             val out = File(dir, "out")
             val service = KrapperServiceImpl()
             service.setConfig(
@@ -123,7 +129,6 @@ class OpaqueMissingTest {
             "fun r(): COpaquePointer?",
             "fun takeRef(x: COpaquePointer)",
             "fun pp(): COpaquePointer?",
-            "fun takeVal(x: COpaquePointer)",
             "var fp: COpaquePointer?"
         )) {
             assertTrue(member in out.user, "missing `$member`:\n${out.user}")
@@ -131,27 +136,45 @@ class OpaqueMissingTest {
         assertFalse("Derived" in out.user, "Kotlin must not name the unbound class:\n${out.user}")
     }
 
+    /**
+     * A by-value argument would be copied from `*x` in the wrapper, which does not compile for a
+     * forward-declared or non-copyable class and fails the whole module.
+     */
     @Test
     fun by_value_unlisted_class_is_dropped_and_ledgered() {
         val out = generate(listOf("p::User"), ReferencePolicy.OPAQUE_MISSING)
+        val takeVal = "fun takeVal(x: p::Derived): void"
         assertEquals(
-            listOf("f: p::Derived", "fun byval(): p::Derived", "fun cbyval(): const p::Derived"),
-            out.index.drops.map { it.symbol }
+            setOf(
+                "f: p::Val",
+                "fun byval(): p::Derived",
+                "fun cbyval(): const p::Derived",
+                "x: p::Derived",
+                takeVal
+            ),
+            out.index.drops.map { it.symbol }.toSet()
         )
-        for (drop in out.index.drops) {
+        // The argument carries the reason; its method is ledgered as failing from it.
+        for (drop in out.index.drops.filter { it.symbol != takeVal }) {
             assertTrue("OPAQUE_MISSING binds only a pointer or reference" in drop.message, "$drop")
         }
-        assertFalse("byval" in out.wrapper + out.user, out.wrapper)
-        assertFalse("p_User_f_" in out.wrapper + out.user, out.wrapper)
+        for (member in listOf("byval", "take_val", "takeVal", "p_User_f_")) {
+            assertFalse(member in out.wrapper + out.user, "$member must be gone:\n${out.wrapper}")
+        }
         assertTrue("fun u(): Int" in out.user, "User keeps the rest:\n${out.user}")
     }
 
     /** Must-differ: a listed class is still bound as itself, by value too. */
     @Test
     fun listed_class_is_still_bound_as_its_wrapper() {
-        val out = generate(listOf("p::User", "p::Derived"), ReferencePolicy.OPAQUE_MISSING)
+        val out = generate(
+            listOf("p::User", "p::Derived", "p::Val"),
+            ReferencePolicy.OPAQUE_MISSING,
+            derived = "struct Derived { int dv(); };"
+        )
         assertTrue("fun d(): Derived?" in out.user, out.user)
         assertTrue("fun byval(): Derived" in out.user, out.user)
+        assertTrue("fun takeVal(x: Derived)" in out.user, out.user)
         assertFalse("COpaquePointer?" in out.user.substringAfter("fun d()"), out.user)
         assertEquals(emptyList(), out.index.drops)
     }

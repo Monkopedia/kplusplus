@@ -18,8 +18,8 @@ package com.monkopedia.krapper.generator.model.type
 /**
  * An unresolvable class kept under `OPAQUE_MISSING` (#268). It spells exactly as [type], so a
  * wrapper still casts its `void*` to the real C++ pointer, but it has no binding: Kotlin sees
- * `COpaquePointer`. A by-value return or field is dropped, since Kotlin could neither size nor
- * destroy the copy; a by-value argument is copied from the caller's object, so it binds.
+ * `COpaquePointer`. Any by-value use is dropped: a copy needs the class complete and copyable,
+ * and an unlisted class is often only forward-declared.
  */
 class WrappedOpaqueType(val type: WrappedType) : WrappedType() {
     override val cType: WrappedType
