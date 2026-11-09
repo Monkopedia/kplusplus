@@ -47,9 +47,10 @@ class GeneratedBindings(val header: String, val wrapper: String, val emitted: Li
  * otherwise emit a reference to a binding that no longer exists. Under `THROW_MISSING` that
  * fails the run, as an unlisted reference fails resolution; under every other policy the
  * element is dropped too, ledgered with the dropped class as its cause. (`OPAQUE_MISSING`
- * would retype it to `void*` at resolve time, but that rewrite does not compile in the C++
- * wrapper for a class reference, so it is not reproduced here.) A class dropped this way is
- * a cause in turn; each round removes what it reports, so the cascade ends within the pass.
+ * retypes a pointer or reference to an unlisted class at resolve time; a class dropped here is
+ * known only after resolution, so what names it is dropped rather than re-resolved.) A class
+ * dropped this way is a cause in turn; each round removes what it reports, so the cascade ends
+ * within the pass.
  *
  * Every failure names an element of the model, so each failing pass removes at least one and
  * this terminates.

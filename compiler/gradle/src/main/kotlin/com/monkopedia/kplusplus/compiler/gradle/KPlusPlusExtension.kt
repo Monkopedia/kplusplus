@@ -126,8 +126,9 @@ open class KPlusPlusExtension {
     /**
      * Reference policy for types referenced-but-not-listed (forwarded to krapper
      * as `-r`/`--referencePolicy`). One of `INCLUDE_MISSING` (default — recursively bind
-     * referenced types), `IGNORE_MISSING` (drop them), `OPAQUE_MISSING` (bind as opaque
-     * pointers), `THROW_MISSING`. For a SCOPED import of a large library (see [only]),
+     * referenced types), `IGNORE_MISSING` (drop them), `OPAQUE_MISSING` (bind a pointer or
+     * reference to one as a `COpaquePointer`, and drop any by-value use of one),
+     * `THROW_MISSING`. For a SCOPED import of a large library (see [only]),
      * `IGNORE_MISSING` is what keeps the bound surface to the allowlist instead of
      * exploding into the whole transitive closure. Null leaves the historical
      * `INCLUDE_MISSING`.

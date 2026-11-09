@@ -33,6 +33,7 @@ import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.parentClass
 import com.monkopedia.krapper.generator.model.qualified
+import com.monkopedia.krapper.generator.model.type.WrappedOpaqueType
 import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.LONG_DOUBLE
@@ -90,6 +91,16 @@ val ResolvedElement.parentClass: ResolvedClass?
     get() = (parent as? ResolvedClass) ?: parent?.parentClass
 val ResolvedElement.baseParent: ResolvedElement
     get() = parent?.baseParent ?: parent ?: this
+
+// Only the address of an unlisted class is bound (#268). A by-value return or field would need
+// an owner the Kotlin side can neither size nor destroy, and a by-value argument is copied
+// from `*arg` in the wrapper, which does not compile for a forward-declared or non-copyable
+// class and fails the whole module.
+private const val OPAQUE_BY_VALUE =
+    "Unlisted class by value: OPAQUE_MISSING binds only a pointer or reference to it"
+
+private val WrappedType.isOpaqueValue: Boolean
+    get() = (if (this is WrappedPrefixedType) baseType else this) is WrappedOpaqueType
 
 // The else branch covers WrappedBase / WrappedArgument / WrappedTemplateParam, which
 // have no standalone resolution (they resolve as part of their owning class/method).
@@ -550,6 +561,9 @@ private suspend fun WrappedMethod.resolvePlainMethod(
         } else {
             mapped
         }
+    if (rawMapping.isOpaqueValue) {
+        return resolverContext.notifyFailed(this@resolvePlainMethod, returnType, OPAQUE_BY_VALUE)
+    }
     val returnStyle = determineReturnStyle(rawMapping, resolverContext)
     // A by-value class return is copy-constructed into a scope-bound Holder via
     // placement-new (ARG_CAST). Two element-type problems make that emission
@@ -703,6 +717,9 @@ suspend fun WrappedArgument.resolveArgument(resolverContext: ResolveContext): Re
     val mapped =
         resolverContext.mapAndResolve(unreferencedType)
             ?: return resolverContext.notifyFailed(this, unreferencedType, "Missing type $type")
+    if (!type.isReference && mapped.first.isOpaqueValue) {
+        return resolverContext.notifyFailed(this, type, OPAQUE_BY_VALUE)
+    }
     var type = mapped.first
     var resolved = mapped.second
     // A TOP-LEVEL `const` on a POINTER passed by value is meaningless (the wrapper
@@ -773,6 +790,9 @@ suspend fun WrappedField.resolve(resolverContext: ResolveContext): ResolvedField
     with(resolverContext.currentNamer) {
         val (mappedType, resolvedType) = resolverContext.mapAndResolve(type)
             ?: return resolverContext.notifyFailed(this@resolve, type, "Field type")
+        if (mappedType.isOpaqueValue) {
+            return resolverContext.notifyFailed(this@resolve, type, OPAQUE_BY_VALUE)
+        }
         val type =
             if (mappedType.isReference) {
                 val unreferenced = mappedType.unreferenced
