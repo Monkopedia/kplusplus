@@ -147,6 +147,27 @@ inline clang::SourceLocation writtenEnd(const clang::Decl *member, const clang::
     }
 }
 
+// Within its written extent, is [loc] in [decl]'s own declarator? A field or variable written
+// in a group (`int a = 1, b;`) shares its begin — the `int` — with its siblings, and through
+// writtenEnd their `;`, so each one is cut down to its own declarator: from its name (the
+// first keeps the shared specifiers) up to the next sibling's name. A `,` can't mark that
+// boundary: `f<1, 2>()` has one inside a declarator. Locations compare in expanded order, as
+// in ownsParseError.
+inline bool inOwnDeclarator(const clang::Decl *decl, clang::SourceLocation loc,
+                            const clang::SourceManager &sm) {
+    if (!llvm::isa<clang::FieldDecl, clang::VarDecl>(decl)) return true;
+    auto sharesBegin = [&](const clang::Decl *sibling) {
+        return sibling && sibling->getBeginLoc() == decl->getBeginLoc();
+    };
+    const clang::Decl *next = decl->getNextDeclInContext();
+    if (sharesBegin(next) && !sm.isBeforeInTranslationUnit(loc, next->getLocation())) return false;
+    for (const clang::Decl *prev : decl->getLexicalDeclContext()->decls()) {
+        if (prev->getNextDeclInContext() == decl)
+            return !sharesBegin(prev) || !sm.isBeforeInTranslationUnit(loc, decl->getLocation());
+    }
+    return true;
+}
+
 // #257: does a parse error of the last parse belong to [decl] itself? It does when the error
 // lies inside the declaration's written source range and outside every member's written
 // extent: the INNERMOST declaration whose source holds an error owns it. That is what catches
@@ -174,7 +195,8 @@ inline bool ownsParseError(const clang::Decl *decl) {
     auto holds = [&](const clang::Decl *holder, clang::SourceLocation loc) {
         clang::SourceRange range = holder->getSourceRange();
         return range.isValid() && !sm.isBeforeInTranslationUnit(loc, range.getBegin()) &&
-               !sm.isBeforeInTranslationUnit(writtenEnd(holder, sm, lang), loc);
+               !sm.isBeforeInTranslationUnit(writtenEnd(holder, sm, lang), loc) &&
+               inOwnDeclarator(holder, loc, sm);
     };
     // A record's or enum's members; a field or variable has none.
     const auto *context = llvm::dyn_cast<clang::DeclContext>(decl);

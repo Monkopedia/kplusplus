@@ -496,6 +496,38 @@ class InvalidDeclTest {
         assertEquals(1, out.drops.count { it.symbol == "p::R" }, "[$body] ${out.drops}")
     }
 
+    // Every declarator of `int a, b;` begins at the shared `int` and runs on to the shared
+    // `;`, so each one's extent is its own declarator: from its name to the next sibling's.
+    @Test
+    fun an_initializer_error_on_the_first_declarator_drops_only_it() =
+        assertFieldOwnsError("int a = undeclared, b;", guilty = "a", innocent = listOf("b"))
+
+    @Test
+    fun an_initializer_error_on_the_last_declarator_drops_only_it() =
+        assertFieldOwnsError("int a, b = undeclared;", guilty = "b", innocent = listOf("a"))
+
+    @Test
+    fun a_bit_field_width_error_in_a_multi_declarator_line_drops_only_its_declarator() =
+        assertFieldOwnsError("int a : undeclared, b : 2;", guilty = "a", innocent = listOf("b"))
+
+    @Test
+    fun a_macro_argument_multi_declarator_line_drops_only_the_bad_declarator() =
+        assertFieldOwnsError(
+            "FWD(int a = 1, b = undeclared;)",
+            guilty = "b",
+            innocent = listOf("a"),
+            prelude = "#define FWD(...) __VA_ARGS__"
+        )
+
+    // A `,` inside a template argument list is not a declarator boundary.
+    @Test
+    fun a_template_argument_comma_does_not_split_a_declarator() = assertFieldOwnsError(
+        "int x = f<1, 2>(), y = undeclared;",
+        guilty = "y",
+        innocent = listOf("x"),
+        prelude = "template <int A, int B> int f() { return A + B; }"
+    )
+
     // The `;` that ends a field is the first outside brackets, string and character literals
     // and comments, in expanded order.
     @Test
