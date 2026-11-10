@@ -471,6 +471,62 @@ class InvalidDeclTest {
         assertEquals(1, bad.drops.count { it.symbol == "p::Bh" }, "${bad.drops}")
     }
 
+    // Runs `struct R { [body] int k(); }` and asserts the error is [guilty]'s alone: R binds,
+    // [guilty] is ledgered and not emitted, and every [innocent] field still emits.
+    private fun assertFieldOwnsError(
+        body: String,
+        guilty: String,
+        innocent: List<String> = emptyList(),
+        prelude: String = ""
+    ) {
+        val out = generate("$prelude\nnamespace p {\nstruct R { $body int k(); };\n}\n")
+        assertTrue("p::R" in out.bound, "[$body] R must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol == "p::R" }, "[$body] ${out.drops}")
+        assertEquals(1, out.drops.count { it.symbol == "p::R::$guilty" }, "[$body] ${out.drops}")
+        assertFalse("var $guilty:" in out.kotlin, "[$body] `$guilty` must drop:\n${out.kotlin}")
+        for (name in innocent) {
+            assertTrue("var $name:" in out.kotlin, "[$body] `$name` must emit:\n${out.kotlin}")
+            assertEquals(0, out.drops.count { it.symbol == "p::R::$name" }, "[$body] ${out.drops}")
+        }
+    }
+
+    private fun assertClassOwnsError(body: String) {
+        val out = generate("namespace p {\nstruct R { $body };\n}\n")
+        assertFalse("p::R" in out.bound, "[$body] R must not bind: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::R" }, "[$body] ${out.drops}")
+    }
+
+    // The `;` that ends a field is the first outside brackets, string and character literals
+    // and comments, in expanded order.
+    @Test
+    fun a_field_extent_ends_at_its_own_semicolon() {
+        assertFieldOwnsError(
+            "int (*f)() = [] { int q = 1; return undeclared; }; int v;",
+            guilty = "f",
+            innocent = listOf("v")
+        )
+        assertFieldOwnsError(
+            "int (*f)() = [] { return 1; }; int g = undeclared; int v;",
+            guilty = "g",
+            innocent = listOf("v")
+        )
+        assertFieldOwnsError("int a[2] = {1, undeclared}; int v;", "a", listOf("v"))
+        assertFieldOwnsError("int s = sizeof(\";\") + undeclared; int v;", "s", listOf("v"))
+        assertFieldOwnsError("int c = ';' + undeclared; int v;", "c", listOf("v"))
+        assertFieldOwnsError("int x = /* ; */ undeclared; int v;", "x", listOf("v"))
+        assertFieldOwnsError("int x = // ;\nundeclared; int v;", "x", listOf("v"))
+        assertFieldOwnsError("F(x) int v;", "x", listOf("v"), "#define F(n) int n = undeclared;")
+        assertFieldOwnsError("G(x) = undeclared; int v;", "x", listOf("v"), "#define G(n) int n")
+    }
+
+    // ...and an error after that `;` that no member holds is the class's.
+    @Test
+    fun an_error_after_a_field_extent_is_the_class() {
+        assertClassOwnsError("int (*f)() = [] { return 1; }; 42; int k();")
+        assertClassOwnsError("int a{1}; 42; int k();")
+        assertClassOwnsError("int k(); int x = undeclared")
+    }
+
     // The ledger names the user's header, not the virtual `parity_base.cc` the base parse
     // runs under — both the parse-error rows and the per-declaration rows.
     @Test
