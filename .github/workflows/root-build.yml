@@ -87,6 +87,25 @@ jobs:
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-
 
+      # Restoring ~/.konan alone does NOT stop the download (#272). KGP 2.4 passes the
+      # `kotlinNativeBundleConfiguration` file collection as a parameter of its
+      # NativeVersionValueSource, and Gradle resolves it to isolate the parameters BEFORE the
+      # source checks for the `provisioned.ok` marker, so the ~200 MB `kotlin-native-prebuilt`
+      # is fetched from GitHub releases on every run, even when a complete distribution is
+      # already there. `kotlin.native.home` makes KGP skip that value source entirely. It is
+      # set only when the restored distribution matches the catalog's Kotlin version. On a
+      # cold or stale cache it is left unset, so KGP downloads as before and this cache is
+      # repopulated.
+      - name: Use the cached Kotlin/Native distribution
+        run: |
+          home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$(sed -n 's/^kotlin = "\(.*\)"/\1/p' gradle/libs.versions.toml)
+          if [ -f "$home/provisioned.ok" ]; then
+            mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
+            echo "Using cached $home"
+          else
+            echo "No provisioned $home; KGP will download it"
+          fi
+
       - name: Install LLVM/Clang 22 (apt.llvm.org)
         run: |
           set -euxo pipefail
@@ -205,6 +224,17 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-
+
+      # Same as the other job (#272).
+      - name: Use the cached Kotlin/Native distribution
+        run: |
+          home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$(sed -n 's/^kotlin = "\(.*\)"/\1/p' gradle/libs.versions.toml)
+          if [ -f "$home/provisioned.ok" ]; then
+            mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
+            echo "Using cached $home"
+          else
+            echo "No provisioned $home; KGP will download it"
+          fi
 
       - name: Install LLVM/Clang 22 (apt.llvm.org)
         run: |
