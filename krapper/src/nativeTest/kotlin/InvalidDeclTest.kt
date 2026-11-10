@@ -358,6 +358,113 @@ class InvalidDeclTest {
         assertEquals(1, out.drops.count { it.symbol == "p::E" }, "${out.drops}")
     }
 
+    // #263 — one macro expanding to a whole class collapses every expansion location onto the
+    // invocation, so a member's range seemed to hold the bad base and MB bound without it.
+    // Ownership is decided in expanded token order instead: the base lies before any member.
+    @Test
+    fun a_macro_generated_class_with_an_unknown_base_is_not_emitted() {
+        val out = generate(
+            "#define DECLARE_BAD(n) struct n : NotAThing { int m(); };\n" +
+                "namespace p {\nDECLARE_BAD(MB)\n}\n"
+        )
+        assertFalse("p::MB" in out.bound, "MB must not bind without its base: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::MB" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: the same macro over a known base binds, base included.
+    @Test
+    fun a_macro_generated_class_with_a_known_base_binds_with_it() {
+        val out = generate(
+            "#define DECLARE_OK(n) struct n : ValidBase { int m(); };\n" +
+                "namespace p {\nstruct ValidBase { int v(); };\nDECLARE_OK(MB)\n}\n"
+        )
+        val mb = out.classes.single { it.type.toString() == "p::MB" }
+        assertTrue("ValidBase" in mb.baseClass.toString(), "MB keeps its base: ${mb.baseClass}")
+        assertTrue("fun m(" in out.kotlin, out.kotlin)
+        assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
+    }
+
+    // MUST DIFFER: a macro that writes one bad MEMBER charges that member alone, whether the
+    // error is in the expansion (a method's unknown parameter) or after it (`FIELD(x) = bad;`).
+    @Test
+    fun a_macro_generated_bad_member_drops_only_the_member() {
+        val out = generate(
+            "#define FIELD(n) int n\n#define METHOD(n) void n(Handle h);\n" +
+                "namespace p {\nstruct Mf { FIELD(x) = undeclared; int k(); };\n" +
+                "struct Mm { METHOD(set) int k(); };\n}\n"
+        )
+        for (name in listOf("p::Mf", "p::Mm")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertEquals(1, out.drops.count { it.symbol == "p::Mf::x" }, "${out.drops}")
+        assertEquals(1, out.drops.count { it.symbol == "p::Mm::set" }, "${out.drops}")
+    }
+
+    // A macro that supplies its own `;` ends the member there: the `42;` after the invocation
+    // is a discarded member, the class's, just as a real discarded member after it is.
+    @Test
+    fun a_discarded_member_after_a_self_terminated_macro_field_drops_the_class() {
+        val out = generate(
+            "#define FIELD2(n) int n;\n" +
+                "namespace p {\nstruct Mg { FIELD2(x) 42; int k(); };\n" +
+                "struct Mh { FIELD2(x) NotAThing<int> y; int k(); };\n}\n"
+        )
+        for (name in listOf("p::Mg", "p::Mh")) {
+            assertFalse(name in out.bound, "$name must not bind missing a member: ${out.bound}")
+            assertEquals(1, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+    }
+
+    // MUST DIFFER (direction): a macro DEFINED inside Host and EXPANDED inside Victim charges
+    // Victim's member, never Host — order is by expansion, not by where the text is spelled.
+    @Test
+    fun a_macro_error_belongs_where_the_macro_is_expanded() {
+        val out = generate(
+            "namespace p {\nstruct Host { int h();\n#define VFIELD int z = undeclared;\n};\n" +
+                "struct Victim { VFIELD int v(); };\n}\n"
+        )
+        for (name in listOf("p::Host", "p::Victim")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertEquals(1, out.drops.count { it.symbol == "p::Victim::z" }, "${out.drops}")
+    }
+
+    // A bit-field width clang rejected leaves the field valid with no width: it would bind
+    // as a plain field. The field owns the error by its written extent, so it alone drops.
+    @Test
+    fun a_bit_field_with_a_rejected_width_drops_only_the_field() {
+        val out = generate("namespace p {\nstruct Bf { int a : undeclared; int b(); };\n}\n")
+        assertTrue("p::Bf" in out.bound, "Bf must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol == "p::Bf" }, "${out.drops}")
+        assertFalse("var a:" in out.kotlin, "`a` must not bind without its width:\n${out.kotlin}")
+        assertTrue("fun b(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::Bf::a" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: valid bit-fields bind (a multi-declarator line included, beside a
+    // brace-initialized field), while a rejected initializer on a valid width, or a discarded member after
+    // one, keeps its owner — the field, or the class.
+    @Test
+    fun a_valid_bit_field_binds_and_its_neighbours_keep_their_owners() {
+        val ok = generate(
+            "namespace p {\nstruct Bv { int a : 3; int c : 2, d : 4; int e{1}; int b(); };\n}\n"
+        )
+        for (name in listOf("a", "c", "d", "e")) {
+            assertTrue("var $name:" in ok.kotlin, "`$name` must bind:\n${ok.kotlin}")
+        }
+        assertEquals(emptyList(), ok.drops, "a clean parse ledgers nothing")
+        val bad = generate(
+            "namespace p {\nstruct Bg { int a : 3 = undeclared; int b(); };\n" +
+                "struct Bh { int a : 3; 42; int b(); };\n}\n"
+        )
+        assertTrue("p::Bg" in bad.bound, "Bg must still bind: ${bad.bound}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::Bg::a" }, "${bad.drops}")
+        assertFalse("p::Bh" in bad.bound, "Bh must not bind missing a member: ${bad.bound}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::Bh" }, "${bad.drops}")
+    }
+
     // The ledger names the user's header, not the virtual `parity_base.cc` the base parse
     // runs under — both the parse-error rows and the per-declaration rows.
     @Test
