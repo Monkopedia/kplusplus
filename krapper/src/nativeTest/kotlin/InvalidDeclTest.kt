@@ -401,19 +401,25 @@ class InvalidDeclTest {
         assertEquals(1, out.drops.count { it.symbol == "p::Mm::set" }, "${out.drops}")
     }
 
-    // A macro that supplies its own `;` ends the member there: the `42;` after the invocation
-    // is a discarded member, the class's, just as a real discarded member after it is.
+    // A macro field ends at its `;`, whether the macro supplies it or the invocation is
+    // followed by it: the `42;` after is a discarded member, the class's, just as a real
+    // discarded member after it is.
     @Test
-    fun a_discarded_member_after_a_self_terminated_macro_field_drops_the_class() {
+    fun a_discarded_member_after_a_macro_field_drops_the_class() {
         val out = generate(
-            "#define FIELD2(n) int n;\n" +
-                "namespace p {\nstruct Mg { FIELD2(x) 42; int k(); };\n" +
-                "struct Mh { FIELD2(x) NotAThing<int> y; int k(); };\n}\n"
+            "#define FIELD(n) int n\n#define FIELD2(n) int n;\n" +
+                "namespace p {\nstruct Mi { FIELD(x); 42; int k(); };\n" +
+                "struct Mg { FIELD2(x) 42; int k(); };\n" +
+                "struct Mh { FIELD2(x) NotAThing<int> y; int k(); };\n" +
+                "struct Mj { FIELD(a); FIELD2(b) FIELD2(c) int k(); };\n}\n"
         )
-        for (name in listOf("p::Mg", "p::Mh")) {
+        for (name in listOf("p::Mi", "p::Mg", "p::Mh")) {
             assertFalse(name in out.bound, "$name must not bind missing a member: ${out.bound}")
             assertEquals(1, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
         }
+        // MUST DIFFER: macro fields with no discarded member between them bind.
+        assertTrue("p::Mj" in out.bound, "Mj must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol.startsWith("p::Mj") }, "${out.drops}")
     }
 
     // MUST DIFFER (direction): a macro DEFINED inside Host and EXPANDED inside Victim charges
