@@ -358,6 +358,207 @@ class InvalidDeclTest {
         assertEquals(1, out.drops.count { it.symbol == "p::E" }, "${out.drops}")
     }
 
+    // #263 — one macro expanding to a whole class collapses every expansion location onto the
+    // invocation, so a member's range seemed to hold the bad base and MB bound without it.
+    // Ownership is decided in expanded token order instead: the base lies before any member.
+    @Test
+    fun a_macro_generated_class_with_an_unknown_base_is_not_emitted() {
+        val out = generate(
+            "#define DECLARE_BAD(n) struct n : NotAThing { int m(); };\n" +
+                "namespace p {\nDECLARE_BAD(MB)\n}\n"
+        )
+        assertFalse("p::MB" in out.bound, "MB must not bind without its base: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::MB" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: the same macro over a known base binds, base included.
+    @Test
+    fun a_macro_generated_class_with_a_known_base_binds_with_it() {
+        val out = generate(
+            "#define DECLARE_OK(n) struct n : ValidBase { int m(); };\n" +
+                "namespace p {\nstruct ValidBase { int v(); };\nDECLARE_OK(MB)\n}\n"
+        )
+        val mb = out.classes.single { it.type.toString() == "p::MB" }
+        assertTrue("ValidBase" in mb.baseClass.toString(), "MB keeps its base: ${mb.baseClass}")
+        assertTrue("fun m(" in out.kotlin, out.kotlin)
+        assertEquals(emptyList(), out.drops, "a clean parse ledgers nothing")
+    }
+
+    // MUST DIFFER: a macro that writes one bad MEMBER charges that member alone, whether the
+    // error is in the expansion (a method's unknown parameter) or after it (`FIELD(x) = bad;`).
+    @Test
+    fun a_macro_generated_bad_member_drops_only_the_member() {
+        val out = generate(
+            "#define FIELD(n) int n\n#define METHOD(n) void n(Handle h);\n" +
+                "namespace p {\nstruct Mf { FIELD(x) = undeclared; int k(); };\n" +
+                "struct Mm { METHOD(set) int k(); };\n}\n"
+        )
+        for (name in listOf("p::Mf", "p::Mm")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertEquals(1, out.drops.count { it.symbol == "p::Mf::x" }, "${out.drops}")
+        assertEquals(1, out.drops.count { it.symbol == "p::Mm::set" }, "${out.drops}")
+    }
+
+    // A macro field ends at its `;`, whether the macro supplies it or the invocation is
+    // followed by it: the `42;` after is a discarded member, the class's, just as a real
+    // discarded member after it is.
+    @Test
+    fun a_discarded_member_after_a_macro_field_drops_the_class() {
+        val out = generate(
+            "#define FIELD(n) int n\n#define FIELD2(n) int n;\n" +
+                "namespace p {\nstruct Mi { FIELD(x); 42; int k(); };\n" +
+                "struct Mg { FIELD2(x) 42; int k(); };\n" +
+                "struct Mh { FIELD2(x) NotAThing<int> y; int k(); };\n" +
+                "struct Mj { FIELD(a); FIELD2(b) FIELD2(c) int k(); };\n}\n"
+        )
+        for (name in listOf("p::Mi", "p::Mg", "p::Mh")) {
+            assertFalse(name in out.bound, "$name must not bind missing a member: ${out.bound}")
+            assertEquals(1, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        // MUST DIFFER: macro fields with no discarded member between them bind.
+        assertTrue("p::Mj" in out.bound, "Mj must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol.startsWith("p::Mj") }, "${out.drops}")
+    }
+
+    // MUST DIFFER (direction): a macro DEFINED inside Host and EXPANDED inside Victim charges
+    // Victim's member, never Host — order is by expansion, not by where the text is spelled.
+    @Test
+    fun a_macro_error_belongs_where_the_macro_is_expanded() {
+        val out = generate(
+            "namespace p {\nstruct Host { int h();\n#define VFIELD int z = undeclared;\n};\n" +
+                "struct Victim { VFIELD int v(); };\n}\n"
+        )
+        for (name in listOf("p::Host", "p::Victim")) {
+            assertTrue(name in out.bound, "$name must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == name }, "$name: ${out.drops}")
+        }
+        assertEquals(1, out.drops.count { it.symbol == "p::Victim::z" }, "${out.drops}")
+    }
+
+    // A bit-field width clang rejected leaves the field valid with no width: it would bind
+    // as a plain field. The field owns the error by its written extent, so it alone drops.
+    @Test
+    fun a_bit_field_with_a_rejected_width_drops_only_the_field() {
+        val out = generate("namespace p {\nstruct Bf { int a : undeclared; int b(); };\n}\n")
+        assertTrue("p::Bf" in out.bound, "Bf must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol == "p::Bf" }, "${out.drops}")
+        assertFalse("var a:" in out.kotlin, "`a` must not bind without its width:\n${out.kotlin}")
+        assertTrue("fun b(" in out.kotlin, out.kotlin)
+        assertEquals(1, out.drops.count { it.symbol == "p::Bf::a" }, "${out.drops}")
+    }
+
+    // MUST DIFFER: valid bit-fields bind (a multi-declarator line included, beside a
+    // brace-initialized field), while a rejected initializer on a valid width, or a discarded member after
+    // one, keeps its owner — the field, or the class.
+    @Test
+    fun a_valid_bit_field_binds_and_its_neighbours_keep_their_owners() {
+        val ok = generate(
+            "namespace p {\nstruct Bv { int a : 3; int c : 2, d : 4; int e{1}; int b(); };\n}\n"
+        )
+        for (name in listOf("a", "c", "d", "e")) {
+            assertTrue("var $name:" in ok.kotlin, "`$name` must bind:\n${ok.kotlin}")
+        }
+        assertEquals(emptyList(), ok.drops, "a clean parse ledgers nothing")
+        val bad = generate(
+            "namespace p {\nstruct Bg { int a : 3 = undeclared; int b(); };\n" +
+                "struct Bh { int a : 3; 42; int b(); };\n}\n"
+        )
+        assertTrue("p::Bg" in bad.bound, "Bg must still bind: ${bad.bound}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::Bg::a" }, "${bad.drops}")
+        assertFalse("p::Bh" in bad.bound, "Bh must not bind missing a member: ${bad.bound}")
+        assertEquals(1, bad.drops.count { it.symbol == "p::Bh" }, "${bad.drops}")
+    }
+
+    // Runs `struct R { [body] int k(); }` and asserts the error is [guilty]'s alone: R binds,
+    // [guilty] is ledgered and not emitted, and every [innocent] field still emits.
+    private fun assertFieldOwnsError(
+        body: String,
+        guilty: String,
+        innocent: List<String> = emptyList(),
+        prelude: String = ""
+    ) {
+        val out = generate("$prelude\nnamespace p {\nstruct R { $body int k(); };\n}\n")
+        assertTrue("p::R" in out.bound, "[$body] R must still bind: ${out.bound}")
+        assertEquals(0, out.drops.count { it.symbol == "p::R" }, "[$body] ${out.drops}")
+        assertEquals(1, out.drops.count { it.symbol == "p::R::$guilty" }, "[$body] ${out.drops}")
+        assertFalse("var $guilty:" in out.kotlin, "[$body] `$guilty` must drop:\n${out.kotlin}")
+        for (name in innocent) {
+            assertTrue("var $name:" in out.kotlin, "[$body] `$name` must emit:\n${out.kotlin}")
+            assertEquals(0, out.drops.count { it.symbol == "p::R::$name" }, "[$body] ${out.drops}")
+        }
+    }
+
+    private fun assertClassOwnsError(body: String) {
+        val out = generate("namespace p {\nstruct R { $body };\n}\n")
+        assertFalse("p::R" in out.bound, "[$body] R must not bind: ${out.bound}")
+        assertEquals(1, out.drops.count { it.symbol == "p::R" }, "[$body] ${out.drops}")
+    }
+
+    // Every declarator of `int a, b;` begins at the shared `int` and runs on to the shared
+    // `;`, so each one's extent is its own declarator: from its name to the next sibling's.
+    @Test
+    fun an_initializer_error_on_the_first_declarator_drops_only_it() =
+        assertFieldOwnsError("int a = undeclared, b;", guilty = "a", innocent = listOf("b"))
+
+    @Test
+    fun an_initializer_error_on_the_last_declarator_drops_only_it() =
+        assertFieldOwnsError("int a, b = undeclared;", guilty = "b", innocent = listOf("a"))
+
+    @Test
+    fun a_bit_field_width_error_in_a_multi_declarator_line_drops_only_its_declarator() =
+        assertFieldOwnsError("int a : undeclared, b : 2;", guilty = "a", innocent = listOf("b"))
+
+    @Test
+    fun a_macro_argument_multi_declarator_line_drops_only_the_bad_declarator() =
+        assertFieldOwnsError(
+            "FWD(int a = 1, b = undeclared;)",
+            guilty = "b",
+            innocent = listOf("a"),
+            prelude = "#define FWD(...) __VA_ARGS__"
+        )
+
+    // A `,` inside a template argument list is not a declarator boundary.
+    @Test
+    fun a_template_argument_comma_does_not_split_a_declarator() = assertFieldOwnsError(
+        "int x = f<1, 2>(), y = undeclared;",
+        guilty = "y",
+        innocent = listOf("x"),
+        prelude = "template <int A, int B> int f() { return A + B; }"
+    )
+
+    // The `;` that ends a field is the first outside brackets, string and character literals
+    // and comments, in expanded order.
+    @Test
+    fun a_field_extent_ends_at_its_own_semicolon() {
+        assertFieldOwnsError(
+            "int (*f)() = [] { int q = 1; return undeclared; }; int v;",
+            guilty = "f",
+            innocent = listOf("v")
+        )
+        assertFieldOwnsError(
+            "int (*f)() = [] { return 1; }; int g = undeclared; int v;",
+            guilty = "g",
+            innocent = listOf("v")
+        )
+        assertFieldOwnsError("int a[2] = {1, undeclared}; int v;", "a", listOf("v"))
+        assertFieldOwnsError("int s = sizeof(\";\") + undeclared; int v;", "s", listOf("v"))
+        assertFieldOwnsError("int c = ';' + undeclared; int v;", "c", listOf("v"))
+        assertFieldOwnsError("int x = /* ; */ undeclared; int v;", "x", listOf("v"))
+        assertFieldOwnsError("int x = // ;\nundeclared; int v;", "x", listOf("v"))
+        assertFieldOwnsError("F(x) int v;", "x", listOf("v"), "#define F(n) int n = undeclared;")
+        assertFieldOwnsError("G(x) = undeclared; int v;", "x", listOf("v"), "#define G(n) int n")
+    }
+
+    // ...and an error after that `;` that no member holds is the class's.
+    @Test
+    fun an_error_after_a_field_extent_is_the_class() {
+        assertClassOwnsError("int (*f)() = [] { return 1; }; 42; int k();")
+        assertClassOwnsError("int a{1}; 42; int k();")
+        assertClassOwnsError("int k(); int x = undeclared")
+    }
+
     // The ledger names the user's header, not the virtual `parity_base.cc` the base parse
     // runs under — both the parse-error rows and the per-declaration rows.
     @Test

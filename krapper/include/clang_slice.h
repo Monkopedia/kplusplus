@@ -16,10 +16,10 @@
 #include <clang/Lex/Lexer.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallString.h>
 
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,7 +47,7 @@ class ParseDiagCollector : public clang::DiagnosticConsumer {
 public:
     // Accumulated records in the wire format documented on lastParseDiagnostics().
     std::string records;
-    // The same errors' expansion locations, for ownsParseError (#257). Valid only against the
+    // The same errors' locations, for ownsParseError (#257). Valid only against the
     // SourceManager of the parse that produced them, which is the AST the walk reads.
     std::vector<clang::SourceLocation> errorLocations;
 
@@ -72,7 +72,7 @@ public:
         }
         std::string loc;
         if (info.hasSourceManager() && info.getLocation().isValid()) {
-            errorLocations.push_back(info.getSourceManager().getExpansionLoc(info.getLocation()));
+            errorLocations.push_back(info.getLocation());
             clang::PresumedLoc presumed =
                 info.getSourceManager().getPresumedLoc(info.getLocation());
             if (presumed.isValid() && presumed.getFilename()) {
@@ -101,61 +101,113 @@ inline ParseDiagCollector &parseDiagCollector() {
 }
 
 // Where [member] ends AS WRITTEN. Its AST range stops at the declarator when clang REJECTED
-// the initializer — `int x = undeclared;` and `static constexpr int k = undeclared;` lose
-// the initializer from the AST — so a variable or field runs on to its `;` (the first one
-// outside brackets). Anything else's AST range is already its written extent.
+// the initializer or bit-field width — `int x = undeclared;`, `int a : undeclared;` and
+// `static constexpr int k = undeclared;` lose it from the AST — so a variable or field runs on
+// to its `;` (the first one outside brackets). Anything else's AST range is already its
+// written extent.
+//
+// The scan follows the declaration's tokens as EXPANDED (#263): a macro argument continues
+// where its parameter sits in the macro body, a body token in the macro's own #define line,
+// and once that line ends, after the invocation. So a macro that supplies its own `;` ends
+// the member there, and a `42;` after the invocation is not the member's. A `;` found in a
+// macro body is returned as its location within that expansion, which is what lets
+// ownsParseError order it against the errors.
 inline clang::SourceLocation writtenEnd(const clang::Decl *member, const clang::SourceManager &sm,
                                         const clang::LangOptions &lang) {
-    clang::SourceLocation end = sm.getExpansionRange(member->getSourceRange().getEnd()).getEnd();
+    clang::SourceLocation end = member->getSourceRange().getEnd();
     if (!llvm::isa<clang::FieldDecl>(member) && !llvm::isa<clang::VarDecl>(member)) return end;
     int depth = 0;
     for (clang::SourceLocation at = end;;) {
-        std::optional<clang::Token> token = clang::Lexer::findNextToken(at, sm, lang);
-        if (!token || token->is(clang::tok::eof)) return end;
-        if (token->isOneOf(clang::tok::l_paren, clang::tok::l_square, clang::tok::l_brace)) {
-            ++depth;
-        } else if (token->isOneOf(clang::tok::r_paren, clang::tok::r_square,
-                                  clang::tok::r_brace)) {
-            if (depth-- == 0) return end; // the enclosing body closed: no `;` of its own
-        } else if (token->is(clang::tok::semi) && depth == 0) {
-            return token->getLocation();
+        while (sm.isMacroArgExpansion(at)) at = sm.getImmediateExpansionRange(at).getBegin();
+        // A body token's immediate spelling is its #define; a file token is its own.
+        clang::SourceLocation spelled = sm.getImmediateSpellingLoc(at);
+        if (sm.isWrittenInScratchSpace(spelled)) return end; // a pasted token: no text to scan
+        auto [file, offset] = sm.getDecomposedLoc(spelled);
+        bool invalid = false;
+        llvm::StringRef text = sm.getBufferData(file, &invalid);
+        if (invalid) return end;
+        clang::Lexer lexer(sm.getLocForStartOfFile(file), lang, text.begin(),
+                           text.begin() + offset, text.end());
+        clang::Token token;
+        lexer.LexFromRawLexer(token); // the token at `at` itself
+        for (;;) {
+            lexer.LexFromRawLexer(token);
+            if (token.is(clang::tok::eof)) return end;
+            if (at.isMacroID() && token.isAtStartOfLine()) break; // the #define line ended
+            if (token.isOneOf(clang::tok::l_paren, clang::tok::l_square, clang::tok::l_brace)) {
+                ++depth;
+            } else if (token.isOneOf(clang::tok::r_paren, clang::tok::r_square,
+                                     clang::tok::r_brace)) {
+                if (depth-- == 0) return end; // the enclosing body closed: no `;` of its own
+            } else if (token.is(clang::tok::semi) && depth == 0) {
+                return at.getLocWithOffset(sm.getFileOffset(token.getLocation()) - offset);
+            }
         }
-        at = token->getLocation();
+        at = sm.getImmediateExpansionRange(at).getEnd(); // continue after the invocation
     }
 }
 
-// #257: does a parse error of the last parse belong to [tag] itself? It does when the error
-// lies inside the tag's written source range and outside every member's written extent: the
-// INNERMOST declaration whose source holds an error owns it. That is what catches the shapes
-// clang recovers without marking anything invalid — `enum E : Handle` (E keeps an `int`
-// underlying type) and `struct B : NotAThing` (the base specifier is dropped from the AST),
-// and any member clang discarded outright. An error inside a member (a nested record, a
-// method's signature or body, a field's rejected initializer, a static_assert) is that
-// member's, never the enclosing record's; an error between declarations belongs to no tag.
-// A rejected enumerator value leaves the AST too, so it is the enum's — its values ARE it.
-inline bool ownsParseError(const clang::TagDecl *tag) {
+// Within its written extent, is [loc] in [decl]'s own declarator? A field or variable written
+// in a group (`int a = 1, b;`) shares its begin — the `int` — with its siblings, and through
+// writtenEnd their `;`, so each one is cut down to its own declarator: from its name (the
+// first keeps the shared specifiers) up to the next sibling's name. A `,` can't mark that
+// boundary: `f<1, 2>()` has one inside a declarator. Locations compare in expanded order, as
+// in ownsParseError.
+inline bool inOwnDeclarator(const clang::Decl *decl, clang::SourceLocation loc,
+                            const clang::SourceManager &sm) {
+    if (!llvm::isa<clang::FieldDecl, clang::VarDecl>(decl)) return true;
+    auto sharesBegin = [&](const clang::Decl *sibling) {
+        return sibling && sibling->getBeginLoc() == decl->getBeginLoc();
+    };
+    const clang::Decl *next = decl->getNextDeclInContext();
+    if (sharesBegin(next) && !sm.isBeforeInTranslationUnit(loc, next->getLocation())) return false;
+    for (const clang::Decl *prev : decl->getLexicalDeclContext()->decls()) {
+        if (prev->getNextDeclInContext() == decl)
+            return !sharesBegin(prev) || !sm.isBeforeInTranslationUnit(loc, decl->getLocation());
+    }
+    return true;
+}
+
+// #257: does a parse error of the last parse belong to [decl] itself? It does when the error
+// lies inside the declaration's written source range and outside every member's written
+// extent: the INNERMOST declaration whose source holds an error owns it. That is what catches
+// the shapes clang recovers without marking anything invalid — `enum E : Handle` (E keeps an
+// `int` underlying type), `struct B : NotAThing` (the base specifier is dropped from the AST),
+// any member clang discarded outright, and a field's rejected bit-field width (#263). An error
+// inside a member (a nested record, a method's signature or body, a field's rejected
+// initializer, a static_assert) is that member's, never the enclosing record's; an error
+// between declarations belongs to no tag. A rejected enumerator value leaves the AST too, so
+// it is the enum's — its values ARE it.
+//
+// "Inside" is judged in the order the tokens were EXPANDED (isBeforeInTranslationUnit on the
+// raw locations), not on spelling or expansion locations alone (#263). Spelling order would
+// charge an error to wherever a macro's text is written; expansion locations collapse a
+// whole macro expansion onto its invocation, so in `DECLARE_BAD(MB)` (a macro that expands
+// to all of `struct MB : NotAThing { int m(); };`) every member seemed to hold the bad base.
+// Expanded order places an error at its invocation first and then at its position inside the
+// expansion: the base comes before `int m()`, and a macro defined in one record but expanded
+// in another charges the record that expands it.
+inline bool ownsParseError(const clang::Decl *decl) {
     const std::vector<clang::SourceLocation> &errors = parseDiagCollector().errorLocations;
     if (errors.empty()) return false;
-    const clang::SourceManager &sm = tag->getASTContext().getSourceManager();
-    const clang::LangOptions &lang = tag->getASTContext().getLangOpts();
-    auto holds = [&](const clang::Decl *decl, clang::SourceLocation loc) {
-        clang::SourceRange range = decl->getSourceRange();
-        return range.isValid() &&
-               sm.isPointWithin(loc, sm.getExpansionLoc(range.getBegin()),
-                                writtenEnd(decl, sm, lang));
+    const clang::SourceManager &sm = decl->getASTContext().getSourceManager();
+    const clang::LangOptions &lang = decl->getASTContext().getLangOpts();
+    auto holds = [&](const clang::Decl *holder, clang::SourceLocation loc) {
+        clang::SourceRange range = holder->getSourceRange();
+        return range.isValid() && !sm.isBeforeInTranslationUnit(loc, range.getBegin()) &&
+               !sm.isBeforeInTranslationUnit(writtenEnd(holder, sm, lang), loc) &&
+               inOwnDeclarator(holder, loc, sm);
     };
-    for (clang::SourceLocation error : errors) {
-        if (!holds(tag, error)) continue;
-        bool inMember = false;
-        for (const clang::Decl *member : tag->decls()) {
-            if (!member->isImplicit() && holds(member, error)) {
-                inMember = true;
-                break;
-            }
-        }
-        if (!inMember) return true;
-    }
-    return false;
+    // A record's or enum's members; a field or variable has none.
+    const auto *context = llvm::dyn_cast<clang::DeclContext>(decl);
+    auto inMember = [&](clang::SourceLocation error) {
+        return context && llvm::any_of(context->decls(), [&](const clang::Decl *member) {
+                   return !member->isImplicit() && holds(member, error);
+               });
+    };
+    return llvm::any_of(errors, [&](clang::SourceLocation error) {
+        return holds(decl, error) && !inMember(error);
+    });
 }
 
 // Clang's invalid flag, or for a tag type a parse error it owns (judged on the definition,
@@ -373,8 +425,9 @@ inline std::string defaultArgText(clang::ParmVarDecl *parm) {
 
 // #252/#257 BRIDGE: did clang error-recover [decl] without marking it invalid?
 //
-// A record or enum: does it own a parse error (detail::ownsParseError, #257)? Anything else:
-// does its written type reach an error-recovered declaration anywhere inside it? For a
+// A record or enum: does it own a parse error (detail::ownsParseError, #257)? A field or
+// variable: does it own one too (a rejected bit-field width, #263)? Then, for anything but a
+// tag: does its written type reach an error-recovered declaration anywhere inside it? For a
 // function that is its return and parameter types, for a field or variable its type, for a
 // typedef / alias its underlying type — each walked through the typedefs it names and every
 // type node they contain (detail::InvalidDeclFinder). Clang marks only the declaration it
@@ -399,6 +452,8 @@ inline bool reachesRecoveredDecl(const clang::Decl *decl) {
     } else {
         return false;
     }
+    if (llvm::isa<clang::FieldDecl, clang::VarDecl>(decl) && detail::ownsParseError(decl))
+        return true;
     detail::InvalidDeclFinder finder;
     if (info) {
         finder.TraverseTypeLoc(info->getTypeLoc());
