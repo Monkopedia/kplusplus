@@ -39,6 +39,7 @@ import com.monkopedia.krapper.generator.codegen.CppCompiler
 import com.monkopedia.krapper.generator.codegen.DefWriter
 import com.monkopedia.krapper.generator.codegen.File
 import com.monkopedia.krapper.generator.codegen.NameHandler
+import com.monkopedia.krapper.generator.codegen.canonicalPath
 import com.monkopedia.krapper.generator.codegen.generateBindings
 import com.monkopedia.krapper.generator.model.ForcingHeader
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -381,21 +382,23 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // runId is computed from the already-canonical bindings so it too is arrival-order
         // independent.
         val canonicalBindings = BindingIndex.canonical(runId = "", bindings = bindings).bindings
+        val base = canonicalPath(outputBase.path)
         val index = BindingIndex.canonical(
             runId = stableRunId(canonicalBindings),
             rootPackage = config.rootPackage,
             bindings = canonicalBindings,
             kotlinTypeMap = canonicalBindings.associate { it.classId to it.spec },
-            // Drop locations arrive as ABSOLUTE C++ paths. Rewriting them relative to the
-            // output dir is what keeps the index free of host paths (§5 D1) — the same rule
-            // #86 applies to the generated forcing headers. Rewritten HERE rather than in the
-            // ledger so the existing drop report and the diagnostics streamed over the service
-            // channel are untouched: this brick must not move a single pre-existing byte.
+            // Drop locations arrive as canonical absolute paths (DropLedger.record). Rewriting
+            // them relative to the output dir is what keeps the index free of host paths
+            // (§5 D1) — the same rule #86 applies to the generated forcing headers. Rewritten
+            // HERE rather than in the ledger so the drop report and the diagnostics streamed
+            // over the service channel keep the absolute path. The base is canonicalized the
+            // same way, or a symlink in the checkout path would leave every row absolute.
             drops = run.drops.diagnostics().map { diagnostic ->
                 val location = diagnostic.location ?: return@map diagnostic
                 diagnostic.copy(
                     location = location.copy(
-                        file = BindingIndex.relativizePath(location.file, outputBase.path)
+                        file = BindingIndex.relativizePath(location.file, base)
                     )
                 )
             }
