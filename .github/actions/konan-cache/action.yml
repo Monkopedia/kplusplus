@@ -1,0 +1,60 @@
+name: Cache the Kotlin/Native distribution
+description: >-
+  Restores ~/.konan for the build's Kotlin version and, when the restored distribution is
+  complete, points KGP at it so the kotlin-native-prebuilt download is skipped (#272, #276).
+
+inputs:
+  version-file:
+    description: File that pins the build's Kotlin version.
+    default: gradle/libs.versions.toml
+  version-sed:
+    description: A `sed -n` script that prints exactly that version from version-file.
+    default: 's/^kotlin = "\(.*\)"$/\1/p'
+
+runs:
+  using: composite
+  steps:
+    # A version that cannot be read must fail the job. Falling through instead would leave
+    # `kotlin.native.home` unset, so KGP downloads again and the job stays green (#276).
+    - name: Read the Kotlin version
+      id: version
+      shell: bash
+      env:
+        VERSION_FILE: ${{ inputs.version-file }}
+        VERSION_SED: ${{ inputs.version-sed }}
+      run: |
+        version=$(sed -n "$VERSION_SED" "$VERSION_FILE")
+        if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9A-Za-z.-]+$ ]]; then
+          echo "::error file=$VERSION_FILE::Could not read the Kotlin version from $VERSION_FILE (sed '$VERSION_SED' gave '$version'). Fix the pattern rather than let KGP silently re-download Kotlin/Native."
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # Keyed by the Kotlin version alone: that is all the distribution depends on, and each
+    # caller (root build 2.4.x, samples/minimal 2.4.y) gets its own entry instead of
+    # restoring another version's ~1 GB through a prefix fallback. A miss means KGP downloads.
+    - name: Restore ~/.konan
+      uses: actions/cache@v6
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-${{ steps.version.outputs.version }}
+
+    # Restoring ~/.konan alone does NOT stop the download (#272). KGP 2.4 passes the
+    # `kotlinNativeBundleConfiguration` file collection as a parameter of its
+    # NativeVersionValueSource, and Gradle resolves it to isolate the parameters BEFORE the
+    # source checks for the `provisioned.ok` marker, so the ~200 MB `kotlin-native-prebuilt`
+    # is fetched from GitHub releases on every run. `kotlin.native.home` makes KGP skip that
+    # value source entirely. On a cold cache it is left unset, so KGP downloads as before
+    # and the cache is populated.
+    - name: Use the cached Kotlin/Native distribution
+      shell: bash
+      env:
+        KOTLIN_VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$KOTLIN_VERSION
+        if [ -f "$home/provisioned.ok" ]; then
+          mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
+          echo "Using cached $home"
+        else
+          echo "No provisioned $home; KGP will download it"
+        fi

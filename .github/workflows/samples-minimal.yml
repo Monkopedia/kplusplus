@@ -28,10 +28,12 @@ on:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
+      - '.github/actions/konan-cache/**'
   pull_request:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
+      - '.github/actions/konan-cache/**'
   workflow_dispatch:
 
 jobs:
@@ -76,6 +78,14 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-samples-minimal-${{ runner.os }}-${{ hashFiles('samples/minimal/**/*.gradle.kts', 'samples/minimal/gradle.properties', 'samples/minimal/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-samples-minimal-${{ runner.os }}-
+
+      # samples/minimal pins its own Kotlin version in its plugins block, not in the root
+      # catalog, so the composite action is pointed there.
+      - name: Cache the Kotlin/Native distribution
+        uses: ./.github/actions/konan-cache
+        with:
+          version-file: samples/minimal/build.gradle.kts
+          version-sed: 's/^ *kotlin("multiplatform") version "\(.*\)"$/\1/p'
 
       # The published krapper tool binary is LLVM-linked and needs clang++ on PATH at
       # RUNTIME to parse cpp/geometry.h and compile it (see samples/minimal/README.md
