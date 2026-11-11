@@ -38,11 +38,13 @@ import platform.posix.fcntl
 import platform.posix.fopen
 import platform.posix.fputs
 import platform.posix.fread
+import platform.posix.free
 import platform.posix.getenv
 import platform.posix.getpid
 import platform.posix.mkdir
 import platform.posix.opendir
 import platform.posix.readdir
+import platform.posix.realpath
 import platform.posix.remove
 import platform.posix.stat
 
@@ -174,3 +176,17 @@ data class File(val pathSegments: List<String>) {
         }
     }
 }
+
+/**
+ * [path]'s one spelling: absolute, with every symlink and `.`/`..` resolved by realpath(3), so two
+ * routes to one file compare equal (#258). A path naming nothing on disk — the virtual name of an
+ * in-memory translation unit — comes back unchanged: it has no directory to resolve against, and
+ * folding `..` by text is wrong once a segment is a symlink.
+ */
+fun canonicalPath(path: String): String = realpath(path, null)?.let { resolved ->
+    try {
+        resolved.toKString()
+    } finally {
+        free(resolved)
+    }
+} ?: path

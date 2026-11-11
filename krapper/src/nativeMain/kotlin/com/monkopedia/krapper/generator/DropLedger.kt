@@ -19,6 +19,7 @@ import com.monkopedia.krapper.Diagnostic
 import com.monkopedia.krapper.DiagnosticPhase
 import com.monkopedia.krapper.Severity
 import com.monkopedia.krapper.SourceLocation
+import com.monkopedia.krapper.generator.codegen.canonicalPath
 
 /**
  * The phase of the generation pipeline a drop happened in. PARSE drops are the
@@ -105,7 +106,12 @@ class DropLedger {
         location: SourceLocation? = null,
         severity: Severity = Severity.WARNING
     ) {
-        records.add(DropRecord(symbol, reason, phase, location, severity))
+        // Clang reports a location spelled as the path reached it — relative to krapper's cwd
+        // when the header was passed relatively, `/../lib64/gcc/.../../..` for a toolchain
+        // header. Canonicalized here, the one place every row enters the ledger, so a row names
+        // the file however it was reached and from wherever krapper ran (#258).
+        val canonical = location?.let { it.copy(file = canonicalPath(it.file)) }
+        records.add(DropRecord(symbol, reason, phase, canonical, severity))
     }
 
     /**
