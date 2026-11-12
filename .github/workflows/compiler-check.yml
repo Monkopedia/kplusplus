@@ -52,6 +52,7 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/root-build.yml'
       - '.github/workflows/samples-minimal.yml'
+      - '.github/workflows/samples-multiproject.yml'
   push:
     branches: [main]
 
