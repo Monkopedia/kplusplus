@@ -28,10 +28,12 @@ on:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
+      - '.github/actions/konan-cache/**'
   pull_request:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
+      - '.github/actions/konan-cache/**'
   workflow_dispatch:
 
 jobs:
@@ -77,6 +79,16 @@ jobs:
           key: gradle-samples-minimal-${{ runner.os }}-${{ hashFiles('samples/minimal/**/*.gradle.kts', 'samples/minimal/gradle.properties', 'samples/minimal/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-samples-minimal-${{ runner.os }}-
 
+      # samples/minimal pins its own Kotlin version in its plugins block, not in the root
+      # catalog, so the composite action is pointed there. A pin below the KGP the kplusplus
+      # plugin brings loses resolution to it; the assert after the build catches that (#276).
+      - name: Cache the Kotlin/Native distribution
+        id: konan
+        uses: ./.github/actions/konan-cache
+        with:
+          version-file: samples/minimal/build.gradle.kts
+          version-sed: 's/^ *kotlin("multiplatform") version "\(.*\)"$/\1/p'
+
       # The published krapper tool binary is LLVM-linked and needs clang++ on PATH at
       # RUNTIME to parse cpp/geometry.h and compile it (see samples/minimal/README.md
       # "Requirements") — no in-tree LLVM build required, unlike release.yml.
@@ -96,6 +108,19 @@ jobs:
       - name: samples/minimal :nativeTest
         working-directory: samples/minimal
         run: ./gradlew nativeTest --no-daemon
+
+      # #276: konan-cache's init script fails the build on a KGP version it did not key on.
+      # This catches the rest: KGP provisioning that version somewhere other than the home the
+      # action checks, which would leave the cache silently unused.
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # #198: Gradle's Kotlin/Native test task prints no per-test lines by default (fixed
       # above via testLogging in build.gradle.kts) and a Test task with no matching

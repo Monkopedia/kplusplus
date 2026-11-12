@@ -259,8 +259,8 @@ E='^[[:space:]]*echo "::error::'
 ne=$(grep -cE "$E" ../workflows/*.yml | awk -F: '{n+=$2} END{print n+0}')
 np=$(awk -v e="$E" '$0 ~ e { if ((getline nxt) > 0 && nxt ~ /^[[:space:]]*exit 1[[:space:]]*$/) n++ }
           END { print n + 0 }' ../workflows/*.yml)
-want "::error:: annotations across .github/workflows/*.yml" 17 "$ne"
-want "...each one immediately followed by 'exit 1'"    17 "$np"
+want "::error:: annotations across .github/workflows/*.yml" 20 "$ne"
+want "...each one immediately followed by 'exit 1'"    20 "$np"
 
 # Negative control for the in-situ block. A guard whose failure path has never been
 # observed is exactly what this whole sequence is about, so watch it fail: take each

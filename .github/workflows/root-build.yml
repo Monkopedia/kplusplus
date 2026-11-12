@@ -50,6 +50,7 @@ on:
       # containing only that edit would trigger no workflow at all.
       - '.editorconfig'
       - '.github/workflows/root-build.yml'
+      - '.github/actions/konan-cache/**'
   # Unfiltered on main, same as compiler-check.yml: a merge should always leave a full
   # root-build signal on the branch, whatever the merge happened to touch.
   push:
@@ -76,35 +77,11 @@ jobs:
       # The Kotlin/Native distribution is a ~1 GB download that is identical for every run of
       # a given Kotlin version, and it is the largest fixed cost in a cold root build. This is
       # first-party actions/cache, deliberately NOT gradle/actions/setup-gradle — whose v6
-      # moved caching into a proprietary, non-MIT component. That was open in #209 when this
-      # file was written; #209 settled it by declining the component repo-wide, so no workflow
-      # here uses setup-gradle any more and this pattern is now the repo's only cache. A cache
-      # miss just means the download happens.
+      # moved caching into a proprietary, non-MIT component (#209 declined it repo-wide). The
+      # composite action also points KGP at the restored copy; see it for why that is needed.
       - name: Cache the Kotlin/Native distribution
-        uses: actions/cache@v6
-        with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-${{ runner.os }}-
-
-      # Restoring ~/.konan alone does NOT stop the download (#272). KGP 2.4 passes the
-      # `kotlinNativeBundleConfiguration` file collection as a parameter of its
-      # NativeVersionValueSource, and Gradle resolves it to isolate the parameters BEFORE the
-      # source checks for the `provisioned.ok` marker, so the ~200 MB `kotlin-native-prebuilt`
-      # is fetched from GitHub releases on every run, even when a complete distribution is
-      # already there. `kotlin.native.home` makes KGP skip that value source entirely. It is
-      # set only when the restored distribution matches the catalog's Kotlin version. On a
-      # cold or stale cache it is left unset, so KGP downloads as before and this cache is
-      # repopulated.
-      - name: Use the cached Kotlin/Native distribution
-        run: |
-          home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$(sed -n 's/^kotlin = "\(.*\)"/\1/p' gradle/libs.versions.toml)
-          if [ -f "$home/provisioned.ok" ]; then
-            mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
-            echo "Using cached $home"
-          else
-            echo "No provisioned $home; KGP will download it"
-          fi
+        id: konan
+        uses: ./.github/actions/konan-cache
 
       - name: Install LLVM/Clang 22 (apt.llvm.org)
         run: |
@@ -133,6 +110,19 @@ jobs:
           ./gradlew --no-daemon
           :krapper:nativeTest :krapper_model:nativeTest :feature-tests:nativeTest
           ktlintCheck
+
+      # #276: konan-cache's init script fails the build on a KGP version it did not key on.
+      # This catches the rest: KGP provisioning that version somewhere other than the home the
+      # action checks, which would leave the cache silently unused.
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # A green Gradle invocation is not evidence tests ran: a task-name typo, a NO-SOURCE
       # source set, or an up-to-date task all report success having executed nothing, and the
@@ -219,22 +209,8 @@ jobs:
           java-version: '21'
 
       - name: Cache the Kotlin/Native distribution
-        uses: actions/cache@v6
-        with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-${{ runner.os }}-
-
-      # Same as the other job (#272).
-      - name: Use the cached Kotlin/Native distribution
-        run: |
-          home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$(sed -n 's/^kotlin = "\(.*\)"/\1/p' gradle/libs.versions.toml)
-          if [ -f "$home/provisioned.ok" ]; then
-            mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
-            echo "Using cached $home"
-          else
-            echo "No provisioned $home; KGP will download it"
-          fi
+        id: konan
+        uses: ./.github/actions/konan-cache
 
       - name: Install LLVM/Clang 22 (apt.llvm.org)
         run: |
@@ -264,6 +240,17 @@ jobs:
           ./gradlew --no-daemon
           :featuregen:nativeTest :cppfixture:nativeTest
           :krapper:noncopyableDeterminismCheck
+
+      # Same as the other job (#276).
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # Same delete-before-measure guard as the other job (#198), per module. Note the
       # determinism check is NOT test-report-backed — it is an Exec whose non-zero exit fails
