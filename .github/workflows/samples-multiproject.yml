@@ -1,0 +1,121 @@
+# Guard for #194: kplusplus 0.3.4 shipped with every MULTI-PROJECT consumer dying with
+# `NoSuchMethodError` on its first `kplusplusSync` (the root's Kotlin plugin put an older
+# kotlinx-coroutines on the parent buildscript classloader, shadowing the plugin's own). It got
+# out because every sample was single-project. samples/multiproject is the canary for that shape
+# (see samples/multiproject/README.md), but until #232 its only use was one manual line in the
+# release dry run (docs/releasing.md step 4) -- and that line had never been runnable, because
+# this sample has no Gradle wrapper of its own.
+#
+# This workflow runs `:bindings:build` on every PR/push that touches the sample or anything it
+# runs through, the same way samples-minimal.yml guards samples/minimal. Like that sample, this
+# is a from-published consumer: the plugin resolves by coordinate from the portal/Central (the
+# runner's mavenLocal is empty), so there is no in-tree LLVM-linked :krapper build and the job
+# is cheap.
+#
+# A green `:bindings:build` only means something while the sample still HAS the #194 shape, and
+# only if kplusplusSync really generated bindings. Both are asserted below, so collapsing the
+# sample to one project, or a sync that silently produces nothing, fails this job rather than
+# leaving it green over nothing.
+#
+# TODO: once PR #277 (#276) lands, adopt its `.github/actions/konan-cache` composite action here,
+# as samples-minimal.yml does.
+name: samples/multiproject
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'samples/multiproject/**'
+      - 'gradle/wrapper/**'              # the sample runs through the repo-root wrapper
+      - 'gradlew'
+      - '.github/workflows/samples-multiproject.yml'
+  pull_request:
+    paths:
+      - 'samples/multiproject/**'
+      - 'gradle/wrapper/**'
+      - 'gradlew'
+      - '.github/workflows/samples-multiproject.yml'
+  workflow_dispatch:
+
+jobs:
+  bindings-build:
+    runs-on: ubuntu-latest
+    # Same reasoning as samples-minimal.yml (#198): never inherit the 360-minute default.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # See samples-minimal.yml for why this is the standalone sub-action, and why it runs
+      # before the JDK is set up.
+      - name: Validate the Gradle wrapper jars
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The first-party actions/cache pattern samples-minimal.yml uses (see there for why not
+      # setup-gradle's caching).
+      - name: Cache the Gradle user home
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-samples-multiproject-${{ runner.os }}-${{ hashFiles('samples/multiproject/**/*.gradle.kts', 'samples/multiproject/gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-samples-multiproject-${{ runner.os }}-
+
+      # The published krapper binary is LLVM-linked and needs clang++ on PATH at RUNTIME.
+      - name: Install LLVM/Clang 22 (apt.llvm.org)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release gnupg ca-certificates software-properties-common
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          sudo ln -sf "$(command -v clang++-22)"     /usr/local/bin/clang++
+          sudo ln -sf "$(command -v clang-22)"       /usr/local/bin/clang
+          sudo ln -sf "$(command -v llvm-config-22)" /usr/local/bin/llvm-config
+          echo "clang++: $(clang++ --version | head -1); llvm-config: $(llvm-config --version)"
+
+      # The shape IS the test (samples/multiproject/README.md): a root that declares the Kotlin
+      # plugin, and a subproject that applies kplusplus, which the root does not declare. If any
+      # of that goes, the build below can be green while proving nothing about #194.
+      - name: "Assert the sample still has the #194 shape"
+        working-directory: samples/multiproject
+        run: |
+          set -euo pipefail
+          code() { /usr/bin/grep -v '^[[:space:]]*\(//\|\*\|/\*\)' "$1"; }
+          fail() { echo "::error::$1 -- samples/multiproject no longer has the multi-project shape that #194 needs (see its README)."; exit 1; }
+          code settings.gradle.kts | /usr/bin/grep -q 'include(":bindings")' \
+            || fail 'settings.gradle.kts does not include(":bindings")'
+          code build.gradle.kts | /usr/bin/grep -q 'kotlin("multiplatform")' \
+            || fail 'the root build.gradle.kts does not declare the Kotlin plugin'
+          if code build.gradle.kts | /usr/bin/grep -q 'com\.monkopedia\.kplusplus'; then
+            fail 'the root build.gradle.kts declares kplusplus, so it shares the root classloader'
+          fi
+          code bindings/build.gradle.kts | /usr/bin/grep -q 'id("com.monkopedia.kplusplus.compiler")' \
+            || fail ':bindings does not apply kplusplus'
+          echo "shape OK: root declares Kotlin, :bindings applies kplusplus"
+
+      - name: samples/multiproject :bindings:build
+        working-directory: samples/multiproject
+        # No wrapper of its own: drive it with the repo root's (#232).
+        run: ../../gradlew :bindings:build --no-daemon
+
+      # A sync that generated nothing would still let :bindings:build pass on an empty source
+      # set, so check that the bindings it was meant to produce exist.
+      - name: Assert kplusplusSync generated bindings
+        working-directory: samples/multiproject
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          generated=(bindings/build/krapped-cpp/**/*.kt)
+          if [ ${#generated[@]} -eq 0 ]; then
+            echo "::error::No generated Kotlin under bindings/build/krapped-cpp -- kplusplusSync produced nothing, so :bindings:build compiled nothing."
+            exit 1
+          fi
+          printf 'generated: %s\n' "${generated[@]}"

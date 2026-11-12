@@ -51,4 +51,6 @@ service channel to krapper, before any binding is generated. Compiling the gener
 (`../../gradlew :bindings:build`) exercises the rest, but is not what this sample is for.
 
 `:bindings:build` is step 4 of the release **local dry run** ([docs/releasing.md](../../docs/releasing.md)),
-which is where this sample is exercised. It has no CI workflow of its own.
+and CI runs it on every change to this sample
+([`.github/workflows/samples-multiproject.yml`](../../.github/workflows/samples-multiproject.yml)),
+which also fails if the sample loses the two-project shape above.
