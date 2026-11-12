@@ -58,8 +58,10 @@ runs:
     # value source entirely. On a cold cache it is left unset, so KGP downloads as before
     # and the cache is populated. Either way it installs kgp-version.gradle, which fails the
     # build if the KGP Gradle resolves is not this version: on a warm hit nothing else would.
-    # Both land in ~/.gradle, so they apply to EVERY Gradle invocation for the rest of the job,
-    # not just the caller's build. The script checks only each invocation's root build (#281).
+    # Both land in ~/.gradle, so they apply to EVERY Gradle invocation for the rest of the
+    # job, not just the caller's build. The script checks every build that applies Kotlin
+    # Multiplatform, since each one compiles with that home, but only the root build
+    # otherwise (#281).
     - name: Use the cached Kotlin/Native distribution
       id: use
       shell: bash

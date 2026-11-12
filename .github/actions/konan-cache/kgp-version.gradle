@@ -3,14 +3,16 @@
 // plugin Gradle actually resolved is a different version, e.g. a plugin dependency that
 // drags KGP above a consumer's pin. Without this, a warm cache for the pinned version
 // sets `kotlin.native.home`, and the newer KGP compiles with that older Kotlin/Native, green.
-// Only the root build is checked. Init scripts run in every build of the invocation, and a
-// nested one is not the build konan-cache keyed: a `kotlin-dsl` buildSrc applies Gradle's
-// embedded KGP, and an included build may apply no Kotlin plugin at all (#281).
-if (gradle.parent != null) return
+// Init scripts run in every build of the invocation, and `kotlin.native.home` reaches them all,
+// so a nested build that compiles Kotlin/Native is checked too. Only the root build is held to
+// the jvm plugin and to applying one at all: a `kotlin-dsl` buildSrc applies Gradle's embedded
+// KGP, and an included build may apply no Kotlin plugin, and neither uses Kotlin/Native (#281).
+def root = gradle.parent == null
+def ids = ['org.jetbrains.kotlin.multiplatform'] + (root ? ['org.jetbrains.kotlin.jvm'] : [])
 def keyed = '@KOTLIN_VERSION@'
 def checked = false
 allprojects {
-    ['org.jetbrains.kotlin.multiplatform', 'org.jetbrains.kotlin.jvm'].each { id ->
+    ids.each { id ->
         plugins.withId(id) { plugin ->
             def resolved = plugin.class.classLoader
                 .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
@@ -25,6 +27,6 @@ allprojects {
     }
 }
 // A build that applies no Kotlin plugin would pass the check above without running it.
-gradle.projectsEvaluated {
+if (root) gradle.projectsEvaluated {
     if (!checked) throw new GradleException("konan-cache: no project applied the Kotlin plugin, so its version was never checked against $keyed.")
 }
