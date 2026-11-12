@@ -393,13 +393,18 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
             // (§5 D1) — the same rule #86 applies to the generated forcing headers. Rewritten
             // HERE rather than in the ledger so the drop report and the diagnostics streamed
             // over the service channel keep the absolute path. The base is canonicalized the
-            // same way, or a symlink in the checkout path would leave every row absolute.
+            // same way, or a symlink in the checkout path would leave every row absolute. A row
+            // whose symbol IS its position (a parse error) is re-spelled from the relative one,
+            // or the checkout path would survive in the symbol (#279).
             drops = run.drops.diagnostics().map { diagnostic ->
                 val location = diagnostic.location ?: return@map diagnostic
+                val relative = location.copy(
+                    file = BindingIndex.relativizePath(location.file, base)
+                )
+                val positional = diagnostic.symbol == "$location"
                 diagnostic.copy(
-                    location = location.copy(
-                        file = BindingIndex.relativizePath(location.file, base)
-                    )
+                    symbol = if (positional) "$relative" else diagnostic.symbol,
+                    location = relative
                 )
             }
         )
