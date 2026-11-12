@@ -103,8 +103,10 @@ inline ParseDiagCollector &parseDiagCollector() {
 // Where [member] ends AS WRITTEN. Its AST range stops at the declarator when clang REJECTED
 // the initializer or bit-field width — `int x = undeclared;`, `int a : undeclared;` and
 // `static constexpr int k = undeclared;` lose it from the AST — so a variable or field runs on
-// to its `;` (the first one outside brackets). Anything else's AST range is already its
-// written extent.
+// to its `;` (the first one outside brackets). A rejected BRACE initializer (`int a{undeclared};`)
+// recovers as an expression with no location, leaving no AST end at all (#274); the scan then
+// starts from the declarator's own end. Anything else's AST range is already its written
+// extent.
 //
 // The scan follows the declaration's tokens as EXPANDED (#263): a macro argument continues
 // where its parameter sits in the macro body, a body token in the macro's own #define line,
@@ -116,6 +118,8 @@ inline clang::SourceLocation writtenEnd(const clang::Decl *member, const clang::
                                         const clang::LangOptions &lang) {
     clang::SourceLocation end = member->getSourceRange().getEnd();
     if (!llvm::isa<clang::FieldDecl>(member) && !llvm::isa<clang::VarDecl>(member)) return end;
+    if (end.isInvalid())
+        end = llvm::cast<clang::DeclaratorDecl>(member)->DeclaratorDecl::getSourceRange().getEnd();
     int depth = 0;
     for (clang::SourceLocation at = end;;) {
         while (sm.isMacroArgExpansion(at)) at = sm.getImmediateExpansionRange(at).getBegin();
@@ -193,9 +197,10 @@ inline bool ownsParseError(const clang::Decl *decl) {
     const clang::SourceManager &sm = decl->getASTContext().getSourceManager();
     const clang::LangOptions &lang = decl->getASTContext().getLangOpts();
     auto holds = [&](const clang::Decl *holder, clang::SourceLocation loc) {
-        clang::SourceRange range = holder->getSourceRange();
-        return range.isValid() && !sm.isBeforeInTranslationUnit(loc, range.getBegin()) &&
-               !sm.isBeforeInTranslationUnit(writtenEnd(holder, sm, lang), loc) &&
+        clang::SourceLocation begin = holder->getBeginLoc();
+        clang::SourceLocation end = writtenEnd(holder, sm, lang);
+        return begin.isValid() && end.isValid() && !sm.isBeforeInTranslationUnit(loc, begin) &&
+               !sm.isBeforeInTranslationUnit(end, loc) &&
                inOwnDeclarator(holder, loc, sm);
     };
     // A record's or enum's members; a field or variable has none.
