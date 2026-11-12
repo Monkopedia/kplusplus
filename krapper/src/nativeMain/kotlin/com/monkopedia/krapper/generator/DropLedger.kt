@@ -109,9 +109,12 @@ class DropLedger {
         // Clang reports a location spelled as the path reached it — relative to krapper's cwd
         // when the header was passed relatively, `/../lib64/gcc/.../../..` for a toolchain
         // header. Canonicalized here, the one place every row enters the ledger, so a row names
-        // the file however it was reached and from wherever krapper ran (#258).
+        // the file however it was reached and from wherever krapper ran (#258). A row whose
+        // symbol IS its position (a parse error) is re-spelled from the canonical one, or the
+        // two would name the file differently (#279).
         val canonical = location?.let { it.copy(file = canonicalPath(it.file)) }
-        records.add(DropRecord(symbol, reason, phase, canonical, severity))
+        val named = if (location != null && symbol == location.toString()) "$canonical" else symbol
+        records.add(DropRecord(named, reason, phase, canonical, severity))
     }
 
     /**
