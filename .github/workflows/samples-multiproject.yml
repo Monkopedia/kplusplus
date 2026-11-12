@@ -16,9 +16,6 @@
 # only if kplusplusSync really generated bindings. Both are asserted below, so collapsing the
 # sample to one project, or a sync that silently produces nothing, fails this job rather than
 # leaving it green over nothing.
-#
-# TODO: once PR #277 (#276) lands, adopt its `.github/actions/konan-cache` composite action here,
-# as samples-minimal.yml does.
 name: samples/multiproject
 
 on:
@@ -29,12 +26,14 @@ on:
       - 'gradle/wrapper/**'              # the sample runs through the repo-root wrapper
       - 'gradlew'
       - '.github/workflows/samples-multiproject.yml'
+      - '.github/actions/konan-cache/**'
   pull_request:
     paths:
       - 'samples/multiproject/**'
       - 'gradle/wrapper/**'
       - 'gradlew'
       - '.github/workflows/samples-multiproject.yml'
+      - '.github/actions/konan-cache/**'
   workflow_dispatch:
 
 jobs:
@@ -66,6 +65,14 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-samples-multiproject-${{ runner.os }}-${{ hashFiles('samples/multiproject/**/*.gradle.kts', 'samples/multiproject/gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-samples-multiproject-${{ runner.os }}-
+
+      # The Kotlin pin is the root's `apply false` declaration, which :bindings inherits (#281).
+      - name: Cache the Kotlin/Native distribution
+        id: konan
+        uses: ./.github/actions/konan-cache
+        with:
+          version-file: samples/multiproject/build.gradle.kts
+          version-sed: 's/^ *kotlin("multiplatform") version "\(.*\)" apply false$/\1/p'
 
       # The published krapper binary is LLVM-linked and needs clang++ on PATH at RUNTIME.
       - name: Install LLVM/Clang 22 (apt.llvm.org)
@@ -105,6 +112,17 @@ jobs:
         working-directory: samples/multiproject
         # No wrapper of its own: drive it with the repo root's (#232).
         run: ../../gradlew :bindings:build --no-daemon
+
+      # See samples-minimal.yml: catches KGP provisioning somewhere other than the cached home.
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # A sync that generated nothing would still let :bindings:build pass on an empty source
       # set, so check that the bindings it was meant to produce exist.

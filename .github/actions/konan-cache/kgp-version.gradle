@@ -3,6 +3,10 @@
 // plugin Gradle actually resolved is a different version, e.g. a plugin dependency that
 // drags KGP above a consumer's pin. Without this, a warm cache for the pinned version
 // sets `kotlin.native.home`, and the newer KGP compiles with that older Kotlin/Native, green.
+// Only the root build is checked. Init scripts run in every build of the invocation, and a
+// nested one is not the build konan-cache keyed: a `kotlin-dsl` buildSrc applies Gradle's
+// embedded KGP, and an included build may apply no Kotlin plugin at all (#281).
+if (gradle.parent != null) return
 def keyed = '@KOTLIN_VERSION@'
 def checked = false
 allprojects {

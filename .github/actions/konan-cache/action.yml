@@ -40,12 +40,15 @@ runs:
 
     # Keyed by the Kotlin version alone, which is all the distribution depends on: callers on
     # one version share an entry, and there is no prefix fallback because another version's
-    # ~1 GB is no use. A miss means KGP downloads.
+    # ~1 GB is no use. A miss means KGP downloads. `v2` retires the unprefixed entries, which
+    # predate the version assert: `konan-Linux-2.4.0` holds 2.4.10, and actions/cache never
+    # re-saves an exact hit, so every 2.4.0 caller would download forever (#281). Bump it again
+    # if an entry is ever found holding the wrong version.
     - name: Restore ~/.konan
       uses: actions/cache@v6
       with:
         path: ~/.konan
-        key: konan-${{ runner.os }}-${{ steps.version.outputs.version }}
+        key: konan-v2-${{ runner.os }}-${{ steps.version.outputs.version }}
 
     # Restoring ~/.konan alone does NOT stop the download (#272). KGP 2.4 passes the
     # `kotlinNativeBundleConfiguration` file collection as a parameter of its
@@ -55,6 +58,8 @@ runs:
     # value source entirely. On a cold cache it is left unset, so KGP downloads as before
     # and the cache is populated. Either way it installs kgp-version.gradle, which fails the
     # build if the KGP Gradle resolves is not this version: on a warm hit nothing else would.
+    # Both land in ~/.gradle, so they apply to EVERY Gradle invocation for the rest of the job,
+    # not just the caller's build. The script checks only each invocation's root build (#281).
     - name: Use the cached Kotlin/Native distribution
       id: use
       shell: bash
