@@ -109,8 +109,9 @@ jobs:
         working-directory: samples/minimal
         run: ./gradlew nativeTest --no-daemon
 
-      # #276: the konan-cache action can only use its cache if it guessed the Kotlin/Native
-      # version KGP provisions. Checking that after the build fails the job on drift, cold or warm.
+      # #276: konan-cache's init script fails the build on a KGP version it did not key on.
+      # This catches the rest: KGP provisioning that version somewhere other than the home the
+      # action checks, which would leave the cache silently unused.
       - name: Assert KGP provisioned the version the cache is keyed on
         env:
           KONAN_HOME: ${{ steps.konan.outputs.home }}

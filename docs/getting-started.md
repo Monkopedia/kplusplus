@@ -37,7 +37,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    kotlin("multiplatform") version "2.4.0"
+    kotlin("multiplatform") version "2.4.10"
     id("com.monkopedia.kplusplus.compiler") version "0.3.7"
 }
 

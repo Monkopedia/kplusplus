@@ -15,8 +15,8 @@ outputs:
   home:
     description: >-
       The Kotlin/Native home for the version read. Callers assert `provisioned.ok` exists in
-      it after their Gradle step: that fails the job when KGP provisioned a different version
-      than the one this action keyed and checked (a plugin bringing its own KGP, #276).
+      it after their Gradle step, which fails the job when a cold build provisioned it
+      somewhere else, so the cache would never be used (#276).
     value: ${{ steps.use.outputs.home }}
 
 runs:
@@ -53,7 +53,8 @@ runs:
     # source checks for the `provisioned.ok` marker, so the ~200 MB `kotlin-native-prebuilt`
     # is fetched from GitHub releases on every run. `kotlin.native.home` makes KGP skip that
     # value source entirely. On a cold cache it is left unset, so KGP downloads as before
-    # and the cache is populated.
+    # and the cache is populated. Either way it installs kgp-version.gradle, which fails the
+    # build if the KGP Gradle resolves is not this version: on a warm hit nothing else would.
     - name: Use the cached Kotlin/Native distribution
       id: use
       shell: bash
@@ -62,6 +63,8 @@ runs:
       run: |
         home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$KOTLIN_VERSION
         echo "home=$home" >> "$GITHUB_OUTPUT"
+        mkdir -p ~/.gradle/init.d
+        sed "s/@KOTLIN_VERSION@/$KOTLIN_VERSION/" "$GITHUB_ACTION_PATH/kgp-version.gradle" > ~/.gradle/init.d/konan-cache-kgp-version.gradle
         if [ -f "$home/provisioned.ok" ]; then
           mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
           echo "Using cached $home"

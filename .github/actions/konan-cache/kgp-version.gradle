@@ -1,0 +1,26 @@
+// Installed into ~/.gradle/init.d by the konan-cache action (#276), which substitutes the
+// Kotlin version it keyed and checked the cache on. Fails the build when the Kotlin Gradle
+// plugin Gradle actually resolved is a different version, e.g. a plugin dependency that
+// drags KGP above a consumer's pin. Without this, a warm cache for the pinned version
+// sets `kotlin.native.home`, and the newer KGP compiles with that older Kotlin/Native, green.
+def keyed = '@KOTLIN_VERSION@'
+def checked = false
+allprojects {
+    ['org.jetbrains.kotlin.multiplatform', 'org.jetbrains.kotlin.jvm'].each { id ->
+        plugins.withId(id) { plugin ->
+            def resolved = plugin.class.classLoader
+                .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
+                .getMethod('getKotlinPluginVersion', Project).invoke(null, project)
+            if (resolved != keyed) {
+                def msg = "$project applies KGP $resolved, but konan-cache keyed and checked Kotlin/Native $keyed. Point konan-cache at the Kotlin version the build really uses."
+                println "::error::$msg"
+                throw new GradleException(msg)
+            }
+            checked = true
+        }
+    }
+}
+// A build that applies no Kotlin plugin would pass the check above without running it.
+gradle.projectsEvaluated {
+    if (!checked) throw new GradleException("konan-cache: no project applied the Kotlin plugin, so its version was never checked against $keyed.")
+}
