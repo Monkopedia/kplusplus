@@ -551,6 +551,46 @@ class InvalidDeclTest {
         assertFieldOwnsError("G(x) = undeclared; int v;", "x", listOf("v"), "#define G(n) int n")
     }
 
+    // #274 — a `";"` literal at depth 0 is one token, not the field's `;`.
+    @Test
+    fun a_semicolon_string_literal_outside_brackets_does_not_end_a_field() =
+        assertFieldOwnsError("const char *s = \";\" + undeclared; int v;", "s", listOf("v"))
+
+    // #274 — clang recovers a rejected BRACE initializer as an expression with no location,
+    // so the field's AST range has no end; its written extent still runs to its `;`.
+    @Test
+    fun a_rejected_brace_initializer_drops_only_the_member() {
+        assertFieldOwnsError("int a{undeclared}; int v;", "a", listOf("v"))
+        assertFieldOwnsError("int a{1}, b{undeclared}; int v;", "b", listOf("a", "v"))
+    }
+
+    // #274, documented: an array bound clang rejected leaves the FIELD's type invalid, and
+    // clang then marks the RECORD invalid itself (its layout is unknown) — the propagation
+    // a_class_with_an_invalid_field_is_not_emitted_and_is_ledgered relies on. So the class
+    // drops, whether the field stands alone or shares a line with a valid sibling.
+    @Test
+    fun a_rejected_array_bound_drops_the_class_clang_marked_invalid() {
+        assertClassOwnsError("int b[undeclared]; int k();")
+        assertClassOwnsError("int *a, b[undeclared]; int k();")
+    }
+
+    // #274 — an anonymous struct or union never binds, but its guilty member is still
+    // ledgered by name, beside the parse error; the enclosing class keeps binding.
+    @Test
+    fun an_error_in_an_anonymous_record_ledgers_its_member() {
+        for (kind in listOf("struct", "union")) {
+            val out = generate(
+                "namespace p {\nstruct R { $kind { int y = undeclared; int z; }; int k(); };\n}\n"
+            )
+            assertTrue("p::R" in out.bound, "[$kind] R must still bind: ${out.bound}")
+            assertEquals(0, out.drops.count { it.symbol == "p::R" }, "[$kind] ${out.drops}")
+            assertTrue("fun k(" in out.kotlin, "[$kind] `k` must emit:\n${out.kotlin}")
+            val guilty = "p::R::(anonymous $kind)::y"
+            assertEquals(1, out.drops.count { it.symbol == guilty }, "[$kind] ${out.drops}")
+            assertEquals(2, out.drops.size, "[$kind] only `y` beside the error: ${out.drops}")
+        }
+    }
+
     // ...and an error after that `;` that no member holds is the class's.
     @Test
     fun an_error_after_a_field_extent_is_the_class() {

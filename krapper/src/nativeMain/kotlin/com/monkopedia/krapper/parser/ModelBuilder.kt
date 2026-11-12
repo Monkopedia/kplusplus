@@ -418,7 +418,7 @@ private class ModelBuilder(
         val name = record.asNamedDecl().getNameAsString()?.takeIf { it.isNotEmpty() }
             ?: RecordDecl(record.ptr).getTypedefNameForAnonDecl()
                 ?.getNameAsString()?.takeIf { it.isNotEmpty() }
-            ?: return
+            ?: return ledgerUnbound(record)
         record.definitionOrNull()?.let { if (skippedAsInvalid(decl, it.asDecl())) return }
         // ModelFactories' WrappedClass factory: name via wrapName (= the bare name for a
         // non-template class; template-args spelling is brick-4+) + the isAbstract flag.
@@ -432,6 +432,17 @@ private class ModelBuilder(
         attachIfNew(cls, parent, attach)
         if (record.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, cls, cls.metadata)
+        }
+    }
+
+    // #274: a record that never binds (an anonymous struct or union) still ledgers what clang
+    // error-recovered in it — itself, or by name the member that owns the error, through
+    // nested anonymous records — so a parse error inside it is not the ledger's only trace.
+    private fun ledgerUnbound(record: CXXRecordDecl) {
+        if (skippedAsInvalid(record.asDecl())) return
+        for (member in with(memScope) { record.asDeclContext().decls() }) {
+            if (member == null || member.isImplicit()) continue
+            member.asCXXRecordDecl()?.let(::ledgerUnbound) ?: skippedAsInvalid(member)
         }
     }
 
