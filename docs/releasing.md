@@ -110,7 +110,7 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
 # 4. ...and that a MULTI-PROJECT consumer can drive the plugin at all (the #194 guard: the
 #    plugin's runtime is shaded into its jar precisely so a subproject's classloader can't be
 #    shadowed by the root's — see samples/multiproject/README.md):
-(cd samples/multiproject && ./gradlew :bindings:build)
+(cd samples/multiproject && ../../gradlew :bindings:build)  # no wrapper of its own
 ```
 
 `publishToMavenLocal` does **not** sign (no key in the environment) — signing is exercised only
