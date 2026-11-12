@@ -22,7 +22,8 @@ buildscript {
     }
 }
 plugins {
-    kotlin("multiplatform") version "2.4.0"
+    // At least the KGP the kplusplus plugin depends on, or that one silently wins (#276).
+    kotlin("multiplatform") version "2.4.10"
     // The kplusplus compiler subplugin, resolved from its published mavenLocal marker
     // (R2, #128) — no includeBuild. Everything kplusplus-specific lives in the narrow
     // `kplusplus { ... }` block at the bottom of this file.

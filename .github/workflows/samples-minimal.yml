@@ -80,8 +80,10 @@ jobs:
           restore-keys: gradle-samples-minimal-${{ runner.os }}-
 
       # samples/minimal pins its own Kotlin version in its plugins block, not in the root
-      # catalog, so the composite action is pointed there.
+      # catalog, so the composite action is pointed there. A pin below the KGP the kplusplus
+      # plugin brings loses resolution to it; the assert after the build catches that (#276).
       - name: Cache the Kotlin/Native distribution
+        id: konan
         uses: ./.github/actions/konan-cache
         with:
           version-file: samples/minimal/build.gradle.kts
@@ -106,6 +108,18 @@ jobs:
       - name: samples/minimal :nativeTest
         working-directory: samples/minimal
         run: ./gradlew nativeTest --no-daemon
+
+      # #276: the konan-cache action can only use its cache if it guessed the Kotlin/Native
+      # version KGP provisions. Checking that after the build fails the job on drift, cold or warm.
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # #198: Gradle's Kotlin/Native test task prints no per-test lines by default (fixed
       # above via testLogging in build.gradle.kts) and a Test task with no matching

@@ -80,6 +80,7 @@ jobs:
       # moved caching into a proprietary, non-MIT component (#209 declined it repo-wide). The
       # composite action also points KGP at the restored copy; see it for why that is needed.
       - name: Cache the Kotlin/Native distribution
+        id: konan
         uses: ./.github/actions/konan-cache
 
       - name: Install LLVM/Clang 22 (apt.llvm.org)
@@ -109,6 +110,18 @@ jobs:
           ./gradlew --no-daemon
           :krapper:nativeTest :krapper_model:nativeTest :feature-tests:nativeTest
           ktlintCheck
+
+      # #276: the konan-cache action can only use its cache if it guessed the Kotlin/Native
+      # version KGP provisions. Checking that after the build fails the job on drift, cold or warm.
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # A green Gradle invocation is not evidence tests ran: a task-name typo, a NO-SOURCE
       # source set, or an up-to-date task all report success having executed nothing, and the
@@ -195,6 +208,7 @@ jobs:
           java-version: '21'
 
       - name: Cache the Kotlin/Native distribution
+        id: konan
         uses: ./.github/actions/konan-cache
 
       - name: Install LLVM/Clang 22 (apt.llvm.org)
@@ -225,6 +239,17 @@ jobs:
           ./gradlew --no-daemon
           :featuregen:nativeTest :cppfixture:nativeTest
           :krapper:noncopyableDeterminismCheck
+
+      # Same as the other job (#276).
+      - name: Assert KGP provisioned the version the cache is keyed on
+        env:
+          KONAN_HOME: ${{ steps.konan.outputs.home }}
+        run: |
+          if [ ! -f "$KONAN_HOME/provisioned.ok" ]; then
+            found=(~/.konan/kotlin-native-prebuilt-*)
+            echo "::error::KGP did not provision $KONAN_HOME; it provisioned ${found[*]}. Point konan-cache at the Kotlin version the build really uses."
+            exit 1
+          fi
 
       # Same delete-before-measure guard as the other job (#198), per module. Note the
       # determinism check is NOT test-report-backed — it is an Exec whose non-zero exit fails

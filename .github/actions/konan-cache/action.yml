@@ -11,6 +11,14 @@ inputs:
     description: A `sed -n` script that prints exactly that version from version-file.
     default: 's/^kotlin = "\(.*\)"$/\1/p'
 
+outputs:
+  home:
+    description: >-
+      The Kotlin/Native home for the version read. Callers assert `provisioned.ok` exists in
+      it after their Gradle step: that fails the job when KGP provisioned a different version
+      than the one this action keyed and checked (a plugin bringing its own KGP, #276).
+    value: ${{ steps.use.outputs.home }}
+
 runs:
   using: composite
   steps:
@@ -30,9 +38,9 @@ runs:
         fi
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
-    # Keyed by the Kotlin version alone: that is all the distribution depends on, and each
-    # caller (root build 2.4.x, samples/minimal 2.4.y) gets its own entry instead of
-    # restoring another version's ~1 GB through a prefix fallback. A miss means KGP downloads.
+    # Keyed by the Kotlin version alone, which is all the distribution depends on: callers on
+    # one version share an entry, and there is no prefix fallback because another version's
+    # ~1 GB is no use. A miss means KGP downloads.
     - name: Restore ~/.konan
       uses: actions/cache@v6
       with:
@@ -47,11 +55,13 @@ runs:
     # value source entirely. On a cold cache it is left unset, so KGP downloads as before
     # and the cache is populated.
     - name: Use the cached Kotlin/Native distribution
+      id: use
       shell: bash
       env:
         KOTLIN_VERSION: ${{ steps.version.outputs.version }}
       run: |
         home=~/.konan/kotlin-native-prebuilt-linux-x86_64-$KOTLIN_VERSION
+        echo "home=$home" >> "$GITHUB_OUTPUT"
         if [ -f "$home/provisioned.ok" ]; then
           mkdir -p ~/.gradle && echo "kotlin.native.home=$home" >> ~/.gradle/gradle.properties
           echo "Using cached $home"
