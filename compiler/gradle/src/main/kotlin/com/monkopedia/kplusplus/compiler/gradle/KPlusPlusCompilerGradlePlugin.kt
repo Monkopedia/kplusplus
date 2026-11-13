@@ -6,6 +6,7 @@ import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
+import java.util.concurrent.Callable
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.provider.Provider
@@ -822,13 +823,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // The cinterop task reads the generated .def; make it regenerate via
             // kplusplusSync first so it can't process a stale def (issue #16),
             // and declare the artifacts that .def POINTS AT as real inputs so it
-            // can't process a stale ARCHIVE either (issue #249).
+            // can't process a stale ARCHIVE either (issues #249, #251).
             // The interop task is named cinterop<Name><Target>; for the
             // "kplusplus" interop on the "native" target that is
             // cinteropKplusplusNative.
             val interopTaskName = "cinteropKplusplus" +
                 compilation.target.targetName.replaceFirstChar { it.uppercase() }
-            configureInteropTask(project, interopTaskName, krappedDir, moduleName)
+            configureInteropTask(project, interopTaskName, krappedDef)
             // The generated Kotlin sources live under krapped/src. srcDir tolerates
             // a not-yet-existing directory at configure time; kplusplusSync (a
             // compile dependency) creates it before compilation reads it.
@@ -867,10 +868,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
  * The stage-0 seed path's cinterop `.def` (see `runSeedSync`) — deterministic from the module
  * name + this checkout's krapped dir, so the committed seed carries no host-specific absolute
  * path. Mirrors krapper's own `DefWriter`/`CompileFlags` for the static-wrapper case.
- *
- * Extracted from the writer so a test can hold the SAME text the build writes against
- * [cinteropWrapperArtifacts] — that equality is the #249 invariant, and it cannot be asserted
- * on a string that only exists inside a `doLast`.
  */
 internal fun seedDefContent(moduleName: String, krappedDir: File): String = buildString {
     appendLine("headers = $moduleName.h")
@@ -881,67 +878,64 @@ internal fun seedDefContent(moduleName: String, krappedDir: File): String = buil
 }
 
 /**
- * The build products the generated cinterop `.def` POINTS AT, in the order the `.def` names
- * them: the C wrapper header (`headers = <module>.h`) and the compiled wrapper archive
- * (`staticLibraries = lib<module>.a`, `libraryPaths = <krappedDir>`).
+ * The files a generated `.def` POINTS AT — what the cinterop task actually reads besides the
+ * `.def` itself, and so exactly what it must declare as inputs (#249, #251).
  *
- * Both are written by `kplusplusSync` into [krappedDir]. Neither is spelled anywhere Gradle can
- * see from the `.def` alone — a `.def` is opaque text to the cinterop task — which is exactly
- * the gap issue #249 was filed on, so this list is the ONE place the set is enumerated and
- * [defArtifactsIn] reads it back out of a generated `.def` to keep the two in step.
+ * Each `headers` entry is searched for along the `compilerOpts` `-I` dirs and each
+ * `staticLibraries` entry along `libraryPaths`, in order, taking the first that exists — the
+ * lookup cinterop and the linker do. Resolving by basename into the krapped dir instead (#251)
+ * declared a path that does not hold an out-of-tree `library("/abs/libfoo.a")` and left the
+ * real archive undeclared. An entry found nowhere resolves to its first candidate, so it is
+ * still tracked once it appears.
  */
-internal fun cinteropWrapperArtifacts(krappedDir: File, moduleName: String): List<File> =
-    listOf(File(krappedDir, "$moduleName.h"), File(krappedDir, "lib$moduleName.a"))
-
-/**
- * The files a generated `.def` NAMES inside [krappedDir] — its `headers` and `staticLibraries`
- * entries, resolved against the dir. The inverse of [cinteropWrapperArtifacts]: whatever the
- * `.def` points at is what the cinterop task actually reads, so the two sets must agree or the
- * task is once again fingerprinting a pointer whose pointee can change underneath it.
- */
-internal fun defArtifactsIn(defContent: String, krappedDir: File): List<File> =
-    defContent.lineSequence()
-        .mapNotNull { line ->
-            val key = line.substringBefore('=').trim()
-            if (key != "headers" && key != "staticLibraries") return@mapNotNull null
+internal fun defArtifactsIn(defContent: String): List<File> {
+    val entries = defContent.lineSequence().filter { '=' in it }.associate { line ->
+        line.substringBefore('=').trim() to
             line.substringAfter('=').trim().split(' ').filter { it.isNotEmpty() }
-        }
-        .flatten()
-        .map { File(krappedDir, File(it).name) }
-        .distinct()
-        .toList()
+    }
+    fun resolve(key: String, searchPath: List<String>) = entries[key].orEmpty().map { name ->
+        val candidates =
+            if (File(name).isAbsolute) listOf(File(name)) else searchPath.map { File(it, name) }
+        candidates.firstOrNull { it.isFile } ?: candidates.firstOrNull() ?: File(name)
+    }
+    val includeDirs = entries["compilerOpts"].orEmpty()
+        .filter { it.startsWith("-I") }
+        .map { it.removePrefix("-I") }
+    return (
+        resolve("headers", includeDirs) +
+            resolve("staticLibraries", entries["libraryPaths"].orEmpty())
+        ).distinct()
+}
 
 /**
- * Wire the cinterop task (#16 + #249).
+ * Wire the cinterop task (#16 + #249 + #251).
  *
- * TWO declarations, and the second is the one #249 was about:
  *  * `dependsOn(kplusplusSync)` — the generator runs first, so the task can never process a
  *    STALE `.def` (issue #16); and
- *  * the generated `<module>.h` + `lib<module>.a` as declared INPUTS — so it can never process
- *    a stale ARCHIVE either. `interop.definitionFile` is the task's only built-in input, and
- *    the `.def`'s content is deterministic from the module name + this checkout's krapped dir,
- *    so it NEVER changes. The klib packages the archive into itself, which froze it: an edited
- *    C++ header regenerated `lib<module>.a`, the cinterop task went UP-TO-DATE against the
- *    unchanged `.def`, and `nativeTest` ran zero tests against the archive embedded in the klib
- *    minutes earlier. Symmetric, so a REVERT did not land either — the #16 fix addressed the
- *    pointer and not the pointee.
+ *  * every artifact the `.def` points at as a declared INPUT, so it can never process a stale
+ *    ARCHIVE either (#249). `interop.definitionFile` is the task's only built-in input, and the
+ *    `.def`'s content barely changes, while the klib packages the archive into itself: an edited
+ *    C++ header regenerated `lib<module>.a`, the task went UP-TO-DATE against the unchanged
+ *    `.def`, and `nativeTest` ran zero tests against the archive embedded minutes earlier.
  *
- * `inputs.files` (plural) + `optional(true)`: neither artifact exists at configuration time on
- * a clean checkout — `kplusplusSync` writes them, and the `dependsOn` above is what orders it —
- * so the declaration has to tolerate absence exactly like the sync task's own manifest input
- * does. [PathSensitivity.NONE] because only CONTENT matters here: the archive is referenced by
- * an absolute `libraryPaths`, so a checkout at a different path is not a different input.
+ * The input set is READ FROM THE `.def` ITSELF, lazily: Gradle re-resolves the callable when it
+ * fingerprints the task's inputs, which is after `kplusplusSync` has (re)written the `.def`. So
+ * whichever writer produced it — the seed path's [seedDefContent] or krapper's `DefWriter` on
+ * the cpp path — the declared set IS the set the `.def` names, by construction (#251), rather
+ * than a hand-kept list that has to be asserted equal to one writer's output. No `.def` yet
+ * (configuration on a clean checkout) declares nothing instead of throwing.
+ *
+ * [PathSensitivity.NONE] because only CONTENT matters: the `.def` references the artifacts by
+ * absolute path, so a checkout at a different path is not a different input.
  */
 internal fun configureInteropTask(
     project: Project,
     interopTaskName: String,
-    krappedDir: File,
-    moduleName: String
+    def: File
 ) {
-    val artifacts = cinteropWrapperArtifacts(krappedDir, moduleName)
     project.tasks.matching { it.name == interopTaskName }.configureEach { task ->
         task.dependsOn("kplusplusSync")
-        task.inputs.files(artifacts)
+        task.inputs.files(Callable { if (def.isFile) defArtifactsIn(def.readText()) else emptyList() })
             .withPropertyName("krappedWrapperArtifacts")
             .withPathSensitivity(PathSensitivity.NONE)
             .optional(true)

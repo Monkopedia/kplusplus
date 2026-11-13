@@ -368,3 +368,11 @@ val noncopyableDeterminismCheck by tasks.registering(Exec::class) {
 tasks.named("check") {
     dependsOn(noncopyableDeterminismCheck)
 }
+
+// #251: DefWriterGoldenTest compares DefWriter's output against the Gradle plugin's test fixture.
+// It lives outside this project, so declare it, or editing it leaves nativeTest UP-TO-DATE.
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+    inputs.file(rootProject.file("compiler/gradle/src/test/resources/defwriter-golden.def"))
+        .withPropertyName("defWriterGolden")
+        .withPathSensitivity(PathSensitivity.NONE)
+}
