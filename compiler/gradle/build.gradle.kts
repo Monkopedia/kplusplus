@@ -182,7 +182,7 @@ val verifyConsumedPluginPins =
                 // The copy-paste quickstart block a real external consumer runs first (#218).
                 "docs/getting-started.md",
             ).map { repoRoot.file(it).asFile }
-        // Declared so verifyCompilerCheckPaths (compiler/build.gradle.kts, #230) sees them.
+        // Declared so verifyWorkflowPaths (gradle/workflow-paths.gradle.kts, #230) sees them.
         inputs.files(pinFiles)
         doLast {
             val pin = Regex("""id\("com\.monkopedia\.kplusplus\.compiler"\)\s+version\s+"([^"]+)"""")
@@ -265,6 +265,37 @@ tasks.shadowJar {
     exclude("**/module-info.class")
 }
 
+// #231: a bundled package missing from `shadedPackages` keeps its original name and brings back
+// #194's NoSuchMethodError at an external consumer's first sync — which nothing here exercises
+// the way a stranger does. So check the built jar, not the list: every class must be the
+// plugin's own (`com.monkopedia.kplusplus`), the shared wire protocol (`com.monkopedia.krapper`),
+// or relocated under `shadedPrefix`.
+val verifyShadedJar =
+    tasks.register("verifyShadedJar") {
+        group = "verification"
+        description = "Check the shadow jar bundles no third-party class outside $shadedPrefix."
+        val shadowJar = tasks.shadowJar.flatMap { it.archiveFile }
+        inputs.file(shadowJar)
+        doLast {
+            val classes = mutableListOf<String>()
+            zipTree(shadowJar).matching { include("**/*.class") }.visit {
+                if (!isDirectory) classes += relativePath.pathString
+            }
+            val ours = listOf(shadedPrefix, "com.monkopedia.kplusplus", "com.monkopedia.krapper")
+                .map { it.replace('.', '/') + "/" }
+            val stray = classes.filter { c -> ours.none(c::startsWith) }
+            check(stray.isEmpty()) {
+                "${stray.size} bundled class(es) escaped relocation; add their packages to " +
+                    "shadedPackages:\n" + stray.take(20).joinToString("\n") { "  $it" }
+            }
+            check(classes.any { it.startsWith(ours.first()) }) { "No relocated class in the shadow jar." }
+        }
+    }
+
+tasks.check {
+    dependsOn(verifyShadedJar)
+}
+
 // The plain `jar` would write the same archive name as the shadow jar above, and there is
 // nothing left for it to produce: the shadow plugin already makes its jar the artifact of the
 // `java` component, so the shadow jar is what gets published, what the Plugin Portal uploads,
@@ -290,7 +321,7 @@ gradlePlugin {
 // signing unconditionally, and with no signatory present the sign task FAILS ("no configured
 // signatory") — including for a plain, unsigned `publishToMavenLocal`. Gate it on the
 // in-memory key so local mavenLocal stays credential-free while CI signs. The release
-// workflow exports ORG_GRADLE_PROJECT_signingInMemoryKey from the SIGNING_KEY secret.
+// workflow exports ORG_GRADLE_PROJECT_signingInMemoryKey from the OSSRH_GPG_SECRET_KEY secret.
 val signingConfigured =
     providers.gradleProperty("signingInMemoryKey").isPresent ||
         providers.environmentVariable("ORG_GRADLE_PROJECT_signingInMemoryKey").isPresent

@@ -114,7 +114,8 @@ jobs:
       - name: nativeTest (krapper, krapper_model, feature-tests) + ktlintCheck
         run: |
           # shellcheck disable=SC2046,SC2086 # one task per module
-          ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) ktlintCheck
+          ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) ktlintCheck \
+            :verifyWorkflowPaths
 
       # #276: konan-cache's init script fails the build on a KGP version it did not key on.
       # This catches the rest: KGP provisioning that version somewhere other than the home the
@@ -195,7 +196,7 @@ jobs:
         run: |
           # shellcheck disable=SC2046,SC2086 # one task per module
           ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) \
-            :krapper:noncopyableDeterminismCheck
+            :krapper:noncopyableDeterminismCheck :verifyWorkflowPaths
 
       # Same as the other job (#276).
       - name: Assert KGP provisioned the version the cache is keyed on

@@ -89,8 +89,8 @@ creds are reused unchanged. The signing key is the established v1 identity `5B83
 4. Nothing further to do on the Central side — the deployment releases itself after validation.
    Watch the workflow run (and, if you want, https://central.sonatype.com → **Deployments**) for
    status. The Gradle plugin publish to the Plugin Portal is also live immediately.
-   (To require a manual release step instead, set `automaticRelease = false` in the four
-   `publishToMavenCentral(...)` calls.)
+   (To require a manual release step instead, set `automaticRelease = false` in every
+   `publishToMavenCentral(...)` call under `compiler/`.)
 
 ## Local dry run (no outward upload)
 

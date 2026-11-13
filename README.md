@@ -115,6 +115,7 @@ build so it runs as part of normal compilation. K++ is frequently paired with
 | `cppfixture/` | A small standing test that the generic front-end path works on a non-stdlib module. |
 | `clangwalk/` | A self-host proof: walks a real Clang AST entirely on generated bindings. |
 | `samples/minimal/` | A tiny standalone sample binding a hand-written C++ geometry library — the newcomer's first contact. |
+| `samples/multiproject/` | The multi-project canary: keeps the root-Kotlin + kplusplus-subproject shape (#194) under CI. |
 | `samples/v8/` | The heavyweight V8 sample. |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture and
