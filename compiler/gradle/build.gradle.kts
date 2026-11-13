@@ -182,6 +182,8 @@ val verifyConsumedPluginPins =
                 // The copy-paste quickstart block a real external consumer runs first (#218).
                 "docs/getting-started.md",
             ).map { repoRoot.file(it).asFile }
+        // Declared so verifyCompilerCheckPaths (compiler/build.gradle.kts, #230) sees them.
+        inputs.files(pinFiles)
         doLast {
             val pin = Regex("""id\("com\.monkopedia\.kplusplus\.compiler"\)\s+version\s+"([^"]+)"""")
             val found =

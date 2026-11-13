@@ -249,7 +249,7 @@ at_verdict pass "a healthy suite"                    $F/healthy.xml
 at_verdict pass "a mostly-skipped suite"             $F/boundary.xml
 at_verdict pass "a chatty <system-out> file"         $F/decoy-system-out.xml
 
-# The six remaining `exit 1`s guard "no JUnit XML at all" / "no test source tree at
+# The remaining `exit 1`s guard "no JUnit XML at all" / "no test source tree at
 # all", conditions this harness cannot reach because it SUPPLIES the file list. They
 # get the same invariant statically instead, with its denominator on the line: every
 # `::error::` in the workflows is a diagnosis whose consequence is the very next line.
@@ -259,8 +259,8 @@ E='^[[:space:]]*echo "::error::'
 ne=$(grep -cE "$E" ../workflows/*.yml | awk -F: '{n+=$2} END{print n+0}')
 np=$(awk -v e="$E" '$0 ~ e { if ((getline nxt) > 0 && nxt ~ /^[[:space:]]*exit 1[[:space:]]*$/) n++ }
           END { print n + 0 }' ../workflows/*.yml)
-want "::error:: annotations across .github/workflows/*.yml" 21 "$ne"
-want "...each one immediately followed by 'exit 1'"    21 "$np"
+want "::error:: annotations across .github/workflows/*.yml" 22 "$ne"
+want "...each one immediately followed by 'exit 1'"    22 "$np"
 
 # Negative control for the in-situ block. A guard whose failure path has never been
 # observed is exactly what this whole sequence is about, so watch it fail: take each
