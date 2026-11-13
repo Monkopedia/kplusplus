@@ -60,13 +60,15 @@ abstract class WrappedElement(
         mutableChildren.remove(child)
     }
 
-    abstract fun clone(): WrappedElement
-
     /**
-     * Returns [copy] carrying this element's base-class provenance ([sourceLocation]). Every
-     * clone()/copy() override builds its fresh instance through here, so a subclass that
-     * rebuilds only its own declared state can't silently drop it (#255).
+     * A shallow copy of this element. Final so base-class provenance ([sourceLocation]) is
+     * carried here, whatever a subclass's [cloneImpl] rebuilds (#255).
      */
+    fun clone(): WrappedElement = carryProvenance(cloneImpl())
+
+    /** Rebuilds this subclass's own declared state; [clone] adds the base-class state. */
+    protected abstract fun cloneImpl(): WrappedElement
+
     protected fun <T : WrappedElement> carryProvenance(copy: T): T =
         copy.also { it.sourceLocation = sourceLocation }
 

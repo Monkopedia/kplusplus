@@ -73,7 +73,7 @@ data class WrappedTemplate(val name: String) : WrappedElement() {
         append("}\n")
     }
 
-    override fun clone(): WrappedElement = carryProvenance(WrappedTemplate(name)).also {
+    override fun cloneImpl(): WrappedElement = WrappedTemplate(name).also {
         it.addAllChildren(children)
         it.parent = parent
         it.metadata = metadata.copy()
@@ -90,11 +90,10 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
         }
     val otherParams = mutableListOf<WrappedTemplateParam>()
 
-    override fun clone(): WrappedTemplateParam =
-        carryProvenance(WrappedTemplateParam(name, usr)).also {
-            it.addAllChildren(children)
-            it.parent = parent
-        }
+    override fun cloneImpl(): WrappedTemplateParam = WrappedTemplateParam(name, usr).also {
+        it.addAllChildren(children)
+        it.parent = parent
+    }
 
     override fun toString(): String = "$name${defaultType?.let { " $it" } ?: ""} ($children)"
 
@@ -104,7 +103,7 @@ class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement()
 }
 
 class WrappedTypedef(val name: String, val targetType: WrappedType) : WrappedElement() {
-    override fun clone(): WrappedTypedef = carryProvenance(WrappedTypedef(name, targetType)).also {
+    override fun cloneImpl(): WrappedTypedef = WrappedTypedef(name, targetType).also {
         it.addAllChildren(children)
         it.parent = parent
     }

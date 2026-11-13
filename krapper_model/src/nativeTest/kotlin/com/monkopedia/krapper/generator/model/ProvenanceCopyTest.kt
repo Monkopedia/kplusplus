@@ -16,95 +16,70 @@
 package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.SourceLocation
-import com.monkopedia.krapper.generator.model.type.WrappedEnumType
-import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
-import com.monkopedia.krapper.generator.model.type.WrappedModifiedType
-import com.monkopedia.krapper.generator.model.type.WrappedOpaqueType
-import com.monkopedia.krapper.generator.model.type.WrappedPrefixedType
-import com.monkopedia.krapper.generator.model.type.WrappedTemplateRef
-import com.monkopedia.krapper.generator.model.type.WrappedTemplateType
 import com.monkopedia.krapper.generator.model.type.WrappedType
-import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
-import com.monkopedia.krapper.generator.model.type.WrappedTypedefRef
-import com.monkopedia.krapper.generator.model.type.WrappedTypename
+import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * #255: [WrappedElement.sourceLocation] is base-class provenance, so every subclass's
- * `clone()`, and `copy()` on the [WrappedMethod] family, must keep it. The parse-time return
- * rewrites (pair->bool, StringRef->std::string, unique_ptr->release) build their result with
- * `copy()`, so a dropped location there leaves the method's drop-ledger row with no position.
+ * #255: [WrappedElement.sourceLocation] is base-class provenance, so `clone()`, and `copy()`
+ * on the [WrappedMethod] family, must keep it. The parse-time return rewrites (pair->bool,
+ * StringRef->std::string, unique_ptr->release) build their result with `copy()`, so a dropped
+ * location there leaves the method's drop-ledger row with no position.
  *
- * Kotlin/Native has no subclass reflection, and [WrappedElement] can't be `sealed` (its
- * subclasses span the `model` and `model.type` packages), so the subclasses are listed by
- * hand: every concrete [WrappedElement] in this module, 12 elements and 10 types. A new
- * subclass belongs in [instances].
+ * Both entry points are final and carry it themselves, so a subclass's impl can't drop it.
+ * The dummies below are such subclasses: they rebuild only their own state, like a new
+ * subclass that knows nothing about provenance.
  */
 class ProvenanceCopyTest {
 
+    private class WrappedDummy : WrappedElement() {
+        override fun cloneImpl(): WrappedElement = WrappedDummy()
+    }
+
+    private class DummyMethod : WrappedMethod("dummy", WrappedType("int")) {
+        override fun cloneImpl(): WrappedMethod = DummyMethod()
+
+        override fun copyImpl(
+            name: String,
+            returnType: WrappedType,
+            methodType: MethodType,
+            children: List<WrappedElement>
+        ): WrappedMethod = DummyMethod()
+    }
+
     private val int = WrappedType("int")
 
-    private fun instances(): List<WrappedElement> = listOf(
-        WrappedTU(),
-        WrappedNamespace("demo"),
-        WrappedClass("Thing"),
-        WrappedBase(WrappedType("demo::Base")),
-        WrappedField("count", int),
-        WrappedMethod("lookup", int),
-        WrappedConstructor("Thing", WrappedType.VOID, false, true),
-        WrappedDestructor("~Thing", WrappedType.VOID),
-        WrappedArgument("key", int),
-        WrappedTemplate("Box"),
-        WrappedTemplateParam("T", "c:@T"),
-        WrappedTypedef("id_t", int),
-        // The types share WrappedType.clone() = this; listed so a type that starts
-        // overriding clone() is pinned too.
-        WrappedTypedefRef("c:@id"),
-        WrappedTypename("T"),
-        WrappedTemplateRef("T"),
-        WrappedTypeReference("demo::Thing"),
-        WrappedOpaqueType(WrappedType("demo::Thing")),
-        WrappedModifiedType(int, "*"),
-        WrappedPrefixedType(int, "const"),
-        WrappedTemplateType(WrappedType("std::vector"), listOf(int)),
-        WrappedEnumType("demo::Color", int),
-        WrappedFunctionPointer("Transform", int, listOf(int))
-    )
-
-    private fun <T : WrappedElement> located(element: T, line: Int): T = element.also {
+    private fun <T : WrappedElement> located(element: T, line: Int = 12): T = element.also {
         it.sourceLocation = SourceLocation("/x/h.h", line, 5)
     }
 
     @Test
-    fun every_subclass_is_listed_once() {
-        assertEquals(22, instances().map { it::class }.toSet().size)
-    }
-
-    @Test
-    fun clone_keeps_sourceLocation() {
-        for ((i, element) in instances().withIndex()) {
-            val original = located(element, i + 1)
+    fun clone_keeps_sourceLocation_for_a_subclass_that_does_not_carry_it() {
+        for (original in listOf(located(WrappedDummy()), located(DummyMethod()))) {
             assertEquals(
                 original.sourceLocation,
                 original.clone().sourceLocation,
-                "${original::class.simpleName}.clone()"
+                "${original::class.simpleName}"
             )
         }
     }
 
     @Test
-    fun copy_keeps_sourceLocation() {
-        val methods = instances().filterIsInstance<WrappedMethod>()
-        assertEquals(3, methods.size, "WrappedMethod, WrappedConstructor, WrappedDestructor")
-        for ((i, method) in methods.withIndex()) {
-            val original = located(method, i + 1)
+    fun copy_keeps_sourceLocation_for_every_method_kind() {
+        val methods = listOf(
+            WrappedMethod("lookup", int),
+            WrappedConstructor("Thing", WrappedType.VOID, false, true),
+            WrappedDestructor("~Thing", WrappedType.VOID),
+            DummyMethod()
+        )
+        for (original in methods.map { located(it) }) {
             // The shape the parse-time return rewrites use.
             val copy = original.copy(returnType = WrappedType("std::string"))
             assertEquals(
                 original.sourceLocation,
                 copy.sourceLocation,
-                "${original::class.simpleName}.copy()"
+                "${original::class.simpleName}"
             )
         }
     }

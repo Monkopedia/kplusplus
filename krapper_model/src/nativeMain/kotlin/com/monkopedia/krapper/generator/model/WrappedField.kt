@@ -25,7 +25,7 @@ data class WrappedField(val name: String, val type: WrappedType) : WrappedElemen
     @Transient
     val other = Any()
 
-    override fun clone(): WrappedElement = carryProvenance(WrappedField(name, type)).also {
+    override fun cloneImpl(): WrappedElement = WrappedField(name, type).also {
         it.addAllChildren(children)
         it.parent = parent
     }
