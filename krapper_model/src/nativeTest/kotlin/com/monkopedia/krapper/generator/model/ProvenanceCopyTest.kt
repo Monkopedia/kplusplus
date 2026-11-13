@@ -17,9 +17,11 @@ package com.monkopedia.krapper.generator.model
 
 import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedTypeReference
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 /**
  * #255: [WrappedElement.sourceLocation] is base-class provenance, so `clone()`, and `copy()`
@@ -96,5 +98,29 @@ class ProvenanceCopyTest {
         assertEquals(cls.sourceLocation, clone.sourceLocation)
         assertEquals(method.sourceLocation, clonedMethod.sourceLocation)
         assertEquals(SourceLocation("/x/h.h", 3, 5), clonedMethod.children.single().sourceLocation)
+    }
+
+    /**
+     * #288: these three lost `data` (whose `copy()` dropped provenance) and spell their value
+     * equality out instead; it must still be by value, never by identity or by location.
+     */
+    @Test
+    fun former_data_classes_keep_value_equality() {
+        val pairs = listOf(
+            { n: String -> WrappedField(n, WrappedTypeReference("int")) },
+            { n: String -> WrappedTemplate(n) },
+            { n: String -> WrappedTypeReference(n) }
+        )
+        for (make in pairs) {
+            val a = make("a")
+            val b = located(make("a"))
+            assertEquals<Any>(a, b)
+            assertEquals(a.hashCode(), b.hashCode())
+            assertNotEquals<Any>(a, make("b"))
+        }
+        assertNotEquals<Any>(
+            WrappedField("a", WrappedTypeReference("int")),
+            WrappedField("a", WrappedTypeReference("long"))
+        )
     }
 }
