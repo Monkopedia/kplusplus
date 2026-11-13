@@ -468,6 +468,15 @@ inline bool reachesRecoveredDecl(const clang::Decl *decl) {
     return finder.found;
 }
 
+namespace detail {
+inline std::string spellLocation(const clang::Decl *owner, clang::SourceLocation at) {
+    clang::PresumedLoc loc = owner->getASTContext().getSourceManager().getPresumedLoc(at);
+    if (loc.isInvalid() || !loc.getFilename()) return std::string();
+    return std::string(loc.getFilename()) + ":" + std::to_string(loc.getLine()) + ":" +
+           std::to_string(loc.getColumn());
+}
+} // namespace detail
+
 // #185 BRIDGE: the presumed `file:line:col` of a declaration, as one string.
 //
 // SourceLocation / PresumedLoc are value types with no bindable surface here (and binding
@@ -478,11 +487,15 @@ inline bool reachesRecoveredDecl(const clang::Decl *decl) {
 // of a bare symbol name.
 inline std::string declLocation(const clang::Decl *decl) {
     if (!decl) return std::string();
-    const clang::SourceManager &sm = decl->getASTContext().getSourceManager();
-    clang::PresumedLoc loc = sm.getPresumedLoc(decl->getLocation());
-    if (loc.isInvalid() || !loc.getFilename()) return std::string();
-    return std::string(loc.getFilename()) + ":" + std::to_string(loc.getLine()) + ":" +
-           std::to_string(loc.getColumn());
+    return detail::spellLocation(decl, decl->getLocation());
+}
+
+// #288: the same spelling for a base specifier of [record], at the base's written type (not
+// the `public`/`virtual` keyword that may begin it). A CXXBaseSpecifier is not a Decl and has
+// no ASTContext of its own, so the owning record supplies the SourceManager.
+inline std::string baseLocation(const clang::Decl *record, const clang::CXXBaseSpecifier *base) {
+    if (!record || !base) return std::string();
+    return detail::spellLocation(record, base->getBaseTypeLoc());
 }
 } // namespace kppbridge
 

@@ -55,6 +55,7 @@ import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlinx.cinterop.MemScope
+import kppbridge.baseLocation
 import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
@@ -325,7 +326,7 @@ private class ModelBuilder(
         record.definitionOrNull()?.let { if (skippedAsInvalid(decl, it.asDecl())) return }
         val name = record.asNamedDecl().getNameAsString() ?: return
         val template = templates.getOrPut(decl.cppUsr()) { WrappedTemplate(name) }
-            .locatedAt(decl)
+            .locatedAt(decl, templateDecl.isThisDeclarationADefinition())
         attachIfNew(template, parent, attach)
         template.templateArgCounter = 0
         // getTemplateParameters() lives on TemplateDecl — ClassTemplateDecl's
@@ -396,13 +397,15 @@ private class ModelBuilder(
 
     // #185: stamp the element with the C++ position of the decl it was built from, so a
     // later drop can be reported at `file:line:col` instead of by bare symbol name. Only
-    // provenance — no codegen path reads it. First stamp wins (a redeclaration-collapsed
-    // element keeps the position it was first seen at, matching how the memo works).
-    private fun <T : WrappedElement> T.locatedAt(decl: Decl): T = also {
-        if (it.sourceLocation == null) {
-            it.sourceLocation = declLocation(decl)?.let(SourceLocation::parse)
+    // provenance — no codegen path reads it. A redeclaration-collapsed element keeps the first
+    // position it was seen at, unless a later sighting is the DEFINITION (#288): `std::pair` is
+    // forward-declared at stl_pair.h:89, and a row about its body belongs at its definition.
+    private fun <T : WrappedElement> T.locatedAt(decl: Decl, isDefinition: Boolean = false): T =
+        also {
+            if (it.sourceLocation == null || isDefinition) {
+                declLocation(decl)?.let(SourceLocation::parse)?.let { at -> it.sourceLocation = at }
+            }
         }
-    }
 
     private fun addClass(
         record: CXXRecordDecl,
@@ -428,7 +431,7 @@ private class ModelBuilder(
         // to one element via the memo; members attach from the defining redecl only.
         val cls = classes.getOrPut(decl.cppUsr()) {
             WrappedClass(name, isAbstract = record.hasDefinition() && record.isAbstract())
-        }.locatedAt(decl)
+        }.locatedAt(decl, record.isThisDeclarationADefinition())
         attachIfNew(cls, parent, attach)
         if (record.isThisDeclarationADefinition()) {
             addBasesAndMembers(record, cls, cls.metadata)
@@ -470,7 +473,10 @@ private class ModelBuilder(
                     buildWrappedType(base.getType()),
                     isPublic = true,
                     isVirtualBase = base.isVirtual()
-                )
+                ).also {
+                    it.sourceLocation = baseLocation(record.asDecl(), base)
+                        ?.let(SourceLocation::parse)
+                }
             )
         }
         for (decl in record.asDeclContext().decls()) {
@@ -856,7 +862,7 @@ private class ModelBuilder(
                     param.asDecl().cppUsr(),
                     hasDefault,
                     defaultValue
-                )
+                ).locatedAt(param.asDecl())
             )
         }
     }
