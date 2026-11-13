@@ -19,6 +19,7 @@ import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.DefaultFilter
 import com.monkopedia.krapper.FilterDefinition
 import com.monkopedia.krapper.ReferencePolicy
+import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.builders.CppCodeBuilder
 import com.monkopedia.krapper.generator.codegen.CppWriter
 import com.monkopedia.krapper.generator.codegen.File
@@ -55,6 +56,9 @@ import platform.posix.system
 // parent-side run of `childFreshProcessBaseline`) the child entry point does nothing.
 private const val CHILD_CONFIG_ENV = "KRAPPER_DETERMINISM_CHILD_CONFIG"
 private const val CHILD_OUT_ENV = "KRAPPER_DETERMINISM_CHILD_OUT"
+
+/** Where [DeterminismTest]'s dropped member claims to be declared. */
+private val UNRESOLVABLE_AT = SourceLocation("fixture.h", 12, 5)
 
 /** The single `@Test` the parent re-executes; matched by the runner's `--ktest_filter`. */
 private const val CHILD_TEST_NAME = "childFreshProcessBaseline"
@@ -203,7 +207,11 @@ class DeterminismTest {
             if (config.withUnresolvableMember) {
                 // `fixture::Nowhere` is declared nowhere, so under IGNORE_MISSING this member
                 // is dropped and the drop is ledgered — the run's ledger is non-empty.
-                widget.addChild(method("unresolvable", WrappedType("fixture::Nowhere")))
+                widget.addChild(
+                    method("unresolvable", WrappedType("fixture::Nowhere")).also {
+                        it.sourceLocation = UNRESOLVABLE_AT
+                    }
+                )
             }
         }
         WrappedClass("Gadget").also { gadget ->
@@ -421,6 +429,17 @@ class DeterminismTest {
         val config = Config.byName(configName)
         val files = generateOnce(config, ModelIo.encodeToString(buildModel(config)))
         File(out).writeText(encodeTranscript(files))
+    }
+
+    /**
+     * #288: the model reaches the pipeline through ModelIo, so a location it dropped would leave
+     * every ledger row this suite compares unlocated, and a location leak between runs invisible.
+     */
+    @Test
+    fun ledgerCarriesTheModelLocation(): Unit = runBlocking {
+        val ledger = generateOnce(Config.A, ModelIo.encodeToString(buildModel(Config.A)))
+            .getValue(ledgerEntry)
+        assertTrue("($UNRESOLVABLE_AT)" in ledger, ledger)
     }
 
     /** The original guard: the same config generated twice in one process is byte-identical. */

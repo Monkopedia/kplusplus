@@ -128,7 +128,7 @@ object CppParser {
 // deterministic param substitution (Parsing.typedAs). This guard parses the fixture repeatedly
 // and asserts the pattern's special-member set never varies — so a future change that started
 // walking the lazily-instantiated specialization would fail here.
-private val NONCOPYABLE_FIXTURE = """
+internal val NONCOPYABLE_FIXTURE = """
     struct Value { int x; };
 
     template <class T>
@@ -193,10 +193,9 @@ fun noncopyableDeterminismCheck(): Int {
     }
 
     val args = CppParser.driverArgs(std = "c++17", includeDirs = emptyList())
-    val models = (1..NONCOPYABLE_PARSE_COUNT).map { i ->
-        CppParser.parse(NONCOPYABLE_FIXTURE, "noncopyable_$i.cc", args)
-    }
-    val jsons = models.map { ModelIo.encodeToString(it) }
+    val names = (1..NONCOPYABLE_PARSE_COUNT).map { "noncopyable_$it.cc" }
+    val models = names.map { CppParser.parse(NONCOPYABLE_FIXTURE, it, args) }
+    val jsons = models.zip(names) { model, name -> fixtureModelJson(model, name) }
     val divergent = jsons.withIndex().filter { it.value != jsons.first() }.map { it.index + 1 }
     check(
         "$NONCOPYABLE_PARSE_COUNT parses of the NonCopyable fixture are byte-identical (#101)",
@@ -238,6 +237,14 @@ fun noncopyableDeterminismCheck(): Int {
     )
     return failures
 }
+
+/**
+ * [tu]'s ModelIo JSON with every location in [fileName] re-spelled as one fixed name, so parses
+ * that differ only in the name they were given encode identically. Only that file is rewritten;
+ * lines, columns and every non-location field are still compared.
+ */
+internal fun fixtureModelJson(tu: WrappedTU, fileName: String): String =
+    ModelIo.encodeToString(tu) { if (it.file == fileName) it.copy(file = "<fixture>") else it }
 
 // ---- shared helpers ------------------------------------------------------------------------
 

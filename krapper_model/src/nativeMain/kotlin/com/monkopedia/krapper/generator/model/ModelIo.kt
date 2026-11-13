@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.model
 
+import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
@@ -64,6 +65,9 @@ import kotlinx.serialization.json.Json
 //    back-reference; decode rebuilds the exact aliasing structure. Encode and decode
 //    walk the graph in the same canonical order ([modelFields] then children), so a
 //    definition is always materialized before its back-references resolve.
+//  - Provenance rides in an envelope: [LocatedDto] wraps any node whose
+//    [WrappedElement.sourceLocation] is set, rather than a slot on every DTO. Most nodes
+//    (every type) are unlocated, and their encoding stays byte-identical.
 @Serializable
 sealed class NodeDto {
     abstract val children: List<NodeDto>
@@ -197,6 +201,15 @@ data class DefDto(
     override val children: List<NodeDto> = emptyList()
 ) : TypeDto()
 
+/** [node], whose element was declared [at] (#288). */
+@Serializable
+@SerialName("at")
+data class LocatedDto(
+    val at: SourceLocation,
+    val node: NodeDto,
+    override val children: List<NodeDto> = emptyList()
+) : TypeDto()
+
 @Serializable
 @SerialName("ref")
 data class RefDto(val id: Int, override val children: List<NodeDto> = emptyList()) : TypeDto()
@@ -266,9 +279,9 @@ data class FunctionPointerDto(
 ) : TypeDto()
 
 /** Identity (===) wrapper so HashSet/HashMap can key model nodes by instance, not value
- * (several model classes are value-equal data classes). hashCode delegates to the
- * element's own hashCode — identity hash for regular classes, a STABLE value hash for
- * the data classes (their hash only covers immutable constructor vals), so distinct
+ * (several model classes are value-equal). hashCode delegates to the element's own
+ * hashCode — identity hash for most classes, a STABLE value hash for the value-equal ones
+ * (their hash only covers immutable constructor vals), so distinct
  * equal-value instances simply co-bucket while remaining distinct keys. */
 class ElementIdentity(val element: WrappedElement) {
     override fun equals(other: Any?): Boolean =
@@ -327,7 +340,10 @@ private fun collectShared(root: WrappedElement): Set<ElementIdentity> {
     return shared
 }
 
-private class ModelEncoder(private val shared: Set<ElementIdentity>) {
+private class ModelEncoder(
+    private val shared: Set<ElementIdentity>,
+    private val relocate: (SourceLocation) -> SourceLocation
+) {
     private val ids = HashMap<ElementIdentity, Int>()
 
     fun element(element: WrappedElement): NodeDto {
@@ -338,9 +354,14 @@ private class ModelEncoder(private val shared: Set<ElementIdentity>) {
             // back-reference instead of hanging the encoder.
             val id = ids.size
             ids[key] = id
-            return DefDto(id, raw(element))
+            return DefDto(id, located(element))
         }
-        return raw(element)
+        return located(element)
+    }
+
+    private fun located(element: WrappedElement): NodeDto {
+        val node = raw(element)
+        return element.sourceLocation?.let { LocatedDto(relocate(it), node) } ?: node
     }
 
     fun type(type: WrappedType): TypeDto = element(type) as TypeDto
@@ -472,6 +493,8 @@ private class ModelDecoder {
 
             is DefDto -> return element(dto.node).also { byId[dto.id] = it }
 
+            is LocatedDto -> return element(dto.node).also { it.sourceLocation = dto.at }
+
             else -> {}
         }
         val element = when (dto) {
@@ -568,7 +591,7 @@ private class ModelDecoder {
             dto.cppName ?: dto.cName
         )
 
-        is DefDto, is RefDto -> error("def/ref handled in element()")
+        is DefDto, is RefDto, is LocatedDto -> error("def/ref/at handled in element()")
     }
 }
 
@@ -608,8 +631,17 @@ object ModelIo {
         encodeDefaults = false
     }
 
-    fun encodeToString(tu: WrappedTU): String =
-        json.encodeToString(NodeDto.serializer(), ModelEncoder(collectShared(tu)).element(tu))
+    /**
+     * [relocate] rewrites each location as it is written, for a caller comparing models parsed
+     * under different file names (the #101 check); it leaves the model itself untouched.
+     */
+    fun encodeToString(
+        tu: WrappedTU,
+        relocate: (SourceLocation) -> SourceLocation = { it }
+    ): String = json.encodeToString(
+        NodeDto.serializer(),
+        ModelEncoder(collectShared(tu), relocate).element(tu)
+    )
 
     fun decodeFromString(text: String): WrappedTU =
         ModelDecoder().element(json.decodeFromString(NodeDto.serializer(), text)) as WrappedTU

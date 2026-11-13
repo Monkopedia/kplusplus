@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator.model
 
+import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
 import com.monkopedia.krapper.generator.model.type.WrappedFunctionPointer
@@ -200,5 +201,30 @@ class ModelIoTest {
 
         val typedef = assertIs<WrappedTypedef>(ns.children[2])
         assertEquals("unresolved_typedef(c:@id)", typedef.targetType.toString())
+    }
+
+    /**
+     * #288: `sourceLocation` survives the round trip on every element that has one, including
+     * an identity-shared node (a def/ref target); an unlocated element stays unlocated.
+     */
+    @Test
+    fun roundTrip_keepsSourceLocations() {
+        val tu = buildModel()
+        var line = 0
+        tu.forEachRecursive { it.sourceLocation = SourceLocation("d.h", ++line, 3) }
+        fun method(root: WrappedElement) =
+            root.filterRecursive { it is WrappedMethod }.first() as WrappedMethod
+        method(tu).args[0].type.sourceLocation = SourceLocation("t.h", 1, 1)
+
+        fun locations(root: WrappedElement) = buildList {
+            root.forEachRecursive { add(it::class.simpleName to it.sourceLocation) }
+        }
+        val restored = ModelIo.decodeFromString(ModelIo.encodeToString(tu))
+
+        assertEquals(locations(tu), locations(restored))
+        assertEquals(null, restored.sourceLocation)
+        val args = method(restored).args
+        assertEquals(SourceLocation("t.h", 1, 1), args[0].type.sourceLocation)
+        assertSame(args[0].type, assertIs<WrappedEnumType>(args[3].type).underlying)
     }
 }
