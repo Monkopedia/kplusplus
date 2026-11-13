@@ -13,7 +13,7 @@ plugins {
     // (run as part of `check`) that diffs the current public API against the committed `.api`
     // dumps. Regenerate the baseline with `apiDump` when the public API changes intentionally.
     alias(libs.plugins.binary.compatibility.validator)
-    // Gives this root a `check` lifecycle, so `-p compiler check` runs verifyCompilerCheckPaths.
+    // Gives this root a `check` lifecycle, so `-p compiler check` runs verifyWorkflowPaths.
     base
 }
 
@@ -108,102 +108,58 @@ tasks.register("publishPluginToPortal") {
     dependsOn(":kplusplus-compiler-gradle:publishPlugins")
 }
 
-// #230: compiler-check.yml only runs on PRs touching its `pull_request.paths`, and a list that
-// omits a file does not fail — it just does not fire, so a gate here is silently filtered off
-// the very PR that could trip it. Make the list report its own gaps: every repo file this
-// `check` run reads from OUTSIDE `compiler/**` must be matched by some entry. `compiler/**`
-// itself always triggers the job, so a new read wired in here fails on the PR that adds it.
-//
-// What counts as "read", discovered rather than listed wherever Gradle can see it:
-//   * the declared input files of every task in this run's graph (compile sources, the
-//     `verify*` tasks' `inputs.files` — a gate that reads a repo file must declare it);
-//   * every Test system property whose value is an existing file (BindingIndexCoverageTest's
-//     featuregen denominator reaches its test that way, not as a declared input);
-//   * what verify.sh reads (the step before `check`): every file under
-//     .github/test-evidence-gate and .github/workflows, listed from disk;
-//   * the build's own entry points, read before any task exists. These four are the one
-//     hand-kept part: the wrapper, and the two root files compiler/*.gradle.kts load by path.
-val verifyCompilerCheckPaths =
-    tasks.register("verifyCompilerCheckPaths") {
+// #230: compiler-check.yml only runs on PRs touching its `pull_request.paths`, so every repo
+// file `-p compiler check` reads must be matched there — see gradle/workflow-paths.gradle.kts,
+// shared with the root build's root-build.yml check (#231). On top of what it discovers, this
+// run also executes verify.sh (the step before `check`), which reads every file under
+// .github/test-evidence-gate and .github/workflows.
+extra["workflowPaths.workflow"] = rootDir.resolve("../.github/workflows/compiler-check.yml")
+extra["workflowPaths.alsoRead"] = listOf(".github/test-evidence-gate", ".github/workflows")
+apply(from = "../gradle/workflow-paths.gradle.kts")
+
+// #231: README.md and docs/ARCHITECTURE.md each carry a module table, and both silently missed
+// samples/multiproject when it landed. Derive the module set instead of trusting either table:
+// every root-build `include(":…")`, this build, and every samples/<dir> with its own settings
+// script must be named (as `<module>/`) in both. It runs here because this is the cheapest job,
+// and the sample settings scripts are declared inputs, so verifyWorkflowPaths forces
+// compiler-check.yml to fire on the PR that adds a sample.
+val verifyModuleDocs =
+    tasks.register("verifyModuleDocs") {
         group = "verification"
         description =
-            "Check every repo file `-p compiler check` reads outside compiler/ is matched by " +
-                "compiler-check.yml's pull_request.paths."
-        val repoRoot = layout.projectDirectory.asFile.parentFile
-        val workflow = repoRoot.resolve(".github/workflows/compiler-check.yml")
-        fun rel(files: Iterable<File>) =
-            files
-                .map { it.canonicalFile.relativeTo(repoRoot.canonicalFile).invariantSeparatorsPath }
-                .filter { !it.startsWith("../") && !it.startsWith("compiler/") }
-        val fromGraph = sortedSetOf<String>()
-        gradle.taskGraph.whenReady {
-            if (!hasTask(this@register)) return@whenReady
-            fromGraph +=
-                rel(
-                    allTasks.flatMap { t ->
-                        t.inputs.files.files +
-                            ((t as? Test)?.systemProperties?.values.orEmpty())
-                                .map { file(it.toString()) }.filter { it.isFile }
-                    }
-                )
-        }
+            "Check every module and sample is named in README.md and docs/ARCHITECTURE.md."
+        val repoRoot = rootDir.parentFile
+        val settings = repoRoot.resolve("settings.gradle.kts")
+        val samples = fileTree(repoRoot.resolve("samples")) { include("*/settings.gradle.kts") }
+        val docs = listOf("README.md", "docs/ARCHITECTURE.md").map(repoRoot::resolve)
+        inputs.files(settings, samples, docs)
         doLast {
-            // GitHub filter-pattern semantics for the subset used: `**` crosses `/` (and `**/`
-            // may match no directory at all), `*` does not. GitHub's `?`/`+`/`[]`/`!` mean
-            // something else from shell globs, so refuse them rather than guess.
-            fun glob(p: String): Regex {
-                check(p.none { it in "?+[]!" }) { "Unsupported filter syntax `$p`; extend glob()." }
-                return Regex(
-                    Regex("""\*\*/|\*\*|\*|[^*]+""").findAll(p).joinToString("") {
-                        when (it.value) {
-                            "**/" -> "(?:.*/)?"
-                            "**" -> ".*"
-                            "*" -> "[^/]*"
-                            else -> Regex.escape(it.value)
-                        }
-                    }
-                )
+            // Every argument of every `include(...)`, so `include(":a", ":b")` counts both.
+            val included =
+                Regex("""include\(([^)]*)\)""").findAll(settings.readText())
+                    .flatMap { Regex("\":([^\"]+)\"").findAll(it.groupValues[1]) }
+                    .map { it.groupValues[1] }.toList()
+            val sampleDirs = samples.files.map { "samples/${it.parentFile.name}" }
+            check(included.isNotEmpty() && sampleDirs.isNotEmpty()) {
+                "Discovered includes $included and samples $sampleDirs — the discovery broke."
             }
-            check(glob("a/**").matches("a/b/c") && !glob("a/*").matches("a/b/c")) { "glob() broke" }
-            // The `paths:` block under `pull_request:`: its `- '…'` items, comments skipped.
-            val lines = workflow.readLines()
-            val paths =
-                lines.drop(lines.indexOfFirst { it.trim() == "pull_request:" })
-                    .dropWhile { it.trim() != "paths:" }.drop(1)
-                    .map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
-                    .takeWhile { it.startsWith("- ") }
-                    .map { it.removePrefix("- ").substringBefore(" #").trim().trim('\'', '"') }
-            check(paths.isNotEmpty()) { "Parsed no pull_request.paths out of $workflow." }
-            // Vacuity guard: run on its own (not as part of `check`) the graph reads nothing.
-            check(fromGraph.isNotEmpty()) {
-                "No task in this run reads outside compiler/ — run this as part of `check`."
+            val modules = included + "compiler" + sampleDirs
+            val missing =
+                docs.flatMap { doc ->
+                    val text = doc.readText()
+                    modules.filter { "`$it/`" !in text }
+                        .map { "  ${doc.relativeTo(repoRoot)}: `$it/`" }
+                }
+            check(missing.isEmpty()) {
+                "These modules exist but their docs do not name them:\n" +
+                    missing.joinToString("\n")
             }
-            val read =
-                fromGraph +
-                    rel(
-                        listOf(".github/test-evidence-gate", ".github/workflows")
-                            .flatMap { repoRoot.resolve(it).walk().filter(File::isFile).toList() } +
-                            listOf(
-                                "gradlew",
-                                "gradle/wrapper/gradle-wrapper.properties",
-                                "gradle/libs.versions.toml",
-                                "gradle.properties",
-                            ).map(repoRoot::resolve)
-                    )
-            val globs = paths.map(::glob)
-            val missed = read.filter { f -> globs.none { it.matches(f) } }
-            check(missed.isEmpty()) {
-                "`-p compiler check` reads these files, but compiler-check.yml's " +
-                    "pull_request.paths matches none of them, so a PR changing only them " +
-                    "skips this job (#230):\n" +
-                    missed.joinToString("\n") { "  $it" } + "\nAdd them (or a glob) to $workflow."
-            }
-            logger.lifecycle(
-                "compiler-check.yml paths cover all ${read.size} file(s) read outside compiler/."
-            )
         }
     }
 
 tasks.check {
-    dependsOn(verifyCompilerCheckPaths)
+    dependsOn(verifyModuleDocs)
+    // Finalized, not a dependency: it must run after every requested `check` (see
+    // gradle/workflow-paths.gradle.kts), which a dependency of this one would make a cycle.
+    finalizedBy("verifyWorkflowPaths")
 }

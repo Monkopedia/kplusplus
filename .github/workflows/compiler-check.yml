@@ -47,13 +47,19 @@ on:
       - 'samples/minimal/build.gradle.kts'
       - 'samples/multiproject/bindings/build.gradle.kts'
       - 'docs/getting-started.md'        # the quickstart pin (#218)
+      # verifyModuleDocs (#231) checks every module + sample is named in both module tables. A
+      # new sample adds its own settings script, so this glob fires on the PR that adds one.
+      - 'README.md'
+      - 'docs/ARCHITECTURE.md'
+      - 'samples/*/settings.gradle.kts'
+      - 'gradle/workflow-paths.gradle.kts'  # the paths self-check below
       # verify.sh (below) reads its fixtures and EVERY `.github/workflows/*.yml` — so a new
       # workflow is covered by the glob, not by someone remembering to list it (#230).
       - '.github/test-evidence-gate/**'
       - '.github/workflows/*.yml'
       # This list cannot report its own gaps, so `-p compiler check` does it:
-      # verifyCompilerCheckPaths (compiler/build.gradle.kts) fails when a file the check
-      # reads from outside `compiler/**` is matched by no entry here (#230).
+      # verifyWorkflowPaths (gradle/workflow-paths.gradle.kts) fails when a file the check
+      # reads is matched by no entry here (#230).
   push:
     branches: [main]
 
