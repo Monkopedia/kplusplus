@@ -21,7 +21,7 @@ import com.monkopedia.krapper.generator.model.WrappedElement
 abstract class WrappedType : WrappedElement() {
     abstract val cType: WrappedType
 
-    override fun clone(): WrappedType = this
+    override fun cloneImpl(): WrappedType = this
 
     abstract val isNative: Boolean
     open val isEnum: Boolean

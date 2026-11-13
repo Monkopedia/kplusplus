@@ -688,6 +688,8 @@ suspend fun WrappedTemplate.typedAs(
         mapping[templates[i].usr] = type
     }
     val outputClass = WrappedClass(name, false, templateSpec)
+    // The instantiation has no declaration of its own; it is reported at the template's (#255).
+    outputClass.sourceLocation = sourceLocation
     outputClass.metadata = metadata.copy()
     outputClass.parent = parent
     outputClass.addAllChildren(children.map { it.cloneRecursive() })

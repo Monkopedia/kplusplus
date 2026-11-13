@@ -24,7 +24,7 @@ class WrappedTU : WrappedElement() {
         }
     }
 
-    override fun clone(): WrappedElement = WrappedTU().also {
+    override fun cloneImpl(): WrappedElement = WrappedTU().also {
         it.addAllChildren(children)
         it.parent = parent
     }

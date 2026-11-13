@@ -35,7 +35,7 @@ class WrappedConstructor(
     val isDefaultConstructor: Boolean,
     var allocationStyle: AllocationStyle = DIRECT
 ) : WrappedMethod(name, returnType, MethodType.CONSTRUCTOR) {
-    override fun copy(
+    override fun copyImpl(
         name: String,
         returnType: WrappedType,
         methodType: MethodType,
@@ -46,7 +46,7 @@ class WrappedConstructor(
             it.parent = parent
         }
 
-    override fun clone(): WrappedConstructor =
+    override fun cloneImpl(): WrappedConstructor =
         WrappedConstructor(name, returnType, isCopyConstructor, isDefaultConstructor).also {
             it.parent = parent
             it.addAllChildren(children)
@@ -61,7 +61,7 @@ class WrappedConstructor(
 
 class WrappedDestructor(name: String, returnType: WrappedType) :
     WrappedMethod(name, returnType, MethodType.DESTRUCTOR) {
-    override fun copy(
+    override fun copyImpl(
         name: String,
         returnType: WrappedType,
         methodType: MethodType,
@@ -72,7 +72,7 @@ class WrappedDestructor(name: String, returnType: WrappedType) :
         it.isVirtual = isVirtual
     }
 
-    override fun clone(): WrappedDestructor = WrappedDestructor(name, returnType).also {
+    override fun cloneImpl(): WrappedDestructor = WrappedDestructor(name, returnType).also {
         it.parent = parent
         it.addAllChildren(children)
         it.isVirtual = isVirtual
@@ -131,11 +131,19 @@ open class WrappedMethod(
     // returnViaMemberCall.
     var rangeElementType: String? = null
 
-    open fun copy(
+    /** Final, so [sourceLocation] is carried whatever a subclass's [copyImpl] rebuilds (#255). */
+    fun copy(
         name: String = this.name,
         returnType: WrappedType = this.returnType,
         methodType: MethodType = this.methodType,
         children: List<WrappedElement> = this.children.toList()
+    ): WrappedMethod = carryProvenance(copyImpl(name, returnType, methodType, children))
+
+    protected open fun copyImpl(
+        name: String,
+        returnType: WrappedType,
+        methodType: MethodType,
+        children: List<WrappedElement>
     ): WrappedMethod = WrappedMethod(name, returnType, methodType).also {
         it.addAllChildren(children)
         it.parent = parent
@@ -147,7 +155,7 @@ open class WrappedMethod(
         it.rangeElementType = rangeElementType
     }
 
-    override fun clone(): WrappedMethod = WrappedMethod(name, returnType, methodType).also {
+    override fun cloneImpl(): WrappedMethod = WrappedMethod(name, returnType, methodType).also {
         it.parent = parent
         it.addAllChildren(children)
         it.isVirtual = isVirtual
@@ -291,7 +299,7 @@ class WrappedArgument(
             return numeric.toDoubleOrNull() != null
         }
 
-    override fun clone(): WrappedArgument =
+    override fun cloneImpl(): WrappedArgument =
         WrappedArgument(name, type, usr, hasDefault, defaultValue).also {
             it.parent = parent
             it.addAllChildren(children)

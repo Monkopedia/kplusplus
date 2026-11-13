@@ -25,7 +25,7 @@ class WrappedBase(
     val isPublic: Boolean = true,
     val isVirtualBase: Boolean = false
 ) : WrappedElement() {
-    override fun clone(): WrappedElement = WrappedBase(type, isPublic, isVirtualBase).also {
+    override fun cloneImpl(): WrappedElement = WrappedBase(type, isPublic, isVirtualBase).also {
         it.addAllChildren(children.map { it.clone() })
     }
 }
@@ -87,14 +87,11 @@ class WrappedClass(
     val type: WrappedType
         get() = specifiedType ?: WrappedType(qualified)
 
-    override fun clone(): WrappedClass = clone(this.specifiedType)
-
-    fun clone(specifiedType: WrappedType? = this.specifiedType): WrappedClass =
-        WrappedClass(name, isAbstract, specifiedType).also {
-            it.parent = parent
-            it.addAllChildren(children)
-            it.metadata = metadata.copy()
-        }
+    override fun cloneImpl(): WrappedClass = WrappedClass(name, isAbstract, specifiedType).also {
+        it.parent = parent
+        it.addAllChildren(children)
+        it.metadata = metadata.copy()
+    }
 
     override fun toString(): String = qualified
 
