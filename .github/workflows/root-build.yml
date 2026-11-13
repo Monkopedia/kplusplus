@@ -49,6 +49,10 @@ on:
       # max_line_length=40 fails :cppfixture:ktlintCheck in 6s, and without this line a PR
       # containing only that edit would trigger no workflow at all.
       - '.editorconfig'
+      # #251: krapper's DefWriterGoldenTest (:krapper:nativeTest) compares DefWriter's output to
+      # this fixture, a declared input of that task. It lives under compiler/, so without this
+      # line a PR changing only the golden ran just the JVM reader test and merged green.
+      - 'compiler/gradle/src/test/resources/defwriter-golden.def'
       - '.github/workflows/root-build.yml'
       - '.github/actions/konan-cache/**'
       - '.github/test-evidence-gate/gate.sh'

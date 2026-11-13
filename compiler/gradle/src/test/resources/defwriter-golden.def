@@ -1,0 +1,5 @@
+headers = demo.h
+compilerOpts = -I/@KRAPPED@ -DV8_COMPRESS_POINTERS
+staticLibraries = libfoo.a libdemo.a
+libraryPaths = /@PREBUILT@ /@KRAPPED@
+package = krapper.demo.internal

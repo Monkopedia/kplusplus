@@ -16,30 +16,29 @@
 package com.monkopedia.kplusplus.compiler.gradle
 
 import java.io.File
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.testfixtures.ProjectBuilder
 
 /**
- * THE CINTEROP TASK'S REAL INPUTS (#249, and #16 before it).
+ * THE CINTEROP TASK'S REAL INPUTS (#249, #251, and #16 before them).
  *
- * `interop.definitionFile` is the only input the cinterop task declares by itself, and the
- * generated `.def` is deterministic from the module name + this checkout's krapped dir — so its
- * content NEVER changes. The artifacts it points at (`headers = <module>.h`,
- * `staticLibraries = lib<module>.a`) DO change, on every edit to the C++ the module binds, and
- * the klib packages the archive into itself. Under-declared, that froze the archive: an edited
- * `clang_slice.h` regenerated `libkrapper.a`, `cinteropKplusplusNative` went UP-TO-DATE against
- * the unchanged `.def`, and `nativeTest` went UP-TO-DATE having run ZERO tests against an
- * archive built minutes earlier. `BUILD SUCCESSFUL`, and symmetric — the REVERT did not land
- * either, so both states went green with neither exercised.
+ * `interop.definitionFile` is the only input the cinterop task declares by itself, but the
+ * `.def` only POINTS AT what cinterop reads — the wrapper header and the static archives — and
+ * the klib packages those archives into itself. Under-declared, that froze the archive: an
+ * edited `clang_slice.h` regenerated `libkrapper.a`, `cinteropKplusplusNative` went UP-TO-DATE
+ * against the unchanged `.def`, and `nativeTest` went UP-TO-DATE having run ZERO tests.
  *
- * #16 wired `dependsOn(kplusplusSync)` onto the same task so it "can't process a stale def".
- * That fixed the POINTER and not the POINTEE, which is why
- * [declared_inputs_cover_every_artifact_the_generated_def_points_at] asserts the two as one
- * invariant rather than spot-checking two filenames: adding a third artifact to the `.def`
- * without declaring it is the same defect again, and it must fail here.
+ * The rule: the declared input set must be exactly the set of files the generated `.def` names.
+ * Since #251 the plugin derives the inputs FROM the `.def` at execution time, so the rule holds
+ * by construction for both writers (the seed path's `seedDefContent` and krapper's `DefWriter`
+ * on the cpp path). What is left to pin is that the reader resolves what each writer actually
+ * emits: `defwriter-golden.def` is `DefWriter`'s output for a module linking an out-of-tree
+ * archive, and krapper's `DefWriterGoldenTest` fails if `DefWriter` drifts from it.
  */
 class CinteropWrapperInputsTest {
 
@@ -48,21 +47,46 @@ class CinteropWrapperInputsTest {
     private fun taskDependencyNames(task: Task): Set<String> =
         task.taskDependencies.getDependencies(task).map { it.name }.toSet()
 
-    // The whole wiring, on a real (if headless) Gradle task graph: the generator runs first
-    // (#16) AND the artifacts it writes are declared inputs (#249). Both assertions live in one
-    // test on purpose — they are the two halves of "this task cannot run against stale input",
-    // and half of it passing is exactly the state this issue was filed on.
+    // krapper's DefWriter output (pinned by DefWriterGoldenTest), with its placeholder dirs
+    // pointed at real ones.
+    private fun goldenDef(krappedDir: File, prebuiltDir: File): String =
+        javaClass.getResource("/defwriter-golden.def")!!.readText()
+            .replace("/@KRAPPED@", krappedDir.absolutePath)
+            .replace("/@PREBUILT@", prebuiltDir.absolutePath)
+
+    private fun touch(vararg files: File) = files.forEach {
+        it.parentFile.mkdirs()
+        it.writeText("")
+    }
+
+    // Configure BEFORE the task exists: KGP creates the cinterop task itself, well after the
+    // plugin's afterEvaluate runs, so the production wiring is a lazy
+    // matching{}.configureEach{} and the tests must exercise that ordering.
+    private fun interopTask(project: Project, def: File): Task {
+        project.tasks.register("kplusplusSync")
+        configureInteropTask(project, "cinteropKplusplusNative", def)
+        project.tasks.register("cinteropKplusplusNative")
+        return project.tasks.named("cinteropKplusplusNative").get()
+    }
+
+    // The whole wiring, on the cpp path's real `.def` shape: the generator runs first (#16) AND
+    // every artifact the `.def` names is a declared input (#249) — including an archive OUTSIDE
+    // the krapped dir, which basename resolution used to declare at a path that does not hold
+    // it, leaving the real one undeclared (#251).
     @Test
-    fun interop_task_declares_the_generated_wrapper_artifacts_as_inputs() {
+    fun interop_task_declares_every_artifact_the_cpp_path_def_names() {
         val project = ProjectBuilder.builder().build()
         val krappedDir = File(project.projectDir, "build/krapped-cpp")
-        project.tasks.register("kplusplusSync")
-        // Configure BEFORE the task exists: KGP creates the cinterop task itself, well after
-        // the plugin's afterEvaluate runs, so the production wiring is a lazy
-        // matching{}.configureEach{} and the test must exercise that ordering.
-        configureInteropTask(project, "cinteropKplusplusNative", krappedDir, moduleName)
-        project.tasks.register("cinteropKplusplusNative")
-        val interop = project.tasks.named("cinteropKplusplusNative").get()
+        val prebuiltDir = File(project.projectDir, "prebuilt")
+        val expected = setOf(
+            File(krappedDir, "demo.h"),
+            File(krappedDir, "libdemo.a"),
+            File(prebuiltDir, "libfoo.a")
+        )
+        touch(*expected.toTypedArray())
+        val def = File(krappedDir, "$moduleName.def")
+        def.writeText(goldenDef(krappedDir, prebuiltDir))
+        val interop = interopTask(project, def)
 
         assertTrue(
             "kplusplusSync" in taskDependencyNames(interop),
@@ -70,73 +94,84 @@ class CinteropWrapperInputsTest {
                 taskDependencyNames(interop)
         )
         assertEquals(
-            cinteropWrapperArtifacts(krappedDir, moduleName).toSet(),
+            expected,
             interop.inputs.files.files,
-            "the cinterop task must declare the wrapper header AND archive as inputs, or a " +
-                "changed C++ bridge leaves it UP-TO-DATE against the archive already baked " +
-                "into the klib (#249)"
+            "the cinterop task must declare every header and archive the .def names, where " +
+                "the .def names it, or a changed C++ bridge leaves it UP-TO-DATE against the " +
+                "archive already baked into the klib (#249, #251)\n${def.readText()}"
         )
     }
 
-    // The invariant, not the filenames: whatever the generated `.def` NAMES inside the krapped
-    // dir is what the cinterop task actually reads, so the declared input set and the `.def`'s
-    // own references must be the same set. A third artifact added to the `.def` and not
-    // declared is #249 all over again, and fails right here.
+    // The inputs are read from the `.def` when Gradle fingerprints them — after kplusplusSync
+    // has written it — not captured at configuration time. A clean checkout has no `.def` while
+    // configuring, and a regenerated one may name a different set; both must be tolerated and
+    // followed, or the declared set is once again a snapshot that can drift from the pointee.
     @Test
-    fun declared_inputs_cover_every_artifact_the_generated_def_points_at() {
-        val krappedDir = File("/tmp/does-not-need-to-exist/krapped")
-        val def = seedDefContent(moduleName, krappedDir)
-        assertEquals(
-            cinteropWrapperArtifacts(krappedDir, moduleName).toSet(),
-            defArtifactsIn(def, krappedDir).toSet(),
-            "every file the .def points at must be a declared cinterop input, and vice " +
-                "versa — the #16 fix declared the pointer and not the pointee.\n$def"
-        )
-    }
-
-    // A control for the test above: it must be able to NOTICE an artifact that is referenced
-    // but not declared. Without this, a `defArtifactsIn` that parsed nothing at all would make
-    // both sides empty on a `.def` with no references and the assertion would pass while
-    // measuring nothing.
-    @Test
-    fun the_coverage_assertion_notices_an_artifact_the_def_adds_without_declaring() {
-        val krappedDir = File("/tmp/does-not-need-to-exist/krapped")
-        val extended = seedDefContent(moduleName, krappedDir).replace(
-            "staticLibraries = lib$moduleName.a",
-            "staticLibraries = lib$moduleName.a libextra.a"
-        )
-        val referenced = defArtifactsIn(extended, krappedDir).toSet()
-        assertTrue(
-            File(krappedDir, "libextra.a") in referenced,
-            "the .def reader must see every staticLibraries entry: $referenced"
-        )
-        assertTrue(
-            referenced != cinteropWrapperArtifacts(krappedDir, moduleName).toSet(),
-            "an undeclared extra artifact must break the coverage equality, or that " +
-                "assertion is an instrument that cannot go red"
-        )
-    }
-
-    // Neither artifact exists at configuration time on a clean checkout — kplusplusSync writes
-    // them, and the dependsOn above is what orders it. The declaration has to tolerate that,
-    // which is why it is `inputs.files(...).optional(true)` and not `inputs.file(...)`: the
-    // singular form aborts at validation on a missing path and would turn every clean build
-    // into a configuration failure.
-    @Test
-    fun declared_inputs_tolerate_artifacts_that_do_not_exist_yet() {
+    fun declared_inputs_follow_the_def_written_after_configuration() {
         val project = ProjectBuilder.builder().build()
         val krappedDir = File(project.projectDir, "build/krapped-cpp")
-        assertTrue(!krappedDir.exists(), "precondition: nothing is generated yet")
-        project.tasks.register("kplusplusSync")
-        configureInteropTask(project, "cinteropKplusplusNative", krappedDir, moduleName)
-        project.tasks.register("cinteropKplusplusNative")
-
-        val declared = project.tasks.named("cinteropKplusplusNative").get().inputs.files.files
+        val def = File(krappedDir, "$moduleName.def")
+        val interop = interopTask(project, def)
         assertEquals(
-            cinteropWrapperArtifacts(krappedDir, moduleName).toSet(),
-            declared,
-            "the inputs must resolve to the not-yet-written paths rather than throwing or " +
-                "silently collapsing to nothing"
+            emptySet(),
+            interop.inputs.files.files,
+            "no .def yet: nothing to declare, and configuring must not throw"
+        )
+
+        krappedDir.mkdirs()
+        def.writeText(seedDefContent(moduleName, krappedDir))
+        assertEquals(
+            setOf(File(krappedDir, "demo.h"), File(krappedDir, "libdemo.a")),
+            interop.inputs.files.files,
+            "the seed path's .def, written after configuration, must be what is declared"
+        )
+
+        def.writeText(
+            seedDefContent(moduleName, krappedDir)
+                .replace("libdemo.a", "libdemo.a libextra.a")
+        )
+        assertTrue(
+            File(krappedDir, "libextra.a") in interop.inputs.files.files,
+            "an archive the regenerated .def adds must become a declared input: " +
+                interop.inputs.files.files
+        )
+    }
+
+    // The reader's resolution, and its control: it must find each archive where the LINKER
+    // would — the first `libraryPaths` entry that holds it — not by basename in the krapped dir.
+    // Without the out-of-tree case, a reader that always resolved into the krapped dir passed
+    // every assertion here while declaring the wrong file for `library("/abs/libfoo.a")`.
+    @Test
+    fun the_def_reader_resolves_each_entry_along_its_search_path_in_order() {
+        val root = createTempDirectory("cinterop-inputs").toFile()
+        val krappedDir = File(root, "krapped")
+        val prebuiltDir = File(root, "prebuilt")
+        touch(File(krappedDir, "demo.h"), File(krappedDir, "libdemo.a"))
+        // libfoo.a exists only outside the krapped dir.
+        touch(File(prebuiltDir, "libfoo.a"))
+        assertEquals(
+            listOf(
+                File(krappedDir, "demo.h"),
+                File(prebuiltDir, "libfoo.a"),
+                File(krappedDir, "libdemo.a")
+            ),
+            defArtifactsIn(goldenDef(krappedDir, prebuiltDir)),
+            "an out-of-tree archive must resolve to where it lives (#251)"
+        )
+
+        // A same-named archive in an EARLIER libraryPaths entry shadows the later one, as it
+        // does for the linker.
+        touch(File(prebuiltDir, "libdemo.a"))
+        assertTrue(
+            File(prebuiltDir, "libdemo.a") in defArtifactsIn(goldenDef(krappedDir, prebuiltDir)),
+            "the first libraryPaths entry holding the archive must win"
+        )
+
+        // Not generated yet: still declared, at the first place it would be looked for.
+        assertEquals(
+            listOf(File(root, "nowhere/demo.h"), File(root, "nowhere/libdemo.a")),
+            defArtifactsIn(seedDefContent(moduleName, File(root, "nowhere"))),
+            "an entry that exists nowhere must still be tracked, not silently dropped"
         )
     }
 }
