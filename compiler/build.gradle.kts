@@ -159,7 +159,7 @@ val verifyModuleDocs =
 
 tasks.check {
     dependsOn(verifyModuleDocs)
-    // Finalized, not a dependency, so it runs after everything `check` ran and can read their
-    // resolved inputs (see gradle/workflow-paths.gradle.kts).
+    // Finalized, not a dependency: it must run after every requested `check` (see
+    // gradle/workflow-paths.gradle.kts), which a dependency of this one would make a cycle.
     finalizedBy("verifyWorkflowPaths")
 }

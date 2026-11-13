@@ -48,13 +48,12 @@ tasks.register("verifyWorkflowPaths") {
     val fromGraph = sortedSetOf<String>()
     // Some inputs are mapped from another task's output and cannot be resolved before it runs
     // (K/N's distribution download, for one). Those tasks are read again once they have run, so
-    // when this task is requested by name it must run after the tasks requested with it.
+    // this must run after every task requested with it — so nothing requested may depend on it.
     val deferred = mutableListOf<Task>()
     val requested = gradle.startParameter.taskNames
     val self = this
     mustRunAfter(
         provider {
-            if (requested.none { it == name || it == path }) return@provider emptyList<Task>()
             requested.flatMap { n ->
                 if (n.startsWith(":")) {
                     listOfNotNull(rootProject.tasks.findByPath(n))
