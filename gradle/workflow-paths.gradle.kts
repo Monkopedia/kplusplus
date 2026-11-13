@@ -31,9 +31,11 @@ val alsoRead = extra["workflowPaths.alsoRead"] as List<String>
 
 tasks.register("verifyWorkflowPaths") {
     group = "verification"
-    description = "Check every repo file this run reads is matched by $workflowPath's pull_request.paths."
+    description =
+        "Check every repo file this run reads is matched by $workflowPath's pull_request.paths."
     // A build output is not a file a PR can change, so it needs no trigger.
-    val buildDirs = rootProject.allprojects.map { it.layout.buildDirectory.get().asFile.canonicalFile }
+    val buildDirs =
+        rootProject.allprojects.map { it.layout.buildDirectory.get().asFile.canonicalFile }
     fun rel(files: Iterable<File>) =
         files
             .map { it.canonicalFile }
@@ -42,7 +44,8 @@ tasks.register("verifyWorkflowPaths") {
             .filter { !it.startsWith("../") }
     fun reads(t: Task) =
         t.inputs.files.files +
-            ((t as? Test)?.systemProperties?.values.orEmpty()).map { file(it.toString()) }.filter { it.isFile }
+            ((t as? Test)?.systemProperties?.values.orEmpty())
+                .map { file(it.toString()) }.filter { it.isFile }
     val fromGraph = sortedSetOf<String>()
     // Some inputs are mapped from another task's output and cannot be resolved before it runs
     // (K/N's distribution download, for one). Those tasks are read again once they have run, so
@@ -111,16 +114,13 @@ tasks.register("verifyWorkflowPaths") {
         val read =
             fromGraph +
                 rel(
-                    (alsoRead + listOf(workflowPath, "gradle/workflow-paths.gradle.kts"))
-                        .flatMap { repoRoot.resolve(it).walk().filter(File::isFile).toList() } +
+                    (
+                        alsoRead + workflowPath + "gradle/workflow-paths.gradle.kts" + "gradlew" +
+                            "gradle/wrapper/gradle-wrapper.properties" +
+                            "gradle/libs.versions.toml" + "gradle.properties"
+                    ).flatMap { repoRoot.resolve(it).walk().filter(File::isFile).toList() } +
                         rootProject.allprojects.map { it.buildFile }.filter(File::isFile) +
-                        rootDir.resolve("settings.gradle.kts") +
-                        listOf(
-                            "gradlew",
-                            "gradle/wrapper/gradle-wrapper.properties",
-                            "gradle/libs.versions.toml",
-                            "gradle.properties",
-                        ).map(repoRoot::resolve)
+                        rootDir.resolve("settings.gradle.kts")
                 )
         val globs = paths.map(::glob)
         val missed = read.filter { f -> globs.none { it.matches(f) } }

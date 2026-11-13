@@ -288,7 +288,7 @@ val verifyShadedJar =
                 "${stray.size} bundled class(es) escaped relocation; add their packages to " +
                     "shadedPackages:\n" + stray.take(20).joinToString("\n") { "  $it" }
             }
-            check(classes.any { it.startsWith(ours.first()) }) { "No relocated class in the shadow jar." }
+            check(classes.any { it.startsWith(ours.first()) }) { "No relocated class in the jar." }
         }
     }
 

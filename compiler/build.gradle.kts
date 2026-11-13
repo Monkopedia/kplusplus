@@ -117,10 +117,6 @@ extra["workflowPaths.workflow"] = rootDir.resolve("../.github/workflows/compiler
 extra["workflowPaths.alsoRead"] = listOf(".github/test-evidence-gate", ".github/workflows")
 apply(from = "../gradle/workflow-paths.gradle.kts")
 
-tasks.check {
-    dependsOn("verifyWorkflowPaths")
-}
-
 // #231: README.md and docs/ARCHITECTURE.md each carry a module table, and both silently missed
 // samples/multiproject when it landed. Derive the module set instead of trusting either table:
 // every root-build `include(":…")`, this build, and every samples/<dir> with its own settings
@@ -130,7 +126,8 @@ tasks.check {
 val verifyModuleDocs =
     tasks.register("verifyModuleDocs") {
         group = "verification"
-        description = "Check every module and sample is named in README.md and docs/ARCHITECTURE.md."
+        description =
+            "Check every module and sample is named in README.md and docs/ARCHITECTURE.md."
         val repoRoot = rootDir.parentFile
         val settings = repoRoot.resolve("settings.gradle.kts")
         val samples = fileTree(repoRoot.resolve("samples")) { include("*/settings.gradle.kts") }
@@ -146,14 +143,16 @@ val verifyModuleDocs =
             val missing =
                 docs.flatMap { doc ->
                     val text = doc.readText()
-                    modules.filter { "`$it/`" !in text }.map { "  ${doc.relativeTo(repoRoot)}: `$it/`" }
+                    modules.filter { "`$it/`" !in text }
+                        .map { "  ${doc.relativeTo(repoRoot)}: `$it/`" }
                 }
             check(missing.isEmpty()) {
-                "These modules exist but their docs do not name them:\n" + missing.joinToString("\n")
+                "These modules exist but their docs do not name them:\n" +
+                    missing.joinToString("\n")
             }
         }
     }
 
 tasks.check {
-    dependsOn(verifyModuleDocs)
+    dependsOn("verifyWorkflowPaths", verifyModuleDocs)
 }
