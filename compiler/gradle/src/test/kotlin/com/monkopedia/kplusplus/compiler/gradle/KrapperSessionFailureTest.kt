@@ -24,6 +24,8 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.gradle.api.logging.Logging
 
 /**
@@ -73,6 +75,40 @@ class KrapperSessionFailureTest {
 
         val message = failure.message.orEmpty()
         assertContains(message, "protocol stream ended unexpectedly")
+    }
+
+    @Test
+    fun aToolThatDiesBeforeTheSessionCarriesItsStderrIntoTheFailure() {
+        // #254: the loader's "error while loading shared libraries: libclang-cpp.so.22.1" is
+        // the ONLY statement of why a mismatched tool exits 127. Inherited, it went to the
+        // Gradle daemon's fd 2 and the build saw a bare exit code.
+        val failure = runAgainst(stubTool("echo 'ZZ-cause' >&2", "exit 127"))
+
+        val message = failure.message.orEmpty()
+        assertContains(message, "exited with code 127")
+        assertContains(message, "ZZ-cause")
+    }
+
+    @Test
+    fun aChattyToolNeitherBlocksOnAFullPipeNorFloodsTheFailure() {
+        // Far more than a pipe buffer holds, then one line with no sane length. An undrained
+        // pipe would block the tool forever; an unbounded tail would put all of it in the
+        // exception message.
+        val failure = runAgainst(
+            stubTool(
+                "i=0; while [ \$i -lt 20000 ]; do echo \"noise-\$i\" >&2; i=\$((i+1)); done",
+                "head -c 1000000 /dev/zero | tr '\\0' x >&2; echo >&2",
+                "echo 'ZZ-last' >&2",
+                "exit 127"
+            )
+        )
+
+        val message = failure.message.orEmpty()
+        assertContains(message, "ZZ-last")
+        assertContains(message, "earlier line(s) omitted")
+        assertContains(message, "[truncated]")
+        assertFalse("noise-0\n" in message, "the tail kept the FIRST lines, not the last")
+        assertTrue(message.length < 20_000, "unbounded failure message: ${message.length} chars")
     }
 
     @Test

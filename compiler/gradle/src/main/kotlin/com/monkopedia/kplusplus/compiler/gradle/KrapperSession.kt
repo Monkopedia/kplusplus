@@ -34,8 +34,11 @@ import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.toStub
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.Reader
 import java.util.Collections
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -142,7 +145,7 @@ internal object KrapperSession {
         // written from a different thread than the one that reads it after the run.
         val diagnostics = Collections.synchronizedList(mutableListOf<Diagnostic>())
         val sink = GradleLogSink(logger, job.moduleName, diagnostics)
-        val session = start(binary, environment, logger, diagnostics)
+        val session = start(binary, job.moduleName, environment, logger, diagnostics)
         try {
             val krapper = session.connection.defaultChannel().toStub<KrapperService, String>()
             krapper.setLogger(sink)
@@ -180,6 +183,7 @@ internal object KrapperSession {
      */
     private suspend fun start(
         binary: File,
+        moduleName: String,
         environment: Map<String, String>,
         logger: Logger,
         diagnostics: List<Diagnostic>
@@ -192,9 +196,12 @@ internal object KrapperSession {
         }
         val process = try {
             ProcessBuilder(binary.absolutePath, "-s")
-                // stdin/stdout ARE the protocol; stderr stays the tool's (and Clang's) own
-                // channel and is inherited so a parse abort is still visible verbatim.
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                // stdin/stdout ARE the protocol; stderr is the tool's (and the dynamic
+                // loader's, and Clang's) own channel. It is PIPED, never inherited (#254): the
+                // inherited fd 2 is the Gradle daemon's, not the build console, so whatever the
+                // tool said there was lost — including the loader's one-line explanation of an
+                // `exit 127`. [StderrDrain] carries it to the logger and the failure message.
+                .redirectError(ProcessBuilder.Redirect.PIPE)
                 .also { it.environment().putAll(environment) }
                 .start()
         } catch (t: IOException) {
@@ -207,6 +214,7 @@ internal object KrapperSession {
         }
         return KrapperProcess(
             process,
+            StderrDrain(process.errorStream, logger, moduleName),
             (process.inputStream to process.outputStream).asConnection(env)
         )
     }
@@ -224,7 +232,6 @@ internal object KrapperSession {
         applyFixups(job.fixups)
         writeTo(job.outputDir.absolutePath)
     }
-
 }
 
 /**
@@ -237,7 +244,11 @@ internal object KrapperSession {
  * mismatch — and it is strictly less than the pre-#185 subprocess path reported, which always
  * had `exit N`. The process's own outcome is the missing signal, so this keeps it.
  */
-private class KrapperProcess(private val process: Process, val connection: Connection<String>) {
+private class KrapperProcess(
+    private val process: Process,
+    private val stderr: StderrDrain,
+    val connection: Connection<String>
+) {
 
     private var outcome: Outcome? = null
 
@@ -271,6 +282,8 @@ private class KrapperProcess(private val process: Process, val connection: Conne
             process.destroyForcibly()
             Outcome.Killed
         }
+        // The tail is read below, so the drain must have reached EOF first.
+        withContext(Dispatchers.IO) { stderr.finish() }
         outcome = settled
         settled
     }
@@ -282,6 +295,10 @@ private class KrapperProcess(private val process: Process, val connection: Conne
      *  - krapper exited cleanly but the session never completed — a truncated or malformed
      *    protocol stream;
      *  - krapper REPORTED an error — its own message, which is the useful one.
+     *
+     * Whichever it is, the tail of the tool's stderr follows: for a tool that died before it
+     * could speak the protocol (a library the loader cannot find, a Kotlin/Native crash) it is
+     * the only place the cause was ever written.
      */
     suspend fun describeFailure(cause: Throwable): String {
         val settled = settle()
@@ -289,7 +306,7 @@ private class KrapperProcess(private val process: Process, val connection: Conne
         // flight; anything else came FROM krapper and already says what went wrong.
         val reported = cause.message?.takeIf { it.isNotBlank() && cause !is CancellationException }
         val channelDetail = cause.message?.let { " (channel: $it)" }.orEmpty()
-        return when {
+        val summary = when {
             settled is Outcome.Exited && settled.code != 0 ->
                 "krapper exited with code ${settled.code} before the session completed" +
                     channelDetail
@@ -304,12 +321,103 @@ private class KrapperProcess(private val process: Process, val connection: Conne
                 "krapper exited cleanly (code 0) but the session did not complete — its " +
                     "protocol stream ended unexpectedly" + channelDetail
         }
+        return summary + stderr.tail()
     }
 
     private companion object {
         // Long enough for the tool to notice EOF on stdin and exit, short enough that a wedged
         // tool doesn't stall the build. The happy path exits well inside it.
         const val SHUTDOWN_GRACE_SECONDS = 10L
+    }
+}
+
+/**
+ * Drains the tool's stderr on a daemon thread (#254), so a chatty tool can never fill the pipe
+ * and block, and keeps the last [MAX_LINES] lines for a failure message.
+ *
+ * Every line is logged at `info`, not `warn`: on a run that SUCCEEDS, nothing the tool writes
+ * here is news — Clang's parse errors are captured by the bridge's own diagnostic consumer,
+ * `LogPolicy`'s generation failures are ledgered drops (#253) that already arrive as
+ * [Diagnostic]s, and `diag.*` output is opt-in. What remains is noise that is not the build's
+ * to act on — e.g. the loader's `no version information available` for a side-by-side LLVM,
+ * printed on EVERY healthy run. On a run that FAILS, the tail rides in the exception message,
+ * which is where an `exit 127` needs it.
+ *
+ * Lines are capped at [MAX_LINE_CHARS] as they are read, so neither a line with no newline nor
+ * a binary spew can grow the buffer without bound. Decoded as UTF-8 (what both Clang and
+ * Kotlin/Native write); a malformed byte becomes U+FFFD rather than an exception.
+ */
+private class StderrDrain(
+    stream: InputStream,
+    private val logger: Logger,
+    private val moduleName: String
+) {
+
+    private val lines = ArrayDeque<String>()
+    private var dropped = 0
+
+    private val thread = thread(isDaemon = true, name = "krapper-stderr") {
+        try {
+            stream.reader(Charsets.UTF_8).buffered().use { drain(it) }
+        } catch (_: IOException) {
+            // The pipe was closed under us (the process was killed): what was read is kept.
+        }
+    }
+
+    private fun drain(reader: Reader) {
+        val line = StringBuilder()
+        var truncated = false
+        while (true) {
+            val c = reader.read()
+            if (c == -1 || c == '\n'.code) {
+                if (c != -1 || line.isNotEmpty()) {
+                    record(if (truncated) "$line ... [truncated]" else line.toString())
+                }
+                if (c == -1) return
+                line.setLength(0)
+                truncated = false
+            } else if (line.length < MAX_LINE_CHARS) {
+                line.append(c.toChar())
+            } else {
+                truncated = true
+            }
+        }
+    }
+
+    private fun record(line: String) {
+        logger.info("kplusplus[$moduleName]: krapper stderr: $line")
+        synchronized(lines) {
+            lines.addLast(line)
+            if (lines.size > MAX_LINES) {
+                lines.removeFirst()
+                dropped++
+            }
+        }
+    }
+
+    /**
+     * Wait for the drain to reach EOF, which follows the process exiting. Bounded: a child the
+     * tool forked can hold the pipe open past its parent's death, and that must not stall the
+     * build — the thread is a daemon, and whatever it read by then is what gets reported.
+     */
+    fun finish() {
+        thread.join(TimeUnit.SECONDS.toMillis(FINISH_GRACE_SECONDS))
+    }
+
+    /** The kept lines, formatted to append to a failure message; empty when there were none. */
+    fun tail(): String = synchronized(lines) {
+        if (lines.isEmpty()) return ""
+        val omitted = if (dropped > 0) " ($dropped earlier line(s) omitted)" else ""
+        lines.joinToString(
+            prefix = "\n\nkrapper stderr, last ${lines.size} line(s)$omitted:\n  ",
+            separator = "\n  "
+        )
+    }
+
+    private companion object {
+        const val MAX_LINES = 50
+        const val MAX_LINE_CHARS = 2000
+        const val FINISH_GRACE_SECONDS = 5L
     }
 }
 
@@ -354,6 +462,7 @@ private class GradleLogSink(
             val rendered = prefixed(diagnostic.render())
             when {
                 diagnostic.severity == Severity.ERROR -> logger.error(rendered)
+
                 // A broad import legitimately drops symbols in the hundreds. Surface enough
                 // to be actionable, then stop shouting — the rest stay at info, and every
                 // one of them is still in the collected list a failure reports from.
