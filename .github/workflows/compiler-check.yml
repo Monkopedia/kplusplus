@@ -60,6 +60,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # Discovered, not listed (#231): every compiler module with a test source tree.
+      TEST_MODULES: compiler/*/src/test
     # The whole job is a JVM compile plus three tests; if it is anywhere near this
     # it is wedged, not slow. Same reasoning as #198's cap on samples-minimal.
     timeout-minutes: 15
@@ -91,98 +94,26 @@ jobs:
           key: gradle-compiler-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'compiler/**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-compiler-${{ runner.os }}-
 
-      # Executable evidence for the JUnit-XML arithmetic every gate in this repo uses
-      # (.github/test-evidence-gate/). An all-skipped suite must read as zero executed,
-      # a <testsuites> wrapper must not be double-counted, a failure in a second suite
-      # must not be dropped, and a test that ERRORED must not be swallowed. It
-      # also pins all five gate sites to the tested form, runs each gate's own
-      # `executed = reported - skipped` arithmetic in situ, and runs each gate's own
-      # guards on past that to judge the EXIT STATUS -- so a gate that stops
-      # subtracting `skipped`, stops adding `errors`, or keeps the `::error::` and
-      # loses the `exit 1` fails here rather than shipping green.
-      # Runs in about a second and needs nothing but bash, so it sits in the cheapest
-      # job in the repo and covers the gates in the three workflows it cannot run.
+      # Executable evidence for .github/test-evidence-gate/gate.sh, the one gate every
+      # workflow calls: runs it on JUnit fixtures and judges its exit status, and checks
+      # every workflow site still calls it. Needs nothing but bash, so it sits in the
+      # cheapest job in the repo and covers the gate in the workflows it cannot run.
       - name: Verify the test-evidence gate arithmetic
         run: bash .github/test-evidence-gate/verify.sh
 
-      # Delete-before-measure: a task that does not run leaves any previous
-      # report exactly where the guard below looks, so "never ran" and "ran and
-      # passed" are indistinguishable on disk. On a fresh checkout there is
-      # nothing to delete; this matters on a re-run of a cached workspace.
+      # Delete-before-measure (#198); see gate.sh.
       - name: Clear stale test reports
-        run: rm -rf compiler/*/build/test-results
+        run: bash .github/test-evidence-gate/gate.sh clear "$TEST_MODULES"
 
       - name: -p compiler check
         run: ./gradlew -p compiler check --no-daemon
 
-      # A green `check` is not evidence tests ran: a task-name typo, a NO-SOURCE
-      # source set, or an up-to-date task all report success having executed
-      # nothing, and the JUnit XML from a PREVIOUS run persists where a verifier
-      # looks. #198 was exactly this on the other workflow. So: delete the reports
-      # first (in the step before), then assert they exist and are non-empty.
-      #
-      # PER MODULE, not summed (#230), and the module list is DISCOVERED from the source
-      # tree — the same shape and reasoning as release.yml's copy of this gate. A grand
-      # total stays green when `:kplusplus-compiler-plugin:test` stops reporting at all,
-      # because `compiler/gradle`'s tests still count.
+      # A green `check` is not evidence tests ran: a task-name typo, a NO-SOURCE source set,
+      # or an up-to-date task all report success having executed nothing (#198). Per module,
+      # over the modules discovered from TEST_MODULES (#230, #231).
       - name: Assert the tests actually ran
         if: always()
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          mods=(compiler/*/src/test)
-          if [ ${#mods[@]} -eq 0 ]; then
-            echo "::error::Found no compiler/*/src/test source tree at all. Either the layout moved (this guard needs updating) or the tests are gone."
-            exit 1
-          fi
-          mods=("${mods[@]%/src/test}")
-          echo "gating on ${#mods[@]} test module(s): ${mods[*]}"
-          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
-          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
-          # surely as an empty one — which is the exact hole this gate exists to close
-          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
-          # both attributes sit on the same <testsuite> element.
-          #
-          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
-          # counts were extracted the same way, so a second suite carrying a failure was
-          # silently dropped — that one turns a red build green. Gradle happens to write
-          # one suite per file today (both `test` and `nativeTest`), but a gate should be
-          # right by construction, not by a property of the current report writer.
-          #
-          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
-          # attribute-looking text inside a <system-out> block from being counted, and the
-          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
-          # whose totals would otherwise be added on top of the children they summarise.
-          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
-            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
-              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
-          }
-          grand=0
-          for mod in "${mods[@]}"; do
-            xml=("$mod"/build/test-results/**/*.xml)
-            if [ ${#xml[@]} -eq 0 ]; then
-              echo "::error::No JUnit XML under $mod/build/test-results, though $mod/src/test exists. That module's tests cannot have run, so this job would be green having skipped them."
-              exit 1
-            fi
-            reported=0; skipped=0; failed=0
-            for f in "${xml[@]}"; do
-              reported=$((reported + $(sum_attr "$f" tests)))
-              skipped=$((skipped + $(sum_attr "$f" skipped)))
-              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
-            done
-            executed=$((reported - skipped))
-            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$executed" -eq 0 ]; then
-              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing explicitly."
-              exit 1
-            fi
-            if [ "$failed" -ne 0 ]; then
-              echo "::error::$mod reported test failures."
-              exit 1
-            fi
-            grand=$((grand + executed))
-          done
-          echo "compiler build: $grand test(s) executed across ${#mods[@]} module(s)"
+        run: bash .github/test-evidence-gate/gate.sh assert "$TEST_MODULES"
 
       - name: Upload test results
         if: always()

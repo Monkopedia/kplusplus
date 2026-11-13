@@ -51,6 +51,7 @@ on:
       - '.editorconfig'
       - '.github/workflows/root-build.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/test-evidence-gate/gate.sh'
   # Unfiltered on main, same as compiler-check.yml: a merge should always leave a full
   # root-build signal on the branch, whatever the merge happened to touch.
   push:
@@ -65,6 +66,8 @@ jobs:
     # compile plus a cinterop of the ~60-entry clang slice. Well past this and it is wedged,
     # not slow — the same reasoning as #198's cap on samples-minimal.
     timeout-minutes: 60
+    env:
+      TEST_MODULES: krapper krapper_model feature-tests
     steps:
       - uses: actions/checkout@v7
 
@@ -98,18 +101,16 @@ jobs:
           echo "CPATH=$(llvm-config --includedir)" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
-      # Delete-before-measure (#198). A task that does not run leaves any previous report
-      # exactly where the guard below looks, so "never ran" and "ran and passed" are
-      # indistinguishable on disk. Nothing to delete on a fresh checkout; this matters on a
-      # re-run of a cached workspace.
+      # Delete-before-measure (#198); see gate.sh.
       - name: Clear stale test reports
-        run: rm -rf ./*/build/test-results
+        run: bash .github/test-evidence-gate/gate.sh clear "$TEST_MODULES"
 
+      # The nativeTest tasks are built from TEST_MODULES, the list the gate asserts, so a
+      # module cannot be run without being gated or gated without being run.
       - name: nativeTest (krapper, krapper_model, feature-tests) + ktlintCheck
-        run: >-
-          ./gradlew --no-daemon
-          :krapper:nativeTest :krapper_model:nativeTest :feature-tests:nativeTest
-          ktlintCheck
+        run: |
+          # shellcheck disable=SC2046,SC2086 # one task per module
+          ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) ktlintCheck
 
       # #276: konan-cache's init script fails the build on a KGP version it did not key on.
       # This catches the rest: KGP provisioning that version somewhere other than the home the
@@ -125,62 +126,11 @@ jobs:
           fi
 
       # A green Gradle invocation is not evidence tests ran: a task-name typo, a NO-SOURCE
-      # source set, or an up-to-date task all report success having executed nothing, and the
-      # JUnit XML from a PREVIOUS run persists where a verifier looks (#198). So: delete the
-      # reports first (step above), then assert PER MODULE that each one produced a non-empty
-      # report. Per-module matters here and did not in #198's single-module jobs — a whole
-      # suite could silently drop out and the total would still be comfortably non-zero.
+      # source set, or an up-to-date task all report success having executed nothing (#198).
+      # Per module, so one suite cannot silently drop out behind the others' total.
       - name: Assert the tests actually ran
         if: always()
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
-          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
-          # surely as an empty one — which is the exact hole this gate exists to close
-          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
-          # both attributes sit on the same <testsuite> element.
-          #
-          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
-          # counts were extracted the same way, so a second suite carrying a failure was
-          # silently dropped — that one turns a red build green. Gradle happens to write
-          # one suite per file today (both `test` and `nativeTest`), but a gate should be
-          # right by construction, not by a property of the current report writer.
-          #
-          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
-          # attribute-looking text inside a <system-out> block from being counted, and the
-          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
-          # whose totals would otherwise be added on top of the children they summarise.
-          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
-            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
-              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
-          }
-          grand=0
-          for mod in krapper krapper_model feature-tests; do
-            xml=("$mod"/build/test-results/**/*.xml)
-            if [ ${#xml[@]} -eq 0 ]; then
-              echo "::error::No JUnit XML under $mod/build/test-results — :$mod:nativeTest produced no report at all, so it cannot have run anything."
-              exit 1
-            fi
-            reported=0; skipped=0; failed=0
-            for f in "${xml[@]}"; do
-              reported=$((reported + $(sum_attr "$f" tests)))
-              skipped=$((skipped + $(sum_attr "$f" skipped)))
-              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
-            done
-            executed=$((reported - skipped))
-            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$executed" -eq 0 ]; then
-              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
-              exit 1
-            fi
-            if [ "$failed" -ne 0 ]; then
-              echo "::error::$mod reported test failures/errors in its JUnit XML."
-              exit 1
-            fi
-            grand=$((grand + executed))
-          done
-          echo "TOTAL: $grand test(s) executed"
+        run: bash .github/test-evidence-gate/gate.sh assert "$TEST_MODULES"
 
       - name: Upload test results
         if: always()
@@ -199,6 +149,8 @@ jobs:
     # the other job, hence the wider cap — still far under GitHub's 360-minute default, which
     # would let a wedged run sit for six hours (#198).
     timeout-minutes: 90
+    env:
+      TEST_MODULES: featuregen cppfixture
     steps:
       - uses: actions/checkout@v7
 
@@ -228,7 +180,7 @@ jobs:
           echo "LD_LIBRARY_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
 
       - name: Clear stale test reports
-        run: rm -rf ./*/build/test-results
+        run: bash .github/test-evidence-gate/gate.sh clear "$TEST_MODULES"
 
       # `:krapper:noncopyableDeterminismCheck` is the #101 lock. It is now a `dependsOn` of
       # `:krapper:check`, but naming it explicitly here keeps it a first-class, named step of
@@ -236,10 +188,10 @@ jobs:
       # binary the featuregen graph builds anyway, so it costs this job essentially nothing.
       # A non-zero exit from the tool fails the task (App.kt's exitProcess(1)).
       - name: nativeTest (featuregen, cppfixture) + noncopyableDeterminismCheck
-        run: >-
-          ./gradlew --no-daemon
-          :featuregen:nativeTest :cppfixture:nativeTest
-          :krapper:noncopyableDeterminismCheck
+        run: |
+          # shellcheck disable=SC2046,SC2086 # one task per module
+          ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) \
+            :krapper:noncopyableDeterminismCheck
 
       # Same as the other job (#276).
       - name: Assert KGP provisioned the version the cache is keyed on
@@ -252,60 +204,11 @@ jobs:
             exit 1
           fi
 
-      # Same delete-before-measure guard as the other job (#198), per module. Note the
-      # determinism check is NOT test-report-backed — it is an Exec whose non-zero exit fails
-      # the Gradle task directly, so the step above is its whole verdict.
+      # Same gate as the other job. The determinism check is NOT test-report-backed — it is an
+      # Exec whose non-zero exit fails the Gradle task directly, so the build step is its verdict.
       - name: Assert the tests actually ran
         if: always()
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
-          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
-          # surely as an empty one — which is the exact hole this gate exists to close
-          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
-          # both attributes sit on the same <testsuite> element.
-          #
-          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
-          # counts were extracted the same way, so a second suite carrying a failure was
-          # silently dropped — that one turns a red build green. Gradle happens to write
-          # one suite per file today (both `test` and `nativeTest`), but a gate should be
-          # right by construction, not by a property of the current report writer.
-          #
-          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
-          # attribute-looking text inside a <system-out> block from being counted, and the
-          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
-          # whose totals would otherwise be added on top of the children they summarise.
-          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
-            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
-              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
-          }
-          grand=0
-          for mod in featuregen cppfixture; do
-            xml=("$mod"/build/test-results/**/*.xml)
-            if [ ${#xml[@]} -eq 0 ]; then
-              echo "::error::No JUnit XML under $mod/build/test-results — :$mod:nativeTest produced no report at all, so it cannot have run anything."
-              exit 1
-            fi
-            reported=0; skipped=0; failed=0
-            for f in "${xml[@]}"; do
-              reported=$((reported + $(sum_attr "$f" tests)))
-              skipped=$((skipped + $(sum_attr "$f" skipped)))
-              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
-            done
-            executed=$((reported - skipped))
-            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$executed" -eq 0 ]; then
-              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
-              exit 1
-            fi
-            if [ "$failed" -ne 0 ]; then
-              echo "::error::$mod reported test failures/errors in its JUnit XML."
-              exit 1
-            fi
-            grand=$((grand + executed))
-          done
-          echo "TOTAL: $grand test(s) executed"
+        run: bash .github/test-evidence-gate/gate.sh assert "$TEST_MODULES"
 
       - name: Upload test results
         if: always()
