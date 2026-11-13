@@ -28,7 +28,7 @@ class WrappedNamespace(val namespace: String) : WrappedElement() {
             else -> null
         }
 
-    override fun clone(): WrappedElement = WrappedNamespace(namespace).also {
+    override fun clone(): WrappedElement = carryProvenance(WrappedNamespace(namespace)).also {
         it.addAllChildren(children)
         it.parent = parent
     }

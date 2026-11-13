@@ -62,6 +62,14 @@ abstract class WrappedElement(
 
     abstract fun clone(): WrappedElement
 
+    /**
+     * Returns [copy] carrying this element's base-class provenance ([sourceLocation]). Every
+     * clone()/copy() override builds its fresh instance through here, so a subclass that
+     * rebuilds only its own declared state can't silently drop it (#255).
+     */
+    protected fun <T : WrappedElement> carryProvenance(copy: T): T =
+        copy.also { it.sourceLocation = sourceLocation }
+
     // Cursor-side construction (mapAll/map and friends) lives in the libclang front-end
     // (ModelFactories.kt) as extensions on this companion, and resolution against the
     // type graph lives in the resolver (ModelResolution.kt) as a when-dispatch over the
@@ -91,9 +99,6 @@ fun WrappedElement.filterRecursive(
 }
 
 fun <T : WrappedElement> T.cloneRecursive(): T = clone().also {
-    // Each subclass's clone() rebuilds its own declared state; sourceLocation is base-class
-    // provenance, so carry it here rather than editing every clone() override.
-    it.sourceLocation = sourceLocation
     val newChildren = it.children.map { it.cloneRecursive() }
     it.clearChildren()
     it.addAllChildren(newChildren)
