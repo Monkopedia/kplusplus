@@ -49,13 +49,15 @@ tasks.register("verifyWorkflowPaths") {
     val fromGraph = sortedSetOf<String>()
     // Some inputs are mapped from another task's output and cannot be resolved before it runs
     // (K/N's distribution download, for one). Those tasks are read again once they have run, so
-    // this runs after the other tasks requested with it. Should-, not must-: a task depending on
-    // this one (compiler's `check`) would make that a cycle, which shouldRunAfter just drops.
+    // when this task is requested by name it must run after the tasks requested with it.
+    // (Requested only as a dependency — compiler's `check` — that would be a cycle.)
     val deferred = mutableListOf<Task>()
+    val requested = gradle.startParameter.taskNames
     val self = this
-    shouldRunAfter(
+    mustRunAfter(
         provider {
-            gradle.startParameter.taskNames.flatMap { n ->
+            if (requested.none { it == name || it == path }) return@provider emptyList<Task>()
+            requested.flatMap { n ->
                 if (n.startsWith(":")) {
                     listOfNotNull(rootProject.tasks.findByPath(n))
                 } else {
@@ -78,7 +80,7 @@ tasks.register("verifyWorkflowPaths") {
         val unrun = deferred.filterNot { it.state.executed }
         check(unrun.isEmpty()) {
             "Cannot read the inputs of ${unrun.map { it.path }} before they run; " +
-                "request them on the same command line as $path."
+                "request them on the same command line as $path, so it can run after them."
         }
         deferred.forEach { fromGraph += rel(reads(it)) }
         // GitHub filter-pattern semantics for the subset used: `**` crosses `/` (and `**/` may
