@@ -122,7 +122,7 @@ jobs:
           ./gradlew -p compiler :kplusplus-compiler-gradle:publishPlugins
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}
           -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }}
-          -Pkpp.bundleTools.krapper="$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper"
+          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
 
       # --- Publish the plugin set (tools bundled) to the Central Portal (auto-released) ---
       # `-p compiler publishToMavenCentral` uploads ONLY the compiler build's coordinates — the
@@ -142,7 +142,7 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
         run: >-
           ./gradlew -p compiler publishToMavenCentral --no-configuration-cache
-          -Pkpp.bundleTools.krapper="$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper"
+          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
 
       - name: Release notes
         run: |

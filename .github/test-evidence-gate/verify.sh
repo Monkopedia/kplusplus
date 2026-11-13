@@ -24,7 +24,7 @@ want() { # <label> <expected> <actual>
 
 # The gate itself, sourced for its sum_attr (#247) -- not a copy. The broken variants
 # under NEGATIVE CONTROLS are local on purpose: they prove the fixtures discriminate.
-# shellcheck source=gate.sh
+# shellcheck source-path=SCRIPTDIR source=gate.sh
 . ./gate.sh
 set +e
 nospace() { grep -o "<testsuite[^>]*>" "$1" | grep -o " $2=\"[0-9]*\"" \
@@ -110,6 +110,12 @@ tree a:healthy b:boundary,decoy-system-out,nested
 verdict pass "two healthy modules, four fixtures"     assert a b
 want "  ...and it counted them" "TOTAL: 18 test(s) executed across 2 module(s)" "$(tail -1 "$T.log")"
 tree a:healthy b:nested c;      verdict fail "glob discovery still requires every module" assert '*/src/test'
+# The workflows pass "$TEST_MODULES" as ONE space-joined argument; every word must match.
+tree a:healthy b:healthy;       verdict pass "one joined argument, every word a module"  assert 'a b'
+tree a:healthy b:healthy;       verdict fail "one joined argument with a typo'd word"    assert 'a bb b'
+tree a:healthy;                 verdict fail "one joined argument, a glob matching nothing" assert 'a x/*/src/test'
+tree a:healthy;                 verdict fail "an empty TEST_MODULES"                     assert ''
+tree a:healthy b:healthy;       verdict fail "clear with a typo'd word in a joined argument" clear 'a bb'
 tree a:healthy b:nested;        verdict pass "glob discovery of every */src/test"        assert '*/src/test'
 want "  ...discovered both" "gating on 2 module(s): a b" "$(head -1 "$T.log")"
 echo "== gate.sh clear: a stale report must not satisfy a later assert"
@@ -139,18 +145,29 @@ for wf in ../workflows/*.yml; do
   got=$(grep -E "$CALL" "$wf" | grep -oE '(clear|assert)' | paste -sd' ')
   want "$name gate calls" "${SITES[$name]-}" "$got"
 done
+# A gate step that cannot fail is no gate: `continue-on-error`, or an `if:` other than
+# `always()` (which only makes it run after a failed build too), turns it off quietly.
+read -r ngate nsoft < <(CALL=$CALL awk '
+  function close_step() { if (gate) { g++; if (soft) n++ }; gate = 0; soft = 0 }
+  FNR == 1 || /^      - / { close_step() }
+  $0 ~ ENVIRON["CALL"] { gate = 1 }
+  /^        continue-on-error:/ || (/^        if:/ && !/^        if: always\(\)[[:space:]]*$/) { soft = 1 }
+  END { close_step(); print g + 0, n + 0 }' ../workflows/*.yml)
+want "gate steps found (vacuity guard)"                     10 "$ngate"
+want "gate steps with continue-on-error or a skipping if:" 0  "$nsoft"
 want "workflows defining their own sum_attr" 0 "$(grep -c 'sum_attr' ../workflows/*.yml | awk -F: '{n+=$2} END{print n+0}')"
 
 # Every `::error::` a workflow or the gate emits is a diagnosis whose consequence is the
 # very next line (Refs #243). Matching the emitting line, not prose, and pinning the
 # denominator so a guard that vanishes changes a number here. The gate's own guards all go
-# through die(), whose `exit 1` is exercised by every `fail` verdict above.
-E='^[[:space:]]*(die[(][)] [{] )?echo "::error::'
+# through die(), whose `exit 1` is exercised by every `fail` verdict above; one-line helpers
+# like it (samples-multiproject's fail()) count when their `exit 1` closes the same line.
+E='^[[:space:]]*([a-z_]+[(][)] [{] )?echo "::error::'
 ne=$(grep -cE "$E" ../workflows/*.yml gate.sh | awk -F: '{n+=$2} END{print n+0}')
 np=$(awk -v e="$E" '$0 ~ e { if (index($0, "; exit 1; }")) n++; else if ((getline nxt) > 0 && nxt ~ /^[[:space:]]*exit 1[[:space:]]*$/) n++ }
           END { print n + 0 }' ../workflows/*.yml gate.sh)
-want "::error:: emitters across the workflows and gate.sh" 6 "$ne"
-want "...each one immediately followed by 'exit 1'"       6 "$np"
+want "::error:: emitters across the workflows and gate.sh" 7 "$ne"
+want "...each one immediately followed by 'exit 1'"       7 "$np"
 
 echo
 [ $rc -eq 0 ] && echo "test-evidence gate: OK" || echo "test-evidence gate: FAILED"

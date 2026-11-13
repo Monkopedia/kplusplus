@@ -6,9 +6,10 @@
 #   gate.sh clear  MODULE...   before the Gradle step: delete each module's JUnit XML
 #   gate.sh assert MODULE...   after it: each module must have EXECUTED >0 tests, none failed
 #
-# A MODULE is a module directory, or a glob of paths inside modules (`compiler/*/src/test`):
-# the module is everything before `/src/`. A glob is DISCOVERY -- a new module is gated
-# without anyone listing it (#231) -- and a MODULE matching nothing fails closed.
+# Each word of each argument is a module directory, or a glob of paths inside modules
+# (`compiler/*/src/test`): the module is everything before `/src/`. A glob is DISCOVERY --
+# a new module is gated without anyone listing it (#231) -- and a word matching nothing
+# fails closed.
 #
 # Delete-before-measure (#198): a task that does not run leaves the previous run's report
 # exactly where `assert` looks, so "never ran" and "ran and passed" read the same on disk.
@@ -34,15 +35,20 @@ sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the fil
 }
 
 modules() { # <MODULE...> -> the module directories in MODS, fail-closed on an empty match
-  local p d n
+  local arg p d n words
   MODS=()
-  [ $# -gt 0 ] || die "test-evidence gate: no modules given."
-  for p in "$@"; do
-    n=0
-    # shellcheck disable=SC2086 # deliberately unquoted: $p is a glob
-    for d in $p; do [ -d "$d" ] && { MODS+=("${d%%/src/*}"); n=$((n + 1)); }; done
-    [ "$n" -gt 0 ] || die "No module matches '$p'. Either the layout moved (update the workflow) or the tests are gone."
+  # Split into WORDS first: the workflows pass "$TEST_MODULES" as one space-joined argument,
+  # and every word in it must match on its own, or a typo'd one would be silently dropped.
+  for arg in "$@"; do
+    read -ra words <<< "$arg"
+    for p in "${words[@]}"; do
+      n=0
+      # shellcheck disable=SC2086 # deliberately unquoted: $p is a glob
+      for d in $p; do [ -d "$d" ] && { MODS+=("${d%%/src/*}"); n=$((n + 1)); }; done
+      [ "$n" -gt 0 ] || die "No module matches '$p'. Either the layout moved (update the workflow) or the tests are gone."
+    done
   done
+  [ ${#MODS[@]} -gt 0 ] || die "test-evidence gate: no modules given."
 }
 
 clear_reports() {
