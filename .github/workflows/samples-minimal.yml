@@ -29,11 +29,13 @@ on:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/test-evidence-gate/gate.sh'
   pull_request:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/test-evidence-gate/gate.sh'
   workflow_dispatch:
 
 jobs:
@@ -42,6 +44,8 @@ jobs:
     # The job normally takes ~2 minutes; without this it inherits GitHub's 360-minute
     # cap, so a wedged run could sit for six hours before anyone notices (#198).
     timeout-minutes: 15
+    env:
+      TEST_MODULES: samples/minimal
     steps:
       - uses: actions/checkout@v7
 
@@ -105,6 +109,10 @@ jobs:
           sudo ln -sf "$(command -v llvm-config-22)" /usr/local/bin/llvm-config
           echo "clang++: $(clang++ --version | head -1); llvm-config: $(llvm-config --version)"
 
+      # Delete-before-measure (#198); see gate.sh. This site used to lack it (#247).
+      - name: Clear stale test reports
+        run: bash .github/test-evidence-gate/gate.sh clear "$TEST_MODULES"
+
       - name: samples/minimal :nativeTest
         working-directory: samples/minimal
         run: ./gradlew nativeTest --no-daemon
@@ -122,69 +130,12 @@ jobs:
             exit 1
           fi
 
-      # #198: Gradle's Kotlin/Native test task prints no per-test lines by default (fixed
-      # above via testLogging in build.gradle.kts) and a Test task with no matching
-      # sources succeeds silently — so a green step above is NOT proof anything ran. Parse
-      # the JUnit XML this task itself produced and fail loudly if the count is zero (or if
-      # any failure/error slipped through despite Gradle already having failed the build on
-      # those). This is the actual guarantee; the artifact upload below is just evidence for
-      # a human who wants to double check.
+      # #198: a Test task with no matching sources succeeds silently, so a green step above
+      # is NOT proof anything ran. This is the actual guarantee; the artifact upload below is
+      # just evidence for a human who wants to double check.
       - name: Assert nativeTest actually ran tests
         if: always()
-        working-directory: samples/minimal
-        run: |
-          set -euo pipefail
-          shopt -s nullglob globstar
-          xml_files=(build/test-results/**/*.xml)
-          if [ ${#xml_files[@]} -eq 0 ]; then
-            echo "::error::No JUnit XML found under samples/minimal/build/test-results — nativeTest produced no report at all, so it cannot have run anything."
-            exit 1
-          fi
-          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
-          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
-          # surely as an empty one — which is the exact hole this gate exists to close
-          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
-          # both attributes sit on the same <testsuite> element.
-          #
-          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
-          # counts were extracted the same way, so a second suite carrying a failure was
-          # silently dropped — that one turns a red build green. Gradle happens to write
-          # one suite per file today (both `test` and `nativeTest`), but a gate should be
-          # right by construction, not by a property of the current report writer.
-          #
-          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
-          # attribute-looking text inside a <system-out> block from being counted, and the
-          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
-          # whose totals would otherwise be added on top of the children they summarise.
-          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
-            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
-              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
-          }
-          total_reported=0
-          total_skipped=0
-          total_failures=0
-          total_errors=0
-          for f in "${xml_files[@]}"; do
-            t=$(sum_attr "$f" tests)
-            sk=$(sum_attr "$f" skipped)
-            fa=$(sum_attr "$f" failures)
-            er=$(sum_attr "$f" errors)
-            echo "$f: executed=$((t - sk)) (tests=$t skipped=$sk) failures=$fa errors=$er"
-            total_reported=$((total_reported + t))
-            total_skipped=$((total_skipped + sk))
-            total_failures=$((total_failures + fa))
-            total_errors=$((total_errors + er))
-          done
-          total_executed=$((total_reported - total_skipped))
-          echo "TOTAL across ${#xml_files[@]} report(s): executed=$total_executed (tests=$total_reported skipped=$total_skipped) failures=$total_failures errors=$total_errors"
-          if [ "$total_executed" -eq 0 ]; then
-            echo "::error::nativeTest EXECUTED zero tests ($total_reported reported, $total_skipped skipped). This job would otherwise be green having run nothing — failing it explicitly."
-            exit 1
-          fi
-          if [ "$total_failures" -gt 0 ] || [ "$total_errors" -gt 0 ]; then
-            echo "::error::nativeTest reported failures/errors in the JUnit XML."
-            exit 1
-          fi
+        run: bash .github/test-evidence-gate/gate.sh assert "$TEST_MODULES"
 
       - name: Upload nativeTest results
         if: always()

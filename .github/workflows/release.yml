@@ -18,6 +18,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      TEST_MODULES: compiler/*/src/test
     steps:
       - uses: actions/checkout@v7
 
@@ -62,88 +64,20 @@ jobs:
       # Kotlin/Native), so this is the cheapest possible thing to fail on and it fails before
       # the LLVM install below costs anything.
       #
-      # Delete-before-measure + a non-zero-count assert, the #198 pattern: a green `check` is
-      # not evidence tests ran, and stale JUnit XML in a re-run workspace sits exactly where a
-      # verifier looks. The clear glob below and the assert glob further down are deliberately
-      # the SAME depth (`compiler/<module>/build/test-results`) — compiler-check.yml clears one
-      # level but asserts over `compiler/**`, which also matches the root project's own
-      # `compiler/build/test-results`, so stale XML there is read but never cleared. Inert
-      # there (the compiler root has no tests) and tracked in #230; not reproduced here.
+      # Delete-before-measure + a non-zero-count assert, the #198 pattern, via the same
+      # gate.sh every PR workflow calls (see it for the reasoning).
       - name: Clear stale test reports
-        run: rm -rf compiler/*/build/test-results
+        run: bash .github/test-evidence-gate/gate.sh clear "$TEST_MODULES"
 
       - name: Gate the release on -p compiler check
         run: ./gradlew -p compiler check --no-daemon
 
-      # PER MODULE, not summed. A grand total across `compiler/**` passes when a whole test
-      # module's report vanishes (task rename, source-set change, a `check` wiring edit) as long
-      # as some OTHER module still reports: `compiler/plugin` holds BindingIndexCoverageTest,
-      # the #186/B2 gate that every binding name comes out of krapper's index (#206), and losing
-      # just that one still counts 3 tests from `compiler/gradle` and publishes green. On the release path the blast radius of that
-      # is every consumer, so each module is asserted on its own.
-      #
-      # And the module list is DISCOVERED from the source tree, never hardcoded — a hardcoded
-      # pair is an enumeration that cannot report its own gap (#231): add
-      # `compiler/native/src/test` and a literal `for mod in compiler/gradle compiler/plugin`
-      # would silently not require it, which is the same defect one level up. Discovery fails
-      # closed: no test module found at all is itself a gap and fails the gate.
+      # PER MODULE, not summed: `compiler/plugin` holds BindingIndexCoverageTest (#206), and a
+      # grand total would publish green on `compiler/gradle`'s 3 tests alone if it vanished.
+      # The module list is DISCOVERED (TEST_MODULES), so a new test module is required without
+      # anyone listing it (#231), and discovery fails closed.
       - name: Assert the compiler check actually ran tests
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          mods=(compiler/*/src/test)
-          if [ ${#mods[@]} -eq 0 ]; then
-            echo "::error::Found no compiler/*/src/test source tree at all. Either the layout moved (this guard needs updating) or the tests are gone; refusing to publish either way."
-            exit 1
-          fi
-          mods=("${mods[@]%/src/test}")
-          echo "gating on ${#mods[@]} test module(s): ${mods[*]}"
-          # `tests=` COUNTS SKIPPED TESTCASES. An all-skipped suite reports a perfectly
-          # healthy tests="N" with failures=0 errors=0, and it measured nothing just as
-          # surely as an empty one — which is the exact hole this gate exists to close
-          # (Refs #198, Refs #222, Refs #230). The executed count is `tests - skipped`;
-          # both attributes sit on the same <testsuite> element.
-          #
-          # Sum EVERY <testsuite> rather than reading `head -1`. The failure and error
-          # counts were extracted the same way, so a second suite carrying a failure was
-          # silently dropped — that one turns a red build green. Gradle happens to write
-          # one suite per file today (both `test` and `nativeTest`), but a gate should be
-          # right by construction, not by a property of the current report writer.
-          #
-          # Reading the `<testsuite ...>` start tag rather than the whole file keeps
-          # attribute-looking text inside a <system-out> block from being counted, and the
-          # literal space after `testsuite` excludes any `<testsuites>` aggregate wrapper,
-          # whose totals would otherwise be added on top of the children they summarise.
-          sum_attr() { # <file> <attr> -> summed over every <testsuite> element in the file
-            grep -o '<testsuite [^>]*>' "$1" | grep -o " $2=\"[0-9]*\"" \
-              | grep -o '[0-9]*' | awk '{ n += $1 } END { print n + 0 }' || true
-          }
-          grand=0
-          for mod in "${mods[@]}"; do
-            xml=("$mod"/build/test-results/**/*.xml)
-            if [ ${#xml[@]} -eq 0 ]; then
-              echo "::error::No JUnit XML under $mod/build/test-results, though $mod/src/test exists. That module's tests cannot have run, so this release would publish past a gate that skipped them."
-              exit 1
-            fi
-            reported=0; skipped=0; failed=0
-            for f in "${xml[@]}"; do
-              reported=$((reported + $(sum_attr "$f" tests)))
-              skipped=$((skipped + $(sum_attr "$f" skipped)))
-              failed=$((failed + $(sum_attr "$f" failures) + $(sum_attr "$f" errors)))
-            done
-            executed=$((reported - skipped))
-            echo "$mod: $executed test(s) executed ($reported reported, $skipped skipped), $failed failure(s)/error(s) across ${#xml[@]} report file(s)"
-            if [ "$executed" -eq 0 ]; then
-              echo "::error::$mod EXECUTED zero tests ($reported reported, $skipped skipped). Refusing to publish on a gate that ran nothing."
-              exit 1
-            fi
-            if [ "$failed" -ne 0 ]; then
-              echo "::error::$mod reported test failures. Not publishing."
-              exit 1
-            fi
-            grand=$((grand + executed))
-          done
-          echo "compiler build: $grand test(s) executed across ${#mods[@]} module(s)"
+        run: bash .github/test-evidence-gate/gate.sh assert "$TEST_MODULES"
 
       # :krapper regenerates its own Clang-AST bindings with the tool bundled in the last
       # released plugin. The generated wrapper #includes <clang/AST/...> and is built against
@@ -188,7 +122,7 @@ jobs:
           ./gradlew -p compiler :kplusplus-compiler-gradle:publishPlugins
           -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }}
           -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }}
-          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
+          -Pkpp.bundleTools.krapper="$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper"
 
       # --- Publish the plugin set (tools bundled) to the Central Portal (auto-released) ---
       # `-p compiler publishToMavenCentral` uploads ONLY the compiler build's coordinates — the
@@ -208,7 +142,7 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.OSSRH_GPG_SECRET_KEY_PASSWORD }}
         run: >-
           ./gradlew -p compiler publishToMavenCentral --no-configuration-cache
-          -Pkpp.bundleTools.krapper=$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper
+          -Pkpp.bundleTools.krapper="$GITHUB_WORKSPACE/krapper/build/bin/klinker/krapperRelease/krapper"
 
       - name: Release notes
         run: |
