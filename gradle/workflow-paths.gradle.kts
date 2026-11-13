@@ -10,7 +10,8 @@
 //   extra["workflowPaths.alsoRead"] — repo-root-relative files/dirs the run reads that no task
 //                                    declares (what the workflow's own steps run, e.g. gate.sh).
 // It registers `verifyWorkflowPaths`, which must run in the SAME invocation as the tasks it
-// covers, since it reads their task graph.
+// covers, since it reads their task graph, and AFTER them: request it by name beside them
+// (root-build.yml), or finalize the aggregate with it (compiler's `check`).
 //
 // What counts as "read", discovered rather than listed wherever Gradle can see it:
 //   * the declared input files of every task in this run's graph (compile sources, a gate's
@@ -32,16 +33,14 @@ val alsoRead = extra["workflowPaths.alsoRead"] as List<String>
 tasks.register("verifyWorkflowPaths") {
     group = "verification"
     description =
-        "Check every repo file this run reads is matched by $workflowPath's pull_request.paths."
-    // A build output is not a file a PR can change, so it needs no trigger.
-    val buildDirs =
-        rootProject.allprojects.map { it.layout.buildDirectory.get().asFile.canonicalFile }
+        "Check every tracked file this run reads is matched by $workflowPath's pull_request.paths."
+    // Only a tracked file can be in a PR's diff, so only tracked files need a trigger: build
+    // outputs and generated sources do not, wherever they land.
+    val tracked =
+        providers.exec { commandLine("git", "-C", repoRoot.path, "ls-files") }
+            .standardOutput.asText.map { it.lines().toSet() }
     fun rel(files: Iterable<File>) =
-        files
-            .map { it.canonicalFile }
-            .filter { f -> buildDirs.none(f::startsWith) }
-            .map { it.relativeTo(repoRoot).invariantSeparatorsPath }
-            .filter { !it.startsWith("../") }
+        files.map { it.canonicalFile.relativeTo(repoRoot).invariantSeparatorsPath }
     fun reads(t: Task) =
         t.inputs.files.files +
             ((t as? Test)?.systemProperties?.values.orEmpty())
@@ -50,7 +49,6 @@ tasks.register("verifyWorkflowPaths") {
     // Some inputs are mapped from another task's output and cannot be resolved before it runs
     // (K/N's distribution download, for one). Those tasks are read again once they have run, so
     // when this task is requested by name it must run after the tasks requested with it.
-    // (Requested only as a dependency — compiler's `check` — that would be a cycle.)
     val deferred = mutableListOf<Task>()
     val requested = gradle.startParameter.taskNames
     val self = this
@@ -110,11 +108,11 @@ tasks.register("verifyWorkflowPaths") {
                 .map { it.removePrefix("- ").substringBefore(" #").trim().trim('\'', '"') }
         check(paths.isNotEmpty()) { "Parsed no pull_request.paths out of $workflow." }
         // Vacuity guard: run on its own, the graph is just this task and reads nothing.
-        check(fromGraph.isNotEmpty()) {
+        check(fromGraph.any(tracked.get()::contains)) {
             "No task in this run reads a repo file — run this with the tasks $workflowPath runs."
         }
         val read =
-            fromGraph +
+            (fromGraph +
                 rel(
                     (
                         alsoRead + workflowPath + "gradle/workflow-paths.gradle.kts" + "gradlew" +
@@ -123,7 +121,7 @@ tasks.register("verifyWorkflowPaths") {
                     ).flatMap { repoRoot.resolve(it).walk().filter(File::isFile).toList() } +
                         rootProject.allprojects.map { it.buildFile }.filter(File::isFile) +
                         rootDir.resolve("settings.gradle.kts")
-                )
+                )).filter(tracked.get()::contains)
         val globs = paths.map(::glob)
         val missed = read.filter { f -> globs.none { it.matches(f) } }
         check(missed.isEmpty()) {

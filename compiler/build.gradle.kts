@@ -134,12 +134,16 @@ val verifyModuleDocs =
         val docs = listOf("README.md", "docs/ARCHITECTURE.md").map(repoRoot::resolve)
         inputs.files(settings, samples, docs)
         doLast {
-            val modules =
-                Regex("""include\(":([^"]+)"\)""").findAll(settings.readText())
-                    .map { it.groupValues[1] }.toList() +
-                    "compiler" +
-                    samples.files.map { "samples/${it.parentFile.name}" }
-            check(modules.size > 3) { "Found only $modules — the discovery broke." }
+            // Every argument of every `include(...)`, so `include(":a", ":b")` counts both.
+            val included =
+                Regex("""include\(([^)]*)\)""").findAll(settings.readText())
+                    .flatMap { Regex("\":([^\"]+)\"").findAll(it.groupValues[1]) }
+                    .map { it.groupValues[1] }.toList()
+            val sampleDirs = samples.files.map { "samples/${it.parentFile.name}" }
+            check(included.isNotEmpty() && sampleDirs.isNotEmpty()) {
+                "Discovered includes $included and samples $sampleDirs — the discovery broke."
+            }
+            val modules = included + "compiler" + sampleDirs
             val missing =
                 docs.flatMap { doc ->
                     val text = doc.readText()
@@ -154,5 +158,8 @@ val verifyModuleDocs =
     }
 
 tasks.check {
-    dependsOn("verifyWorkflowPaths", verifyModuleDocs)
+    dependsOn(verifyModuleDocs)
+    // Finalized, not a dependency, so it runs after everything `check` ran and can read their
+    // resolved inputs (see gradle/workflow-paths.gradle.kts).
+    finalizedBy("verifyWorkflowPaths")
 }
