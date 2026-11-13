@@ -279,6 +279,8 @@ kplusplus {
         // #185: a decl's presumed `file:line:col`, so a dropped binding can be reported
         // against real C++ source (SourceManager/PresumedLoc are not a bindable surface).
         "kppbridge::declLocation",
+        // #288: the same for a base specifier, which is not a Decl.
+        "kppbridge::baseLocation",
         // #252/#257: whether clang error-recovered a decl without marking it invalid — a
         // record / enum owning a parse error by source range, or a written type reaching an
         // error-recovered declaration. The walk is clang's RecursiveASTVisitor over the

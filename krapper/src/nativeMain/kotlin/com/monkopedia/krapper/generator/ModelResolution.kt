@@ -229,7 +229,7 @@ suspend fun WrappedClass.resolve(resolverContext: ResolveContext): ResolvedClass
                         "Base class $baseType did not resolve: its inherited members " +
                             "and upcast are not bound",
                         DropPhase.RESOLVE,
-                        sourceLocation
+                        base.sourceLocation ?: sourceLocation
                     )
                 }
                 return@mapNotNull null
