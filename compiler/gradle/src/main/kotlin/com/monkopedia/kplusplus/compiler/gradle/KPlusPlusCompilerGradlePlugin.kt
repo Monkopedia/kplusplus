@@ -913,10 +913,10 @@ internal fun defArtifactsIn(defContent: String): List<File> {
  *  * `dependsOn(kplusplusSync)` — the generator runs first, so the task can never process a
  *    STALE `.def` (issue #16); and
  *  * every artifact the `.def` points at as a declared INPUT, so it can never process a stale
- *    ARCHIVE either (#249). `interop.definitionFile` is the task's only built-in input, and the
- *    `.def`'s content barely changes, while the klib packages the archive into itself: an edited
- *    C++ header regenerated `lib<module>.a`, the task went UP-TO-DATE against the unchanged
- *    `.def`, and `nativeTest` ran zero tests against the archive embedded minutes earlier.
+ *    ARCHIVE either (#249). `interop.definitionFile` is the task's only built-in input, the
+ *    `.def` need not change when the archive does, and the klib packages the archive into
+ *    itself: an edited C++ header regenerated `lib<module>.a`, the task went UP-TO-DATE against
+ *    the unchanged `.def`, and `nativeTest` ran zero tests against the stale archive.
  *
  * The input set is READ FROM THE `.def` ITSELF, lazily: Gradle re-resolves the callable when it
  * fingerprints the task's inputs, which is after `kplusplusSync` has (re)written the `.def`. So
@@ -928,14 +928,11 @@ internal fun defArtifactsIn(defContent: String): List<File> {
  * [PathSensitivity.NONE] because only CONTENT matters: the `.def` references the artifacts by
  * absolute path, so a checkout at a different path is not a different input.
  */
-internal fun configureInteropTask(
-    project: Project,
-    interopTaskName: String,
-    def: File
-) {
+internal fun configureInteropTask(project: Project, interopTaskName: String, def: File) {
     project.tasks.matching { it.name == interopTaskName }.configureEach { task ->
         task.dependsOn("kplusplusSync")
-        task.inputs.files(Callable { if (def.isFile) defArtifactsIn(def.readText()) else emptyList() })
+        task.inputs
+            .files(Callable { if (def.isFile) defArtifactsIn(def.readText()) else emptyList() })
             .withPropertyName("krappedWrapperArtifacts")
             .withPathSensitivity(PathSensitivity.NONE)
             .optional(true)
