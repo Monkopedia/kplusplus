@@ -56,6 +56,10 @@ on:
       - '.github/workflows/root-build.yml'
       - '.github/actions/konan-cache/**'
       - '.github/test-evidence-gate/gate.sh'
+      # #223: :feature-tests:matrixReport (generator-suite) stamps this file from the tests and
+      # proves its own verdicts on these fixtures first.
+      - 'docs/features.md'
+      - '.github/test-evidence-gate/fixtures/**'
   # Unfiltered on main, same as compiler-check.yml: a merge should always leave a full
   # root-build signal on the branch, whatever the merge happened to touch.
   push:
@@ -192,11 +196,22 @@ jobs:
       # this job rather than something that happens to be dragged in — and it needs the release
       # binary the featuregen graph builds anyway, so it costs this job essentially nothing.
       # A non-zero exit from the tool fails the task (App.kt's exitProcess(1)).
-      - name: nativeTest (featuregen, cppfixture) + noncopyableDeterminismCheck
+      # `:feature-tests:matrixReport` (#223) re-stamps docs/features.md from :featuregen's results,
+      # which this job already pays for, plus :feature-tests' (cheap; the other job gates them).
+      # It fails on a failing, all-skipped or missing test itself; the next step fails on a
+      # committed matrix that the tests no longer agree with.
+      - name: nativeTest (featuregen, cppfixture) + noncopyableDeterminismCheck + matrixReport
         run: |
           # shellcheck disable=SC2046,SC2086 # one task per module
           ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) \
-            :krapper:noncopyableDeterminismCheck :verifyWorkflowPaths
+            :krapper:noncopyableDeterminismCheck :feature-tests:matrixReport :verifyWorkflowPaths
+
+      - name: Assert docs/features.md matches the tests
+        run: |
+          if ! git diff --exit-code -- docs/features.md; then
+            echo "::error::matrixReport changed docs/features.md: the committed Status column disagrees with the tests. Run ./gradlew :feature-tests:matrixReport and commit the result."
+            exit 1
+          fi
 
       # Same as the other job (#276).
       - name: Assert KGP provisioned the version the cache is keyed on

@@ -166,8 +166,8 @@ E='^[[:space:]]*([a-z_]+[(][)] [{] )?echo "::error::'
 ne=$(grep -cE "$E" ../workflows/*.yml gate.sh | awk -F: '{n+=$2} END{print n+0}')
 np=$(awk -v e="$E" '$0 ~ e { if (index($0, "; exit 1; }")) n++; else if ((getline nxt) > 0 && nxt ~ /^[[:space:]]*exit 1[[:space:]]*$/) n++ }
           END { print n + 0 }' ../workflows/*.yml gate.sh)
-want "::error:: emitters across the workflows and gate.sh" 7 "$ne"
-want "...each one immediately followed by 'exit 1'"       7 "$np"
+want "::error:: emitters across the workflows and gate.sh" 8 "$ne"
+want "...each one immediately followed by 'exit 1'"       8 "$np"
 
 echo
 [ $rc -eq 0 ] && echo "test-evidence gate: OK" || echo "test-evidence gate: FAILED"

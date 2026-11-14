@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
+
 plugins {
     kotlin("multiplatform")
 }
@@ -77,148 +79,360 @@ tasks.matching { it.name.startsWith("cinteropFeature_testsNative") }.configureEa
 }
 
 // ---------------------------------------------------------------------------
-// matrixReport: run the feature tests, then write each row's Status back into
-// docs/features.md so the matrix's "Status is set by the harness, not
-// by hand" promise is real. Row id -> test class is a deterministic forward
-// derivation (PR-int-rt -> PrIntRtTest). Status rollup is per row (test class):
-// any failure/error -> 🔴, otherwise 🟢. A manual 🟡 ("passes with a documented
-// workaround") whose tests are green is preserved, since 🟡 is human judgment.
-// Drift is logged both ways: a row with no matching test xml, and a test class
-// with no matching row.
+// matrixReport: write each row's Status into docs/features.md from THIS run's test results,
+// and FAIL whenever the matrix and the tests disagree (#223), so the matrix's "Status is set
+// by the test harness, not by hand" promise is real.
+//
+// Harness-statused rows are those of a table with a `Test cases` column (the contract
+// tables: each bullet is an @Test). A row's tests are the `FooTest` classes its cells cite
+// in backticks, else the class derived from its id (PR-int-rt -> PrIntRtTest). Tables
+// without `Test cases` are statused by hand; their rows' citations only count towards
+// which test classes have a row.
+//
+// Verdicts (stampMatrix):
+//   * every test passed            -> 🟢 (a hand-set 🟡 "documented workaround" is kept)
+//   * any failure/error            -> 🔴, and the task FAILS — for ANY failing class, row
+//                                     or not, since the harness tests run with
+//                                     ignoreFailures under this task so 🔴 can be stamped;
+//   * the tests executed nothing    -> 🔴, FAILS (an all-@Ignore'd class measured nothing);
+//   * no results for a cited class, or for a row that claims 🟢/🟡 -> ⚪, FAILS;
+//   * no results and the row is ⚪ or 🔴 -> left alone: neither claims support, so this is
+//     the legitimate "not built yet" state, reported but not failed (by decision);
+//   * no contract row measured at all -> FAILS (vacuity: a moved header must not pass).
+// A test class with no row is reported, not failed: many classes are krapper regression
+// tests (TsSkipTest, TdDefArgTest, ...) that have no feature row by design.
+//
+// Stale results: a test task clears its JUnit XML directory when it runs, and under this
+// task the harness tests always run (see the end of this file), so the results read here
+// are exactly the ones this build produced. A deleted test class leaves no XML behind, and
+// its row goes ⚪ and fails.
+//
+// Not cached: no outputs are declared, so it always re-reads docs/features.md. CI runs it in
+// root-build.yml's generator-suite job and fails if it changed the committed file.
 // ---------------------------------------------------------------------------
-val matrixReport by tasks.registering {
-    group = "verification"
-    description = "Run feature tests and write per-row status back into features.md"
-    dependsOn(tasks.named("nativeTest"))
-    // The generator-backed harness (:featuregen) contributes std::-type rows;
-    // include its results so those rows get statused too.
-    dependsOn(":featuregen:nativeTest")
 
-    // Every module's nativeTest results dir. The pure-cinterop harness
-    // (this module) plus any generator-backed modules.
-    val resultDirs =
-        listOf(
-            layout.buildDirectory
-                .dir("test-results/nativeTest")
-                .get()
-                .asFile,
-            rootProject.file("featuregen/build/test-results/nativeTest"),
-        )
-    val matrixFile = rootProject.file("docs/features.md")
-    resultDirs.filter { it.exists() }.forEach { inputs.dir(it) }
-    inputs.file(matrixFile)
-    outputs.file(matrixFile)
+// A JUnit XML file's counts, summed over EVERY `<testsuite ` start tag: the arithmetic of
+// .github/test-evidence-gate/gate.sh. `tests=` counts skipped testcases, so executed is
+// `tests - skipped`. Reading only start tags keeps attribute-like <system-out> text out, and
+// the space after `testsuite` keeps a `<testsuites>` root's totals from counting twice.
+data class Counts(
+    val executed: Int,
+    val failed: Int,
+) {
+    operator fun plus(other: Counts) = Counts(executed + other.executed, failed + other.failed)
+}
 
-    doLast {
-        // Row id -> test class, generalized across categories. The first
-        // segment is the category code (PR, ST, …), Title-cased; the rest are
-        // PascalCase and concatenated. PR-int-rt -> PrIntRtTest,
-        // ST-cstr-in -> StCstrInTest.
-        fun rowIdToClass(id: String): String {
-            val parts = id.split("-")
-            val cat = parts.first().lowercase().replaceFirstChar(Char::uppercaseChar)
-            val rest = parts.drop(1).joinToString("") { it.replaceFirstChar(Char::uppercaseChar) }
-            return "$cat${rest}Test"
-        }
-        val idPattern = Regex("^[A-Z]{2,}-")
+fun countsOf(xml: String): Counts =
+    Regex("<testsuite [^>]*>")
+        .findAll(xml)
+        .map { tag ->
+            fun attr(name: String) =
+                Regex(" $name=\"(\\d+)\"")
+                    .find(tag.value)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.toInt() ?: 0
+            Counts(attr("tests") - attr("skipped"), attr("failures") + attr("errors"))
+        }.fold(Counts(0, 0), Counts::plus)
 
-        val attr = { text: String, name: String ->
-            Regex("""$name="(\d+)"""")
-                .find(text)
-                ?.groupValues
-                ?.get(1)
-                ?.toInt() ?: 0
-        }
+// PR-int-rt -> PrIntRtTest, ST-cstr-in -> StCstrInTest: the category code Title-cased, the
+// rest PascalCased, then `Test`.
+fun rowIdToClass(id: String): String =
+    id.split("-").joinToString("") { it.lowercase().replaceFirstChar(Char::uppercaseChar) } + "Test"
 
-        val xmlByClass =
-            resultDirs
-                .flatMap {
-                    (
-                        it.listFiles { f ->
-                            f.name.endsWith(".xml")
-                        } ?: emptyArray()
-                    ).toList()
-                }.associateBy { it.name.removePrefix("TEST-nativeTest.").removeSuffix(".xml") }
+class Stamped(
+    val text: String,
+    val problems: List<String>,
+    val unscaffolded: List<String>,
+    val orphans: List<String>,
+)
 
-        val lines = matrixFile.readLines()
-        var statusIdx = -1
-        var headerCells = 0
-        val matchedClasses = mutableSetOf<String>()
-        val notScaffolded = mutableListOf<String>()
-        val turnedRed = mutableListOf<String>()
-
-        val out =
-            lines.map { line ->
-                val trimmed = line.trim()
-                val isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|")
-                if (!isTableRow) return@map line
-                val cells =
-                    trimmed
-                        .removePrefix("|")
-                        .removeSuffix("|")
-                        .split("|")
-                        .map { it.trim() }
-
-                // Lock onto the header that owns the Status column.
-                if (statusIdx == -1 && cells.contains("Status") && cells.contains("ID")) {
-                    statusIdx = cells.indexOf("Status")
-                    headerCells = cells.size
-                    return@map line
-                }
-                // Only rewrite real data rows of that table.
-                if (statusIdx == -1 || cells.size != headerCells) return@map line
-                val id = cells.firstOrNull() ?: return@map line
-                if (!idPattern.containsMatchIn(id)) return@map line
-
-                val cls = rowIdToClass(id)
-                val xml = xmlByClass[cls]
-                if (xml == null) {
-                    notScaffolded += "$id (expected $cls)"
-                    return@map line
-                }
-                matchedClasses += cls
-                val text = xml.readText()
-                val failed = attr(text, "failures") + attr(text, "errors")
-                val current = cells[statusIdx]
-                val newStatus =
-                    when {
-                        failed > 0 -> "🔴"
-
-                        // 🔴
-                        current.contains("🟡") -> current
-
-                        // keep manual 🟡
-                        else -> "🟢" // 🟢
-                    }
-                if (failed > 0) turnedRed += "$id ($cls: $failed failing)"
-                val updated = cells.toMutableList().also { it[statusIdx] = newStatus }
-                "| " + updated.joinToString(" | ") + " |"
+fun stampMatrix(
+    matrix: String,
+    results: Map<String, Counts>,
+): Stamped {
+    val problems = mutableListOf<String>()
+    val unscaffolded = mutableListOf<String>()
+    val claimed = mutableSetOf("SmokeTest")
+    var statusIdx = -1 // the current table's Status column; -1 outside a contract table
+    var width = 0
+    var measured = 0
+    val text =
+        matrix.lines().withIndex().joinToString("\n") { (index, line) ->
+            val trimmed = line.trim()
+            if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
+                statusIdx = -1
+                width = 0
+                return@joinToString line
             }
+            // A Markdown cell may hold an escaped `\|`; only an unescaped `|` separates cells.
+            val cells =
+                trimmed
+                    .removePrefix("|")
+                    .removeSuffix("|")
+                    .split(Regex("""(?<!\\)\|"""))
+                    .map { it.trim() }
+            if ("ID" in cells && "Status" in cells) {
+                statusIdx = if ("Test cases" in cells) cells.indexOf("Status") else -1
+                width = cells.size
+                return@joinToString line
+            }
+            val id = cells.first()
+            if (cells.size != width || !Regex("^[A-Z]{2,}-").containsMatchIn(id)) {
+                // In a contract table every line past the header is a row or the separator:
+                // one that cannot be read must not drop out of the matrix unmeasured.
+                val separator = cells.all { Regex("^:?-+:?$").matches(it) }
+                if (statusIdx != -1 && !separator) {
+                    problems +=
+                        "line ${index + 1}: cannot read this row of a `Test cases` table: $trimmed"
+                }
+                return@joinToString line
+            }
+            val cited =
+                cells.flatMap { cell ->
+                    Regex("`([A-Z][A-Za-z0-9]*Test)`").findAll(cell).map { it.groupValues[1] }
+                }
+            val classes = cited.ifEmpty { listOf(rowIdToClass(id)) }
+            claimed += classes
+            if (statusIdx == -1) return@joinToString line
 
-        val newText = out.joinToString("\n") + "\n"
-        val changed = newText != matrixFile.readText()
-        if (changed) matrixFile.writeText(newText)
+            val current = cells[statusIdx]
+            val missing = classes.filter { it !in results }
+            val counts = classes.mapNotNull(results::get).fold(Counts(0, 0), Counts::plus)
+            val claimsSupport = current != "⚪" && current != "🔴"
+            val status =
+                if (missing.isNotEmpty()) {
+                    if (cited.isEmpty() && !claimsSupport) {
+                        unscaffolded += "$id ($current, expected $classes)"
+                        return@joinToString line
+                    }
+                    problems += "$id: is $current, but no test results for $missing"
+                    "⚪"
+                } else {
+                    measured++
+                    val ranNothing = counts.executed == 0
+                    if (ranNothing) problems += "$id: $classes executed zero tests"
+                    // A failing class fails the task below, whether or not a row owns it.
+                    when {
+                        counts.failed > 0 || ranNothing -> "🔴"
+                        "🟡" in current -> current
+                        else -> "🟢"
+                    }
+                }
+            "| " + cells.toMutableList().also { it[statusIdx] = status }.joinToString(" | ") + " |"
+        }
+    problems +=
+        results.filterValues { it.failed > 0 }.map { (cls, c) ->
+            "$cls: ${c.failed} failing test(s)"
+        }
+    if (measured == 0) problems += "matrix: no harness-statused row matched a test that ran"
+    return Stamped(text, problems, unscaffolded, (results.keys - claimed).sorted())
+}
 
-        val orphans = (xmlByClass.keys - matchedClasses - "SmokeTest").sorted()
-        logger.lifecycle(
-            "matrixReport: ${if (changed) "updated" else "no change to"} ${matrixFile.relativeTo(
-                rootProject.projectDir,
-            )}",
-        )
-        if (turnedRed.isNotEmpty()) {
-            logger.lifecycle(
-                "  🔴 failing rows: ${turnedRed.joinToString(", ")}",
+// The harness whose results matrixReport reads: this module (pure cinterop) and the
+// generator-backed :featuregen, which statuses the std::-type rows.
+evaluationDependsOn(":featuregen")
+val harnessTests =
+    listOf(
+        tasks.named<KotlinNativeTest>("nativeTest"),
+        project(":featuregen").tasks.named<KotlinNativeTest>("nativeTest"),
+    )
+
+// stampMatrix's verdicts, proven on the test-evidence gate's committed JUnit fixtures before
+// matrixReport trusts it: a correct stamper and a broken one are indistinguishable while
+// every row is green, which is how #223 survived.
+val verifyMatrixReport =
+    tasks.register("verifyMatrixReport") {
+        group = "verification"
+        description = "Check matrixReport's verdicts against the test-evidence-gate fixtures"
+        val fixtures =
+            rootProject.layout.projectDirectory.dir(
+                ".github/test-evidence-gate/fixtures",
             )
-        }
-        if (notScaffolded.isNotEmpty()) {
-            logger.lifecycle(
-                "  ⚪ rows with no tests yet: ${notScaffolded.joinToString(", ")}",
+        inputs.dir(fixtures)
+        doLast {
+            fun fixture(name: String) = countsOf(fixtures.file("$name.xml").asFile.readText())
+            val wrong = mutableListOf<String>()
+
+            fun expect(
+                what: String,
+                want: Any,
+                got: Any,
+            ) {
+                if (want != got) wrong += "$what: expected $want, got $got"
+            }
+            expect("healthy.xml", Counts(9, 0), fixture("healthy"))
+            expect("all-skipped.xml", Counts(0, 0), fixture("all-skipped"))
+            expect("boundary.xml", Counts(1, 0), fixture("boundary"))
+            expect("nested.xml", Counts(6, 0), fixture("nested"))
+            expect("multi-suite-failure.xml", Counts(10, 1), fixture("multi-suite-failure"))
+            expect("errored.xml", Counts(6, 2), fixture("errored"))
+            expect("decoy-system-out.xml", Counts(2, 0), fixture("decoy-system-out"))
+
+            val results =
+                mapOf(
+                    "AaPassTest" to fixture("healthy"),
+                    "AaWorkaroundTest" to fixture("boundary"),
+                    "AaFailTest" to fixture("multi-suite-failure"),
+                    "AaErrorTest" to fixture("errored"),
+                    "AaIgnoredTest" to fixture("all-skipped"),
+                    "SharedTest" to fixture("nested"),
+                    "AaHandTest" to fixture("healthy"),
+                    "AaEscapedTest" to fixture("healthy"),
+                    "AaOrphanTest" to fixture("healthy"),
+                )
+            val matrix =
+                """
+                | ID | Feature | Test cases | Status | Notes |
+                |---|---|---|---|---|
+                | AA-pass | f | • c | ⚪ | |
+                | AA-workaround | f | • c | 🟡 | |
+                | AA-fail | f | • c | 🟢 | |
+                | AA-error | f | • c | 🟢 | |
+                | AA-ignored | f | • c | 🟢 | |
+                | AA-deleted | f | • c | 🟢 | |
+                | AA-todo | f | • c | ⚪ | |
+                | AA-blocked | f | • c | 🔴 | |
+                | AA-cited | f | • c | 🔴 | `SharedTest` |
+                | AA-cited-gone | f | • c | ⚪ | `GoneTest` |
+                | AA-escaped | `a \| b` | • c | ⚪ | |
+                | ZZ-pipe | a | b | • c | ⚪ | |
+                | zz-lower | f | • c | ⚪ | |
+
+                | ID | Feature | Status | Notes |
+                |---|---|---|---|
+                | AA-hand | f | 🔴 | `AaHandTest` |
+                """.trimIndent()
+            val stamped = stampMatrix(matrix, results)
+            val statuses =
+                stamped.text.lines().filter { it.startsWith("| AA-") }.associate {
+                    val cells = it.split("|").map(String::trim)
+                    cells[1] to cells[cells.size - 3]
+                }
+            expect(
+                "statuses",
+                mapOf(
+                    "AA-pass" to "🟢",
+                    "AA-workaround" to "🟡",
+                    "AA-fail" to "🔴",
+                    "AA-error" to "🔴",
+                    "AA-ignored" to "🔴",
+                    "AA-deleted" to "⚪",
+                    "AA-todo" to "⚪",
+                    "AA-blocked" to "🔴",
+                    "AA-cited" to "🟢",
+                    "AA-cited-gone" to "⚪",
+                    "AA-escaped" to "🟢",
+                    "AA-hand" to "🔴",
+                ),
+                statuses,
             )
-        }
-        if (orphans.isNotEmpty()) {
-            logger.lifecycle(
-                "  ⚠️  test classes with no matrix row: ${orphans.joinToString(", ")}",
+            expect(
+                "failed on",
+                listOf(
+                    "AA-ignored",
+                    "AA-deleted",
+                    "AA-cited-gone",
+                    "AaFailTest",
+                    "AaErrorTest",
+                    "line 14", // ZZ-pipe: an unescaped `|` in a cell
+                    "line 15", // zz-lower: an id that is not an id
+                ).sorted(),
+                stamped.problems.map { it.substringBefore(':') }.sorted(),
             )
+            expect(
+                "unscaffolded",
+                listOf("AA-todo", "AA-blocked"),
+                stamped.unscaffolded.map {
+                    it.substringBefore(' ')
+                },
+            )
+            expect("orphans", listOf("AaOrphanTest"), stamped.orphans)
+            // Vacuity: the same matrix with no `Test cases` column statuses nothing, and must say so.
+            expect(
+                "no contract table",
+                listOf("matrix: no harness-statused row matched a test that ran"),
+                stampMatrix(
+                    matrix.replace("| Test cases |", "| Cases |"),
+                    mapOf("AaPassTest" to fixture("healthy")),
+                ).problems,
+            )
+            if (wrong.isNotEmpty()) {
+                throw GradleException(
+                    "matrixReport's stamper is wrong:\n  " + wrong.joinToString("\n  "),
+                )
+            }
         }
+    }
+
+tasks.named("check") { dependsOn(verifyMatrixReport) }
+
+val matrixReport =
+    tasks.register("matrixReport") {
+        group = "verification"
+        description =
+            "Run the feature tests, write per-row status into docs/features.md, fail on drift"
+        dependsOn(verifyMatrixReport, harnessTests)
+        val xmlDirs =
+            files(
+                harnessTests.map { test ->
+                    test.map {
+                        it.reports.junitXml.outputLocation
+                            .get()
+                    }
+                },
+            )
+        val matrixFile = rootProject.file("docs/features.md")
+        inputs.files(xmlDirs)
+        inputs.file(matrixFile)
+
+        doLast {
+            val results =
+                xmlDirs.asFileTree
+                    .matching { include("TEST-*.xml") }
+                    .groupBy { it.name.removePrefix("TEST-nativeTest.").removeSuffix(".xml") }
+                    .mapValues { (_, xml) ->
+                        xml.map { countsOf(it.readText()) }.reduce(Counts::plus)
+                    }
+            val old = matrixFile.readText()
+            val stamped = stampMatrix(old, results)
+            val changed = stamped.text != old
+            if (changed) matrixFile.writeText(stamped.text)
+
+            val where = matrixFile.relativeTo(rootProject.projectDir)
+            logger.lifecycle("matrixReport: ${if (changed) "updated" else "no change to"} $where")
+            if (stamped.unscaffolded.isNotEmpty()) {
+                logger.lifecycle(
+                    "  ⚪/🔴 rows with no tests yet: ${stamped.unscaffolded.joinToString(", ")}",
+                )
+            }
+            if (stamped.orphans.isNotEmpty()) {
+                logger.lifecycle(
+                    "  test classes with no matrix row: ${stamped.orphans.joinToString(", ")}",
+                )
+            }
+            if (stamped.problems.isNotEmpty()) {
+                throw GradleException(
+                    "$where disagrees with the tests:\n  " + stamped.problems.joinToString("\n  "),
+                )
+            }
+        }
+    }
+
+// Under matrixReport the harness tests always RUN: an UP-TO-DATE test task does not clear its
+// JUnit XML directory, so a report no run of this build wrote would be read, and excluding
+// one (`-x`) would leave its last run's reports. A failing test must reach the
+// matrix as 🔴 rather than stop the build first; matrixReport then fails on it itself.
+gradle.taskGraph.whenReady {
+    if (!hasTask(matrixReport.get())) return@whenReady
+    for (test in harnessTests.map { it.get() }) {
+        val excluded = !hasTask(test)
+        if (excluded) throw GradleException("${matrixReport.get().path} must run ${test.path}")
+        test.outputs.upToDateWhen { false }
+        test.ignoreFailures = true
+        // An up-to-date input, so the run that ignored a failure is never reused as a pass
+        // by a later plain run; outside matrixReport the property is absent, so a plain run
+        // stays cacheable.
+        test.inputs.property("ignoreFailuresUnderMatrixReport", true)
     }
 }

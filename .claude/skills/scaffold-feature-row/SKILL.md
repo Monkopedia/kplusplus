@@ -70,14 +70,17 @@ runs.
      them by a deterministic forward derivation: split the id on `-`, Title-case
      the first segment (the category code), PascalCase the rest, append `Test`.
      `PR-int-rt` → `PrIntRtTest`, `PR-uchar` → `PrUcharTest`,
-     `ST-cstr-in` → `StCstrInTest`. A misnamed class is reported as drift.
+     `ST-cstr-in` → `StCstrInTest`. A row covered by a differently named class
+     cites it in backticks in a cell instead (`` `UcConstructTest` ``). A 🟢/🟡
+     row whose class produced no results fails `matrixReport`.
 6. **Run the build:** `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew
    :feature-tests:nativeTest`. Fix until green.
 7. **Write status back to the matrix** — do NOT hand-edit the Status column.
    Run `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew
    :feature-tests:matrixReport`. It re-runs the tests, rolls each row up to
-   🟢 (all pass) / 🔴 (any failure), rewrites the Status column, and logs
-   drift (rows with no matching test class, and orphan test classes). A
+   🟢 (all pass) / 🔴 (any failure), rewrites the Status column, and FAILS on
+   a failing or all-skipped test or a 🟢/🟡 row with no results (#223; CI
+   also fails if the committed file is stale). Orphan test classes are logged. A
    manual 🟡 (passes with a documented workaround) is preserved when tests
    are green — set 🟡 and its Notes by hand, the task won't clobber it.
 8. **Commit** with subject `Land row <ID> — <status emoji>` (or a batch subject

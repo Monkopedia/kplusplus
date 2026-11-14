@@ -7,6 +7,17 @@ into `feature-tests/` by the scaffold-feature-row skill.
 **Columns.** `Status` is set by the test harness, not by hand. `Test cases` is
 the contract — each bullet becomes an `@Test` in `Cases.kt`.
 
+**How the harness sets Status.** `./gradlew :feature-tests:matrixReport` runs
+`:feature-tests` and `:featuregen`, writes every row of a table that has a
+`Test cases` column, and fails if the matrix and the tests disagree. CI runs it
+on every PR (root-build.yml) and fails if the committed file is out of date. A
+row's tests are the `` `FooTest` `` classes it cites in backticks, otherwise the
+class derived from its ID (`PR-int-rt` → `PrIntRtTest`). It fails on a failing
+or all-skipped test, and on a 🟢/🟡 row with no test results. A ⚪ or 🔴 row with
+no test is left alone, since neither claims support. Tables without a
+`Test cases` column have hand-set Status; their citations name the covering
+tests.
+
 | Status legend | |
 |---|---|
 | ⚪ | row signed off, scaffolding not yet authored |
@@ -187,16 +198,16 @@ All rows 🟢 (scaffolded by an orchestrated subagent; `UcConstructTest`,
 
 | ID | Feature | C++ surface | Desired Kotlin | Test cases | Status | Notes |
 |---|---|---|---|---|---|---|
-| UC-ctor-default | default construction | `Widget()` | `with(Widget){ ms.Widget() }` | • construct; default fields (count==0, scale==0.0) | 🟢 | |
-| UC-ctor-args | construct with args | `Widget(int, double)` | `ms.Widget__int_double(3, 1.5)` | • fields reflect args; int+double both round-trip | 🟢 | content-based factory name (overload-naming fix) |
-| UC-ctor-overload | overload selection | default + (int,double) | both factories reachable | • both ctors callable from one binding | 🟢 | no brittle `_`-prefix — distinct names |
-| UC-field-rw | public field read/write | `int count; double scale;` | `w.count` / `w.count = n` | • read both; write then read back; independent | 🟢 | `var` accessors |
-| UC-method-void | void mutator | `void reset()` | `w.reset()` | • mutates state (fields zeroed), observable after | 🟢 | |
-| UC-method-ret | value-returning method | `int compute(int) const` | `w.compute(5)` | • return reflects state+arg; arg round-trips | 🟢 | |
-| UC-const-method | const method | `double scaled() const` | `w.scaled()` | • callable; does not mutate | 🟢 | const `this` wrapped |
-| UC-static-method | static factory | `static Widget make(int)` | `with(Widget){ ms.make(7) }` | • returns a constructed Widget by value; fields correct | 🟢 | return-by-value (Holder placement-new) |
-| UC-operator-eq | equality operator (hand-written) | `bool operator==(const Widget&) const` | `a.valueEquals(b)` | • value equality via `valueEquals`; Kotlin `==` is identity | 🟢 | hand-written `==` → IDENTITY `equals`/`hashCode` + `valueEquals` (see the equals/hashCode note) |
-| UC-operator-plus | arithmetic operator (by value) | `Widget operator+(const Widget&) const` | `a + b` | • sum combines fields; operands unchanged; independent result | 🟢 | maps to a real `operator fun plus` |
+| UC-ctor-default | default construction | `Widget()` | `with(Widget){ ms.Widget() }` | • construct; default fields (count==0, scale==0.0) | 🟢 | `UcConstructTest` |
+| UC-ctor-args | construct with args | `Widget(int, double)` | `ms.Widget__int_double(3, 1.5)` | • fields reflect args; int+double both round-trip | 🟢 | `UcConstructTest`; content-based factory name (overload-naming fix) |
+| UC-ctor-overload | overload selection | default + (int,double) | both factories reachable | • both ctors callable from one binding | 🟢 | `UcConstructTest`; no brittle `_`-prefix — distinct names |
+| UC-field-rw | public field read/write | `int count; double scale;` | `w.count` / `w.count = n` | • read both; write then read back; independent | 🟢 | `UcFieldMethodTest`; `var` accessors |
+| UC-method-void | void mutator | `void reset()` | `w.reset()` | • mutates state (fields zeroed), observable after | 🟢 | `UcFieldMethodTest` |
+| UC-method-ret | value-returning method | `int compute(int) const` | `w.compute(5)` | • return reflects state+arg; arg round-trips | 🟢 | `UcFieldMethodTest` |
+| UC-const-method | const method | `double scaled() const` | `w.scaled()` | • callable; does not mutate | 🟢 | `UcFieldMethodTest`; const `this` wrapped |
+| UC-static-method | static factory | `static Widget make(int)` | `with(Widget){ ms.make(7) }` | • returns a constructed Widget by value; fields correct | 🟢 | `UcStaticOpTest`; return-by-value (Holder placement-new) |
+| UC-operator-eq | equality operator (hand-written) | `bool operator==(const Widget&) const` | `a.valueEquals(b)` | • value equality via `valueEquals`; Kotlin `==` is identity | 🟢 | `UcStaticOpTest`; hand-written `==` → IDENTITY `equals`/`hashCode` + `valueEquals` (see the equals/hashCode note) |
+| UC-operator-plus | arithmetic operator (by value) | `Widget operator+(const Widget&) const` | `a + b` | • sum combines fields; operands unchanged; independent result | 🟢 | `UcStaticOpTest`; maps to a real `operator fun plus` |
 
 **Note:** operator mapping is asymmetric — `operator+` becomes Kotlin `operator fun plus`
 (`a + b` works). `operator==`'s mapping is gated on whether it is C++20 **defaulted**.
