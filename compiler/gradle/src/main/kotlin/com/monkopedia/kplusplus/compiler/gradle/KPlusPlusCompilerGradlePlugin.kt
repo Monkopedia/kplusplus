@@ -118,10 +118,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.property("failOnDrop", e.failOnDrop)
                 it.inputs.property("strictDiagnostics", e.strictDiagnostics)
                 it.inputs.property("debug", e.debug)
-                it.inputs.property(
-                    "llvmConfig",
-                    e.llvmConfig ?: target.findProperty("llvmConfig")?.toString() ?: ""
-                )
+                it.inputs.property("llvmConfig", llvmConfigOverride(target, e) ?: "")
                 it.inputs.property("compiler", e.compiler ?: "")
                 // Ordered: they are search paths.
                 it.inputs.property("headerDirectories", e.headerDirectories.toList())
@@ -305,15 +302,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val includeDirs = resolveLlvmIncludeDirs(target, ext) +
             ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
-        // The worklist: the compiler-written manifest plus the build-seeded instantiate()
-        // calls, deduped + sorted (the deterministic instantiation order).
-        val manifestFile = requestedManifestFor(target)
-        val manifestSpecs = if (manifestFile.exists()) {
-            manifestFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
-        } else {
-            emptyList()
-        }
-        val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
+        val requested = syncWorklist(target, ext)
 
         krappedDir.mkdirs()
         val headerPaths = headers.map { target.file(it).absolutePath }
@@ -457,8 +446,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * parse error surfaces. Idempotent + additive: absent config on a default-path box adds no -I.
      */
     private fun resolveLlvmIncludeDirs(target: Project, ext: KPlusPlusExtension?): List<String> {
-        val llvmConfigOverride = ext?.llvmConfig?.takeIf { it.isNotBlank() }
-            ?: (target.findProperty("llvmConfig") as? String)?.takeIf { it.isNotBlank() }
+        val llvmConfigOverride = llvmConfigOverride(target, ext)
         val llvmConfigExec = resolveExecutable(llvmConfigOverride ?: "llvm-config")
         if (llvmConfigExec == null) {
             if (llvmConfigOverride != null) {
@@ -725,15 +713,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         return File(target.projectDir, "krapped")
     }
 
-    /**
-     * The compiler-written manifest of requested instantiations: the FIR checker is handed this
-     * path (applyToCompilation) and kplusplusSync reads it. It is a committed input (#25), so it
-     * lives under `<projectDir>/krapped` on EVERY front-end — unlike [krappedDirFor], which says
-     * where output goes.
-     */
-    private fun requestedManifestFor(project: Project) =
-        File(project.projectDir, "krapped/requested.txt")
-
     private fun compareVersions(a: String, b: String): Int {
         val aParts = a.split(".", "-").mapNotNull { it.toIntOrNull() }
         val bParts = b.split(".", "-").mapNotNull { it.toIntOrNull() }
@@ -886,6 +865,38 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val DEFAULT_SYSTEM_INCLUDE_DIRS = setOf("/usr/include", "/usr/local/include")
     }
 }
+
+/**
+ * The compiler-written manifest of requested instantiations: the FIR checker is handed this path
+ * (applyToCompilation), and kplusplusSync declares it and reads it ([syncWorklist]). It is a
+ * committed input (#25), so it lives under `<projectDir>/krapped` on EVERY front-end — unlike
+ * `krappedDirFor`, which says where output goes.
+ */
+internal fun requestedManifestFor(project: Project) =
+    File(project.projectDir, "krapped/requested.txt")
+
+/**
+ * What kplusplusSync instantiates: the [requestedManifestFor] entries plus the build-seeded
+ * `instantiate()` calls, deduped + sorted (the deterministic instantiation order).
+ */
+internal fun syncWorklist(project: Project, ext: KPlusPlusExtension?): List<String> {
+    val manifest = requestedManifestFor(project)
+    val specs = if (manifest.exists()) {
+        manifest.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+    } else {
+        emptyList()
+    }
+    return (specs + ext?.instantiations.orEmpty()).distinct().sorted()
+}
+
+/**
+ * The `llvm-config` the build names, if any: `kplusplus { llvmConfig = ... }`, else
+ * `-PllvmConfig=`; a blank value counts as unset. The ONE resolution, shared by the cpp parse
+ * (resolveLlvmIncludeDirs) and the sync's declared input, so the two cannot disagree.
+ */
+internal fun llvmConfigOverride(project: Project, ext: KPlusPlusExtension?): String? =
+    ext?.llvmConfig?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("llvmConfig") as? String)?.takeIf { it.isNotBlank() }
 
 /**
  * The stage-0 seed path's cinterop `.def` (see `runSeedSync`) — deterministic from the module

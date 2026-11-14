@@ -76,6 +76,7 @@ configurations.testImplementation { extendsFrom(shaded, configurations.shadow.ge
 
 // #226: the plugin applied for real — in ProjectBuilder and in TestKit builds — loads KGP types,
 // which the consumer's build supplies and this module only compiles against.
+val kotlinGradlePlugin = "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0"
 val kgpUnderTest =
     configurations.create("kgpUnderTest") {
         isCanBeConsumed = false
@@ -96,9 +97,8 @@ dependencies {
     shadow(kotlin("reflect"))
     // For KotlinNativeCompilation (MPP-specific). compileOnly because the consumer's
     // build always has kotlin-gradle-plugin on the classpath.
-    compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
-    // The sync-task tests (#226) apply the plugin for real, which loads KGP types.
-    kgpUnderTest("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    compileOnly(kotlinGradlePlugin)
+    kgpUnderTest(kotlinGradlePlugin)
     // #185: the typed channel to krapper. ksrpc-sockets supplies the JVM
     // `ProcessBuilder.asConnection` that speaks the protocol over the subprocess's stdio
     // pipe; ksrpc-core + serialization + coroutines are what the generated stubs run on.

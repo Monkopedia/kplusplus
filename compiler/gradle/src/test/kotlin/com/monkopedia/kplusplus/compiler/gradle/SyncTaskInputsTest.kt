@@ -71,6 +71,38 @@ class SyncTaskInputsTest {
         )
     }
 
+    // The other half of the contract: what the sync READS is the file it declared. Written
+    // through the declared input, so a read pointed anywhere else comes up empty.
+    @Test
+    fun the_worklist_reads_the_declared_manifest() {
+        val project = cppProject()
+        val declared = project.tasks.getByName("kplusplusSync").inputs.files.files
+            .single { it.name == "requested.txt" }
+        declared.parentFile.mkdirs()
+        declared.writeText("std::vector<int>\n\nstd::map<int, int>\n")
+        val ext = project.extensions.getByType(KPlusPlusExtension::class.java)
+        ext.instantiate("std::pair<int, int>")
+        assertEquals(
+            listOf("std::map<int, int>", "std::pair<int, int>", "std::vector<int>"),
+            syncWorklist(project, ext),
+            "the worklist must be the declared manifest ($declared) plus instantiate() calls"
+        )
+    }
+
+    // One resolution of the llvm-config override for the parse and the declared input: a blank
+    // DSL value is unset, so -PllvmConfig wins for both.
+    @Test
+    fun a_blank_dsl_llvm_config_declares_the_project_property() {
+        val project = cppProject()
+        project.extensions.extraProperties["llvmConfig"] = "/opt/llvm/bin/llvm-config"
+        project.extensions.getByType(KPlusPlusExtension::class.java).llvmConfig = ""
+        assertEquals(
+            "/opt/llvm/bin/llvm-config",
+            project.tasks.getByName("kplusplusSync").inputs.properties["llvmConfig"],
+            "the declared llvmConfig must be the one the cpp parse resolves"
+        )
+    }
+
     @Test
     fun a_manifest_alone_wires_the_generated_bindings() {
         val project = cppProject()
