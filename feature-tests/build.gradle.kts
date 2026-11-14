@@ -158,17 +158,19 @@ fun stampMatrix(
     var width = 0
     var measured = 0
     val text =
-        matrix.lines().joinToString("\n") { line ->
+        matrix.lines().withIndex().joinToString("\n") { (index, line) ->
             val trimmed = line.trim()
             if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
+                statusIdx = -1
                 width = 0
                 return@joinToString line
             }
+            // A Markdown cell may hold an escaped `\|`; only an unescaped `|` separates cells.
             val cells =
                 trimmed
                     .removePrefix("|")
                     .removeSuffix("|")
-                    .split("|")
+                    .split(Regex("""(?<!\\)\|"""))
                     .map { it.trim() }
             if ("ID" in cells && "Status" in cells) {
                 statusIdx = if ("Test cases" in cells) cells.indexOf("Status") else -1
@@ -176,9 +178,14 @@ fun stampMatrix(
                 return@joinToString line
             }
             val id = cells.first()
-            if (cells.size != width ||
-                !Regex("^[A-Z]{2,}-").containsMatchIn(id)
-            ) {
+            if (cells.size != width || !Regex("^[A-Z]{2,}-").containsMatchIn(id)) {
+                // In a contract table every line past the header is a row or the separator:
+                // one that cannot be read must not drop out of the matrix unmeasured.
+                val separator = cells.all { Regex("^:?-+:?$").matches(it) }
+                if (statusIdx != -1 && !separator) {
+                    problems +=
+                        "line ${index + 1}: cannot read this row of a `Test cases` table: $trimmed"
+                }
                 return@joinToString line
             }
             val cited =
@@ -271,6 +278,7 @@ val verifyMatrixReport =
                     "AaIgnoredTest" to fixture("all-skipped"),
                     "SharedTest" to fixture("nested"),
                     "AaHandTest" to fixture("healthy"),
+                    "AaEscapedTest" to fixture("healthy"),
                     "AaOrphanTest" to fixture("healthy"),
                 )
             val matrix =
@@ -287,6 +295,9 @@ val verifyMatrixReport =
                 | AA-blocked | f | • c | 🔴 | |
                 | AA-cited | f | • c | 🔴 | `SharedTest` |
                 | AA-cited-gone | f | • c | ⚪ | `GoneTest` |
+                | AA-escaped | `a \| b` | • c | ⚪ | |
+                | ZZ-pipe | a | b | • c | ⚪ | |
+                | zz-lower | f | • c | ⚪ | |
 
                 | ID | Feature | Status | Notes |
                 |---|---|---|---|
@@ -311,6 +322,7 @@ val verifyMatrixReport =
                     "AA-blocked" to "🔴",
                     "AA-cited" to "🟢",
                     "AA-cited-gone" to "⚪",
+                    "AA-escaped" to "🟢",
                     "AA-hand" to "🔴",
                 ),
                 statuses,
@@ -323,6 +335,8 @@ val verifyMatrixReport =
                     "AA-cited-gone",
                     "AaFailTest",
                     "AaErrorTest",
+                    "line 14", // ZZ-pipe: an unescaped `|` in a cell
+                    "line 15", // zz-lower: an id that is not an id
                 ).sorted(),
                 stamped.problems.map { it.substringBefore(':') }.sorted(),
             )
@@ -350,6 +364,8 @@ val verifyMatrixReport =
             }
         }
     }
+
+tasks.named("check") { dependsOn(verifyMatrixReport) }
 
 val matrixReport =
     tasks.register("matrixReport") {
@@ -414,5 +430,9 @@ gradle.taskGraph.whenReady {
         if (excluded) throw GradleException("${matrixReport.get().path} must run ${test.path}")
         test.outputs.upToDateWhen { false }
         test.ignoreFailures = true
+        // An up-to-date input, so the run that ignored a failure is never reused as a pass
+        // by a later plain run; outside matrixReport the property is absent, so a plain run
+        // stays cacheable.
+        test.inputs.property("ignoreFailuresUnderMatrixReport", true)
     }
 }
