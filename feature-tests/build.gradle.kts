@@ -102,10 +102,10 @@ tasks.matching { it.name.startsWith("cinteropFeature_testsNative") }.configureEa
 // A test class with no row is reported, not failed: many classes are krapper regression
 // tests (TsSkipTest, TdDefArgTest, ...) that have no feature row by design.
 //
-// Stale results: the root build deletes every KotlinNativeTest's JUnit XML before it runs,
-// and under this task the harness tests always run (see the end of this file), so the
-// results read here are exactly the ones this build produced. A deleted test class leaves
-// no XML behind, and its row goes ⚪ and fails.
+// Stale results: a test task clears its JUnit XML directory when it runs, and under this
+// task the harness tests always run (see the end of this file), so the results read here
+// are exactly the ones this build produced. A deleted test class leaves no XML behind, and
+// its row goes ⚪ and fails.
 //
 // Not cached: no outputs are declared, so it always re-reads docs/features.md. CI runs it in
 // root-build.yml's generator-suite job and fails if it changed the committed file.
@@ -403,9 +403,9 @@ val matrixReport =
         }
     }
 
-// Under matrixReport the harness tests always RUN: Gradle does not track the JUnit XML
-// directory, so an UP-TO-DATE test task would leave a report it never wrote where it is read,
-// and excluding one (`-x`) would leave its last run's reports. A failing test must reach the
+// Under matrixReport the harness tests always RUN: an UP-TO-DATE test task does not clear its
+// JUnit XML directory, so a report no run of this build wrote would be read, and excluding
+// one (`-x`) would leave its last run's reports. A failing test must reach the
 // matrix as 🔴 rather than stop the build first; matrixReport then fails on it itself.
 gradle.taskGraph.whenReady {
     if (!hasTask(matrixReport.get())) return@whenReady

@@ -67,14 +67,6 @@ subprojects {
             request.args.any { it == "--tests" || it.startsWith("--tests=") }
         }
     tasks.withType<KotlinNativeTest>().configureEach {
-        // #223: delete-before-measure. Gradle leaves the JUnit XML of a test class that no
-        // longer exists, so a deleted or renamed class kept reporting its last green result.
-        doFirst {
-            reports.junitXml.outputLocation
-                .get()
-                .asFile
-                .deleteRecursively()
-        }
         // Internal API: the `--tests` patterns are only writable through the DefaultTestFilter.
         val testFilter = filter as DefaultTestFilter
         var executed = 0
