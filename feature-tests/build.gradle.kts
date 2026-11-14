@@ -410,7 +410,8 @@ val matrixReport =
 gradle.taskGraph.whenReady {
     if (!hasTask(matrixReport.get())) return@whenReady
     for (test in harnessTests.map { it.get() }) {
-        if (!hasTask(test)) throw GradleException("${matrixReport.get().path} must run ${test.path}")
+        val excluded = !hasTask(test)
+        if (excluded) throw GradleException("${matrixReport.get().path} must run ${test.path}")
         test.outputs.upToDateWhen { false }
         test.ignoreFailures = true
     }
