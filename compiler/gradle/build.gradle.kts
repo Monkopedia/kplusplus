@@ -74,6 +74,16 @@ configurations.compileOnly { extendsFrom(shaded) }
 // compile classpath but on no test one — on their runtime classpath.
 configurations.testImplementation { extendsFrom(shaded, configurations.shadow.get()) }
 
+// #226: the plugin applied for real — in ProjectBuilder and in TestKit builds — loads KGP types,
+// which the consumer's build supplies and this module only compiles against.
+val kgpUnderTest =
+    configurations.create("kgpUnderTest") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
+configurations.testImplementation { extendsFrom(kgpUnderTest) }
+tasks.pluginUnderTestMetadata { pluginClasspath.from(shaded, kgpUnderTest) }
+
 dependencies {
     // `shadow` is shadow's bucket for "compile against it, do NOT bundle it, DO declare it for
     // the consumer": it is the only configuration whose dependencies reach the published POM
@@ -87,6 +97,8 @@ dependencies {
     // For KotlinNativeCompilation (MPP-specific). compileOnly because the consumer's
     // build always has kotlin-gradle-plugin on the classpath.
     compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+    // The sync-task tests (#226) apply the plugin for real, which loads KGP types.
+    kgpUnderTest("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
     // #185: the typed channel to krapper. ksrpc-sockets supplies the JVM
     // `ProcessBuilder.asConnection` that speaks the protocol over the subprocess's stdio
     // pipe; ksrpc-core + serialization + coroutines are what the generated stubs run on.
