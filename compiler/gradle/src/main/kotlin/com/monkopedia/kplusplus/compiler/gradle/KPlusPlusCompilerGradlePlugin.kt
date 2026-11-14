@@ -64,10 +64,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             // (re)parsing its headers. The tool is neither built nor run, so don't depend on its
             // link task and don't declare its binary an input — the committed seed is the only
             // input.
-            val seedMode = target.findProperty("kpp.frontend.${target.name}") == "seed"
+            val frontend = target.findProperty("kpp.frontend.${target.name}")
+            val seedMode = frontend == "seed"
             if (!seedMode) linkTask?.let { lt -> it.dependsOn(lt) }
             val krappedDir = krappedDirFor(target)
-            val manifestFile = File(krappedDir, "requested.txt")
             val moduleName = target.name
             // Declare up-to-date inputs/outputs so Gradle can (a) order this task
             // ahead of the native compile that consumes krapped/ (see
@@ -96,9 +96,19 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.files(kexe).withPropertyName("krapperBinary")
                     .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
             }
-            it.inputs.files(manifestFile).withPropertyName("requestedManifest")
+            it.inputs.files(requestedManifestFor(target)).withPropertyName("requestedManifest")
                 .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
                 .optional(true)
+            if (seedMode) {
+                // What runSeedSync reads: the committed bindings and the wrapper it recompiles.
+                it.inputs.files(
+                    target.fileTree(krappedDir) { t -> t.include("src/*.kt", "*.cc", "*.h") }
+                ).withPropertyName("committedSeed").withPathSensitivity(PathSensitivity.RELATIVE)
+            }
+            // Read outside the extension: the front-end itself and the -P passthroughs.
+            it.inputs.property("frontend", frontend?.toString() ?: "")
+            it.inputs.property("kppX", target.findProperty("kpp.x")?.toString() ?: "")
+            it.inputs.property("dumpModel", target.findProperty("kpp.dumpModel") != null)
             ext?.let { e ->
                 it.inputs.property("instantiations", e.instantiations.sorted())
                 it.inputs.property("referencePolicy", e.referencePolicy ?: "")
@@ -108,9 +118,15 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.property("failOnDrop", e.failOnDrop)
                 it.inputs.property("strictDiagnostics", e.strictDiagnostics)
                 it.inputs.property("debug", e.debug)
-                it.inputs.property("llvmConfig", e.llvmConfig ?: "")
+                it.inputs.property("llvmConfig", llvmConfigOverride(target, e) ?: "")
+                it.inputs.property("compiler", e.compiler ?: "")
+                // Ordered: they are search paths.
+                it.inputs.property("headerDirectories", e.headerDirectories.toList())
+                it.inputs.property("libraries", e.libraries.toList())
                 it.inputs.property("only", e.only.sorted())
-                it.inputs.property("onlyFile", e.onlyFile ?: "")
+                // The allowlist is the file's CONTENTS (resolveAllowList), not its path.
+                it.inputs.files(listOfNotNull(e.onlyFile?.let(target::file)))
+                    .withPropertyName("onlyFile").withPathSensitivity(PathSensitivity.NONE)
                 it.inputs.property("fixups", e.fixups.toJsonArray())
                 if (e.headers.isNotEmpty()) {
                     it.inputs.files(e.headers.map { h -> target.file(h) })
@@ -286,17 +302,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val includeDirs = resolveLlvmIncludeDirs(target, ext) +
             ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
-        // The worklist: the compiler-written manifest (ALWAYS at
-        // <projectDir>/krapped/requested.txt — the FIR checker hardcodes that path, see
-        // applyToCompilation) plus the build-seeded instantiate() calls, deduped + sorted (the
-        // deterministic instantiation order).
-        val manifestFile = File(target.projectDir, "krapped/requested.txt")
-        val manifestSpecs = if (manifestFile.exists()) {
-            manifestFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
-        } else {
-            emptyList()
-        }
-        val requested = (manifestSpecs + ext?.instantiations.orEmpty()).distinct().sorted()
+        val requested = syncWorklist(target, ext)
 
         krappedDir.mkdirs()
         val headerPaths = headers.map { target.file(it).absolutePath }
@@ -440,8 +446,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * parse error surfaces. Idempotent + additive: absent config on a default-path box adds no -I.
      */
     private fun resolveLlvmIncludeDirs(target: Project, ext: KPlusPlusExtension?): List<String> {
-        val llvmConfigOverride = ext?.llvmConfig?.takeIf { it.isNotBlank() }
-            ?: (target.findProperty("llvmConfig") as? String)?.takeIf { it.isNotBlank() }
+        val llvmConfigOverride = llvmConfigOverride(target, ext)
         val llvmConfigExec = resolveExecutable(llvmConfigOverride ?: "llvm-config")
         if (llvmConfigExec == null) {
             if (llvmConfigOverride != null) {
@@ -754,9 +759,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 compileTask.dependsOn("kplusplusSync")
             }
         }
-        // Per-compilation manifest path: matches the krapped/ layout the sync
-        // task + wireGeneratedBindings already use, so the on-disk wiring stays consistent.
-        val manifestPath = File(project.projectDir, "krapped/requested.txt").absolutePath
+        val manifestPath = requestedManifestFor(project).absolutePath
         // Mirror the generator's rootPackage to the FIR plugin. Since #206/B2 the plugin no
         // longer positions bindings with it — it cross-checks it against the rootPackage the
         // index records, so a krapped tree predating a rootPackage change is reported rather
@@ -810,10 +813,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // at a def that will never exist.
         project.afterEvaluate {
             val ext = project.extensions.findByType(KPlusPlusExtension::class.java)
-            val manifestFile = File(krappedDir, "requested.txt")
             val willGenerate = ext?.headers?.isNotEmpty() == true ||
                 ext?.instantiations?.isNotEmpty() == true ||
-                manifestFile.exists()
+                requestedManifestFor(project).exists()
             if (!willGenerate && !krappedDef.exists() && !krappedSrc.exists()) {
                 return@afterEvaluate
             }
@@ -863,6 +865,38 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val DEFAULT_SYSTEM_INCLUDE_DIRS = setOf("/usr/include", "/usr/local/include")
     }
 }
+
+/**
+ * The compiler-written manifest of requested instantiations: the FIR checker is handed this path
+ * (applyToCompilation), and kplusplusSync declares it and reads it ([syncWorklist]). It is a
+ * committed input (#25), so it lives under `<projectDir>/krapped` on EVERY front-end — unlike
+ * `krappedDirFor`, which says where output goes.
+ */
+internal fun requestedManifestFor(project: Project) =
+    File(project.projectDir, "krapped/requested.txt")
+
+/**
+ * What kplusplusSync instantiates: the [requestedManifestFor] entries plus the build-seeded
+ * `instantiate()` calls, deduped + sorted (the deterministic instantiation order).
+ */
+internal fun syncWorklist(project: Project, ext: KPlusPlusExtension?): List<String> {
+    val manifest = requestedManifestFor(project)
+    val specs = if (manifest.exists()) {
+        manifest.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+    } else {
+        emptyList()
+    }
+    return (specs + ext?.instantiations.orEmpty()).distinct().sorted()
+}
+
+/**
+ * The `llvm-config` the build names, if any: `kplusplus { llvmConfig = ... }`, else
+ * `-PllvmConfig=`; a blank value counts as unset. The ONE resolution, shared by the cpp parse
+ * (resolveLlvmIncludeDirs) and the sync's declared input, so the two cannot disagree.
+ */
+internal fun llvmConfigOverride(project: Project, ext: KPlusPlusExtension?): String? =
+    ext?.llvmConfig?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("llvmConfig") as? String)?.takeIf { it.isNotBlank() }
 
 /**
  * The stage-0 seed path's cinterop `.def` (see `runSeedSync`) — deterministic from the module
