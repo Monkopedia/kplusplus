@@ -100,18 +100,16 @@ The verification tasks (all need the LLVM toolchain, which is always required):
 | `:featuregen:nativeTest` | The self-hosted feature suite: `krapper` parses + generates featuregen's whole C++ surface (including instantiation forcing), and the tests exercise the generated bindings. |
 | `:cppfixture:nativeTest` | The same generic path on a second module's own config, std-free. |
 | `:krapper:noncopyableDeterminismCheck` | #101: the front-end's special-member set for a NonCopyable type is byte-identical and complete across repeated parses. Wired into `:krapper:check` (#222), so it no longer needs to be typed by hand. |
-| `:clangwalk:runReleaseExecutableKlinker` | The stage1 demo: walks a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on generated bindings. |
+| `:clangwalk:runDebugExecutableKlinker` | The stage1 walk: builds a real Clang AST (`buildASTFromCode` → `TranslationUnitDecl` → `decls()`/`methods()`/`bases()`) entirely on the committed seed bindings (`kpp.frontend.clangwalk=seed`, so no tool run), asserts the walked kinds, names, types, bases and methods, and exits non-zero on any failed check or a null on the way to the TU (#245). Runs in CI. |
 
 featuregen's two-stage build still applies: run `:featuregen:kplusplusSync` first, then the
 normal build picks up the generated bindings.
 
-Since #222, the first THREE rows of that table run in CI (`.github/workflows/root-build.yml`,
-`generator-suite` job), together with `:krapper`/`:krapper_model`/`:feature-tests` `nativeTest`
-and every `ktlintCheck` in the `unit-tests` job — 566 `@Test`s that previously ran on developer
-machines only. The FOURTH row is the exception: **`:clangwalk:runReleaseExecutableKlinker` still
-runs in no workflow.** `clangwalk/**` appears in that workflow only as a `paths:` filter (so a
-change to it is linted), and `clangwalk` is `kpp.frontend.clangwalk=seed` — a dev-only
-self-hosting demo, not part of the release. Run it by hand when touching the stage1 demo.
+Every row of that table runs in CI (`.github/workflows/root-build.yml`). The first three
+(#222) run in the `generator-suite` job. The fourth (#245) runs in the `unit-tests` job,
+beside `:krapper`/`:krapper_model`/`:feature-tests` `nativeTest` and every `ktlintCheck`,
+because its seed build needs no in-tree tool. `clangwalk` is still a dev-only
+self-hosting check and is not part of the release.
 
 ## 6. Troubleshooting
 

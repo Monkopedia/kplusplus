@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 import com.monkopedia.klinker.klinkedExecutable
+import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi
 
 plugins {
     kotlin("multiplatform")
@@ -32,15 +34,6 @@ kotlin {
             klinkedExecutable {
                 // klinker links with the system clang++ (needed for modern libclang-cpp's
                 // glibc/libstdc++ symbol versions, absent from K/N's bundled old sysroot).
-                // K/N's DEBUG build pulls in the precompiled platform.linux cinterop cache
-                // WHOLE (no whole-program DCE), and it references dozens of OBSOLETE glibc
-                // symbols (__argp_parse, __argz_*, cfree, getmsg, …) modern glibc removed →
-                // ~111 undefined refs. `--gc-sections` lets the system linker dead-strip the
-                // unreferenced per-function sections (K/N emits one section per wrapper for
-                // exactly this) — giving DEBUG the same DCE release already gets from -opt.
-                // So BOTH build types link now: runDebugExecutableKlinker + the release one.
-                // (The durable home for this is a klinker default — see its LinkTask.)
-                linkerOpts("--gc-sections")
                 // The generated wrapper calls into Clang's C++ AST API, so the final
                 // executable links libclang-cpp (the monolithic LLVM/Clang shared lib)
                 // + LLVM core. -lstdc++ for the C++ wrapper runtime.
@@ -57,6 +50,19 @@ kotlin {
                     "-lpthread",
                 )
                 runTask()
+            }
+            all {
+                // K/N's DEBUG build otherwise links the precompiled platform.linux cache WHOLE,
+                // and it references obsolete glibc symbols. On Ubuntu (libLLVM -> libedit ->
+                // libbsd, which exports one of them, `inet_net_pton`) ld.bfd fails symbol
+                // resolution outright: "DSO missing from command line" (#245). Without the
+                // cache, K/N compiles in only the platform declarations the walk uses, as
+                // :krapper does, so the debug link needs no --gc-sections either.
+                @OptIn(KotlinNativeCacheApi::class)
+                disableNativeCache(
+                    version = DisableCacheInKotlinVersion.`2_4_10`,
+                    reason = "the platform.linux cache drags libbsd's inet_net_pton into the link",
+                )
             }
         }
         compilations.all {

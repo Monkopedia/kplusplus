@@ -31,8 +31,15 @@ private data class WalkedDecl(
 
 // Mirror of krapper's parser self-check helper (CppParser.kt:check): record every assertion,
 // print PASS/FAIL with a message, and let main() exit non-zero if ANY failed — so
-// `:clangwalk:runReleaseExecutableKlinker` is self-verifying instead of a println demo.
+// `:clangwalk:runDebugExecutableKlinker` is self-verifying instead of a println demo.
 private var failures = 0
+
+// The walk cannot reach its checks: a broken binding set links fine and returns null at
+// runtime (#73). That is a failure, not an early success (#245).
+private fun abort(reason: String): Nothing {
+    println("clangwalk: FAILED — $reason")
+    exitProcess(1)
+}
 
 private fun check(name: String, pass: Boolean, detail: String = "") {
     if (!pass) failures++
@@ -59,12 +66,9 @@ fun main(args: Array<String>) = memScoped {
     """.trimIndent()
 
     // Entry point: clang::tooling::buildASTFromCode (unique_ptr<ASTUnit> -> owned ASTUnit).
-    val unit = buildASTFromCode(source, "input.cc")
-        ?: return@memScoped println("clangwalk: buildASTFromCode returned null")
-    val context = unit.getASTContext()
-        ?: return@memScoped println("clangwalk: no ASTContext")
-    val tu = context.getTranslationUnitDecl()
-        ?: return@memScoped println("clangwalk: no TranslationUnitDecl")
+    val unit = buildASTFromCode(source, "input.cc") ?: abort("buildASTFromCode returned null")
+    val context = unit.getASTContext() ?: abort("no ASTContext")
+    val tu = context.getTranslationUnitDecl() ?: abort("no TranslationUnitDecl")
 
     println("clangwalk: top-level declarations of the parsed TU")
     val walked = mutableListOf<WalkedDecl>()
