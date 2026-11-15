@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 import com.monkopedia.klinker.klinkedExecutable
+import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi
 
 plugins {
     kotlin("multiplatform")
@@ -57,6 +59,18 @@ kotlin {
                     "-lpthread",
                 )
                 runTask()
+            }
+            all {
+                // --gc-sections is not enough on Ubuntu: there libLLVM -> libedit -> libbsd, which
+                // exports the cache's `inet_net_pton`, and ld.bfd fails symbol resolution
+                // ("DSO missing from command line") before it ever garbage-collects (#245, first
+                // seen when CI linked this). Without the cache, K/N compiles in only the platform
+                // declarations the walk uses, the same way :krapper builds.
+                @OptIn(KotlinNativeCacheApi::class)
+                disableNativeCache(
+                    version = DisableCacheInKotlinVersion.`2_4_10`,
+                    reason = "the platform.linux cache drags libbsd's inet_net_pton into the link",
+                )
             }
         }
         compilations.all {
