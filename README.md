@@ -45,9 +45,9 @@ Build, and the generated Kotlin bindings are on the classpath — call your C++ 
 
 New to K++, or consuming the **published** plugin from an external project? Start with the
 step-by-step [docs/getting-started.md](docs/getting-started.md) — the full external-consumer flow
-(declare the plugin from `mavenCentral()`/the Plugin Portal, the LLVM-22 prerequisite + how to
-point K++ at a non-default-path install via `llvmConfig` / `-PllvmConfig`, minimal config, build +
-run).
+(declare the plugin from `mavenCentral()`/the Plugin Portal, the Linux x86-64 host it needs, the
+LLVM-22 prerequisite + how to point K++ at a non-default-path install via `llvmConfig` /
+`-PllvmConfig`, minimal config, build + run).
 
 Runnable samples live under [`samples/`](samples). Start with
 [`samples/minimal`](samples/minimal) — a tiny hand-written C++ geometry library bound and run

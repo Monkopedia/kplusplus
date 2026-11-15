@@ -6,6 +6,7 @@ import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
+import java.net.URL
 import java.util.concurrent.Callable
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -19,6 +20,9 @@ import org.jetbrains.kotlin.gradle.plugin.SubpluginOption
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 
 class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
+
+    /** The host + jar the bundled tool is looked up against; tests substitute both. */
+    internal var bundledTools = BundledTools()
 
     override fun apply(target: Project) {
         // The compiler plugin uses FIR APIs that change between Kotlin versions; running
@@ -155,7 +159,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     // the tool from mavenLocal if build/ was wiped by a same-invocation
                     // `clean` after configuration staged it (resolvePublishedTool is
                     // idempotent). For the in-tree paths this returns the same binary.
-                    val execKexe = resolveKrapper(target).second
+                    val resolved = resolveKrapper(target)
+                    resolved.unavailable?.let { reason -> throw GradleException(reason) }
+                    val execKexe = resolved.binary
                     if (!execKexe.exists()) {
                         throw GradleException(
                             "kplusplusSync: the krapper tool was not found at $execKexe. The " +
@@ -537,22 +543,34 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     /**
      * Extract the tool binary BUNDLED in the plugin jar — the 0.4.0 distribution model. The
      * released plugin carries its own `krapper` binary on its classpath at
-     * `/com/monkopedia/kplusplus/tools/linuxX64/<tool>`, so a consumer NEVER resolves a separate
-     * tool Maven coordinate (that coordinate resolution is what collided with an in-build
-     * `:krapper` project). Copy the binary to a per-plugin-version cache under the Gradle user
-     * home, chmod +x (jar entries carry no exec bit), and return it. Returns null when the jar
-     * carries no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through to
-     * the sibling/includedBuild/published paths.
+     * `/com/monkopedia/kplusplus/tools/<host>/<tool>` ([BundledTools]), so a consumer NEVER
+     * resolves a separate tool Maven coordinate (that coordinate resolution is what collided
+     * with an in-build `:krapper` project). Copy the binary to a per-plugin-version cache under the Gradle user
+     * home, chmod +x (jar entries carry no exec bit), and return it. Null when the jar carries
+     * no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through to the
+     * sibling/includedBuild/published paths. A jar that bundles the tool for OTHER hosts only
+     * resolves to [ResolvedKrapper.unavailable] (#208): reported when the tool is first needed,
+     * so configuration (`./gradlew tasks`) still works on that host.
      */
-    private fun extractBundledTool(target: Project, tool: String): File? {
+    private fun bundledKrapper(target: Project): ResolvedKrapper? =
+        when (val bundled = bundledTools.find(TOOL_NAME)) {
+            BundledTool.None -> null
+
+            is BundledTool.UnsupportedHost ->
+                ResolvedKrapper(null, File(TOOL_NAME), unavailable = bundled.message)
+
+            is BundledTool.Found ->
+                extractBundledTool(target, TOOL_NAME, bundled.resource)?.let {
+                    ResolvedKrapper(null, it)
+                }
+        }
+
+    private fun extractBundledTool(target: Project, tool: String, resource: URL): File? {
         val cache = File(
             target.gradle.gradleUserHomeDir,
             "kplusplus/tools/$PLUGIN_VERSION/$tool",
         )
         if (cache.exists() && cache.length() > 0L) return cache
-        val stream = javaClass.getResourceAsStream(
-            "/com/monkopedia/kplusplus/tools/linuxX64/$tool",
-        ) ?: return null
         return try {
             cache.parentFile.mkdirs()
             // Per-invocation UNIQUE temp file (issue #149): two parallel first-time builds for
@@ -562,7 +580,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             val tmp = java.nio.file.Files.createTempFile(cache.parentFile.toPath(), tool, ".part")
                 .toFile()
             try {
-                stream.use { input -> tmp.outputStream().use { out -> input.copyTo(out) } }
+                resource.openStream().use { input ->
+                    tmp.outputStream().use { out -> input.copyTo(out) }
+                }
                 tmp.copyTo(cache, overwrite = true)
             } finally {
                 tmp.delete()
@@ -576,7 +596,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Find the `krapper` binary and its link task. Four layouts, in order:
+     * Find the `krapper` binary and its link task. A `-Pkpp.krapper=<abs-path>` override wins
+     * outright, on any host. Otherwise four layouts, in order:
      *
      *   1. SELF-HOST (`:krapper` itself): the tool module's own bindings must be generated by
      *      the PREVIOUS release's tool, never by itself — resolving to its own link task would
@@ -600,18 +621,22 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * Returns the link task (null on every path where nothing in THIS build builds the tool)
      * plus the binary File; the caller fails fast at execution time if it doesn't exist.
      */
-    private fun resolveKrapper(target: Project): Pair<Any?, File> {
+    internal fun resolveKrapper(target: Project): ResolvedKrapper {
         val relBinary = "krapper/build/bin/klinker/krapperRelease/krapper"
+        fun override(name: String) = (target.findProperty(name) as? String)
+            ?.takeIf { it.isNotBlank() }?.let { ResolvedKrapper(null, File(it)) }
+        override(BundledTools.KRAPPER_OVERRIDE)?.let { return it }
         if (target.name == TOOL_NAME) {
-            (target.findProperty("kpp.stageZeroKrapper") as? String)?.takeIf { it.isNotBlank() }
-                ?.let { return null to File(it) }
-            extractBundledTool(target, TOOL_NAME)?.let { return null to it }
+            override("kpp.stageZeroKrapper")?.let { return it }
+            bundledKrapper(target)?.let { return it }
         }
         val direct = target.rootProject.findProject(":$TOOL_NAME")
         if (direct != null) {
-            return direct.tasks.findByName("linkReleaseExecutableKlinker") to
+            return ResolvedKrapper(
+                direct.tasks.findByName("linkReleaseExecutableKlinker"),
                 direct.layout.buildDirectory
                     .file("bin/klinker/krapperRelease/krapper").get().asFile
+            )
         }
         for (included in target.gradle.includedBuilds) {
             if (!File(included.projectDir, TOOL_NAME).isDirectory) continue
@@ -622,14 +647,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             }
             val binary = File(included.projectDir, relBinary)
             if (taskRef != null || binary.exists()) {
-                return taskRef to binary
+                return ResolvedKrapper(taskRef, binary)
             }
         }
-        extractBundledTool(target, TOOL_NAME)?.let { return null to it }
-        resolvePublishedTool(target, TOOL_NAME)?.let { return null to it }
+        bundledKrapper(target)?.let { return it }
+        resolvePublishedTool(target, TOOL_NAME)?.let { return ResolvedKrapper(null, it) }
         // Final fallback: the conventional in-tree path. The doLast throws a helpful error if
         // it doesn't exist.
-        return null to target.rootProject.file(relBinary)
+        return ResolvedKrapper(null, target.rootProject.file(relBinary))
     }
 
     /**
@@ -848,7 +873,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // until it went stale for the whole 0.3.4 prep out of a green build.
 
         // The ONE tool binary (#184) — also the Gradle project name, the bundled-resource name
-        // under /com/monkopedia/kplusplus/tools/linuxX64/, and the published coordinate.
+        // under /com/monkopedia/kplusplus/tools/<host>/, and the published coordinate.
         const val TOOL_NAME = "krapper"
         const val MIN_KOTLIN_VERSION = "2.3.20"
 
@@ -865,6 +890,17 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val DEFAULT_SYSTEM_INCLUDE_DIRS = setOf("/usr/include", "/usr/local/include")
     }
 }
+
+/**
+ * Where `krapper` comes from: its link task in THIS build (null when nothing here builds it) and
+ * its binary. [unavailable] is the reason there is no usable binary at all, raised when the tool
+ * is first run rather than while configuring.
+ */
+internal data class ResolvedKrapper(
+    val linkTask: Any?,
+    val binary: File,
+    val unavailable: String? = null
+)
 
 /**
  * The compiler-written manifest of requested instantiations: the FIR checker is handed this path

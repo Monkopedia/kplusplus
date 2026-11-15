@@ -7,6 +7,12 @@ K++ repo). If you want to read a finished version of exactly this, see
 
 ## Prerequisites
 
+- **A Linux x86-64 host.** The `krapper` tool bundled in the published plugin is a `linuxX64`
+  binary only — there is none for macOS, Windows or Linux on ARM. On any other host the plugin
+  configures normally but `kplusplusSync` fails, naming your host and the supported ones. If you
+  have a `krapper` built for your host, point the plugin at it with
+  `-Pkpp.krapper=/abs/path/to/krapper` (or `kpp.krapper=...` in `gradle.properties`); it is used
+  as-is, with no host check.
 - **JDK 21** to run the Gradle build.
 - **An LLVM/Clang 22 toolchain.** K++'s front-end is self-hosted on Clang: it parses your headers
   with a bundled Clang. `clang++` must be on `PATH` (it locates Clang's builtin headers and also
