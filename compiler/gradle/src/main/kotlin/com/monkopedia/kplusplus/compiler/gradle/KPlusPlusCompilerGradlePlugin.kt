@@ -97,7 +97,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 // entry, lets the task run, and the doLast re-stages it via resolveKrapperGen
                 // (idempotent) or fails fast on a genuinely-missing tool. When the file is
                 // present it still drives the up-to-date check identically.
-                it.inputs.files(kexe).withPropertyName("krapperBinary")
+                it.inputs.files(listOfNotNull(kexe)).withPropertyName("krapperBinary")
                     .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.NONE)
             }
             it.inputs.files(requestedManifestFor(target)).withPropertyName("requestedManifest")
@@ -161,7 +161,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     // idempotent). For the in-tree paths this returns the same binary.
                     val resolved = resolveKrapper(target)
                     resolved.unavailable?.let { reason -> throw GradleException(reason) }
-                    val execKexe = resolved.binary
+                    val execKexe = checkNotNull(resolved.binary)
                     if (!execKexe.exists()) {
                         throw GradleException(
                             "kplusplusSync: the krapper tool was not found at $execKexe. The " +
@@ -557,7 +557,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             BundledTool.None -> null
 
             is BundledTool.UnsupportedHost ->
-                ResolvedKrapper(null, File(TOOL_NAME), unavailable = bundled.message)
+                ResolvedKrapper(null, null, unavailable = bundled.message)
 
             is BundledTool.Found ->
                 extractBundledTool(target, TOOL_NAME, bundled.resource)?.let {
@@ -623,8 +623,24 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      */
     internal fun resolveKrapper(target: Project): ResolvedKrapper {
         val relBinary = "krapper/build/bin/klinker/krapperRelease/krapper"
-        fun override(name: String) = (target.findProperty(name) as? String)
-            ?.takeIf { it.isNotBlank() }?.let { ResolvedKrapper(null, File(it)) }
+
+        // A user-supplied binary is used as-is, so it must be one: absolute (the up-to-date
+        // input and the exec must resolve it alike) and executable. Reported at execution.
+        fun override(name: String): ResolvedKrapper? {
+            val value = (target.findProperty(name) as? String)?.takeIf { it.isNotBlank() }
+                ?: return null
+            val file = File(value)
+            if (file.isAbsolute && file.isFile && file.canExecute()) {
+                return ResolvedKrapper(null, file)
+            }
+            return ResolvedKrapper(
+                null,
+                null,
+                "kplusplus: -P$name='$value' is not an absolute path to an executable file. " +
+                    "Point it at a krapper binary built for this host, e.g. " +
+                    "-P$name=/abs/path/to/krapper."
+            )
+        }
         override(BundledTools.KRAPPER_OVERRIDE)?.let { return it }
         if (target.name == TOOL_NAME) {
             override("kpp.stageZeroKrapper")?.let { return it }
@@ -893,12 +909,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
 
 /**
  * Where `krapper` comes from: its link task in THIS build (null when nothing here builds it) and
- * its binary. [unavailable] is the reason there is no usable binary at all, raised when the tool
- * is first run rather than while configuring.
+ * its binary. A null [binary] means there is no usable one, for the reason in [unavailable],
+ * raised when the tool is first run rather than while configuring.
  */
 internal data class ResolvedKrapper(
     val linkTask: Any?,
-    val binary: File,
+    val binary: File?,
     val unavailable: String? = null
 )
 

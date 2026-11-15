@@ -18,6 +18,7 @@ package com.monkopedia.kplusplus.compiler.gradle
 import java.io.File
 import java.net.URI
 import java.net.URL
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -93,9 +94,9 @@ class BundledToolsTest {
         assertIs<BundledTool.None>(BundledTools("Mac OS X", "aarch64", jar()).find("krapper"))
     }
 
-    private fun macProject(configure: Project.() -> Unit = {}): Project {
-        val project = ProjectBuilder.builder().withName("demo").build()
-        project.extensions.extraProperties["kpp.frontend.demo"] = "cpp"
+    private fun macProject(name: String = "demo", configure: Project.() -> Unit = {}): Project {
+        val project = ProjectBuilder.builder().withName(name).build()
+        project.extensions.extraProperties["kpp.frontend.$name"] = "cpp"
         project.configure()
         project.pluginManager.apply(KPlusPlusCompilerGradlePlugin::class.java)
         project.plugins.getPlugin(KPlusPlusCompilerGradlePlugin::class.java).bundledTools =
@@ -103,25 +104,63 @@ class BundledToolsTest {
         return project
     }
 
+    private fun Project.syncFailure(): String {
+        val sync = tasks.getByName("kplusplusSync")
+        return assertFailsWith<GradleException> { sync.actions.forEach { it.execute(sync) } }
+            .message.orEmpty()
+    }
+
     // Configuring is fine on the unsupported host (`./gradlew tasks` works on a Mac); the
     // refusal comes when the sync first needs the tool, before anything is extracted or run.
     @Test
     fun the_refusal_surfaces_when_the_sync_runs_not_at_configuration() {
-        val project = macProject()
-        val sync = project.tasks.getByName("kplusplusSync")
-        val failure = assertFailsWith<GradleException> {
-            sync.actions.forEach { it.execute(sync) }
-        }
-        assertTrue("Mac OS X aarch64" in failure.message.orEmpty(), failure.message)
+        val failure = macProject().syncFailure()
+        assertTrue("Mac OS X aarch64" in failure, failure)
     }
+
+    private val tmp = createTempDirectory("bundled-tools").toFile().apply { deleteOnExit() }
+
+    private fun tool(executable: Boolean) = File(tmp, "krapper-$executable").apply {
+        writeText("#!/bin/sh\n")
+        setExecutable(executable)
+    }
+
+    // `kpp.krapper` on any project, and `kpp.stageZeroKrapper` on the `:krapper` self-host.
+    private val overrides = listOf("demo" to "kpp.krapper", "krapper" to "kpp.stageZeroKrapper")
+
+    private fun overridden(name: String, property: String, value: String) =
+        macProject(name) { extensions.extraProperties[property] = value }
 
     @Test
     fun a_user_supplied_krapper_skips_the_host_check() {
-        val own = File("/opt/my/krapper")
-        val project = macProject { extensions.extraProperties["kpp.krapper"] = own.path }
-        val resolved = project.plugins.getPlugin(KPlusPlusCompilerGradlePlugin::class.java)
-            .resolveKrapper(project)
-        assertEquals(own, resolved.binary)
-        assertNull(resolved.unavailable)
+        val own = tool(executable = true)
+        for ((name, property) in overrides) {
+            val project = overridden(name, property, own.path)
+            val resolved = project.plugins.getPlugin(KPlusPlusCompilerGradlePlugin::class.java)
+                .resolveKrapper(project)
+            assertEquals(own, resolved.binary, property)
+            assertNull(resolved.unavailable, property)
+        }
     }
+
+    // A bad override names the property and the value rather than pointing at includeBuild /
+    // mavenLocal, and fails before the exec rather than as a late IOException.
+    private fun assertRefused(value: String) {
+        for ((name, property) in overrides) {
+            val failure = overridden(name, property, value).syncFailure()
+            assertTrue("-P$property='$value'" in failure, failure)
+        }
+    }
+
+    @Test
+    fun a_missing_override_names_the_property() = assertRefused("/nope/krapper")
+
+    // Relative would resolve against the project dir as an input but the daemon cwd at exec, so
+    // it is refused even when it names a real executable from here.
+    @Test
+    fun a_relative_override_is_refused() =
+        assertRefused(tool(executable = true).relativeTo(File("").absoluteFile).path)
+
+    @Test
+    fun a_non_executable_override_is_refused() = assertRefused(tool(executable = false).path)
 }
