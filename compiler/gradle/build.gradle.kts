@@ -75,8 +75,9 @@ configurations.compileOnly { extendsFrom(shaded) }
 configurations.testImplementation { extendsFrom(shaded, configurations.shadow.get()) }
 
 // #226: the plugin applied for real — in ProjectBuilder and in TestKit builds — loads KGP types,
-// which the consumer's build supplies and this module only compiles against — at the consumer
-// floor (`kotlin-api` in the catalog, #225), so the tests run the oldest KGP we accept.
+// which the consumer's build supplies and this module only compiles against. Requested at the
+// consumer floor (`kotlin-api` in the catalog, #225); KGP's BOM aligns it up to the build's own
+// `kotlin`, because `shadow(kotlin("gradle-plugin-api"))` below is at that version.
 val kotlinGradlePlugin = libs.kotlin.gradle.plugin
 val kgpUnderTest =
     configurations.create("kgpUnderTest") {
@@ -140,7 +141,7 @@ dependencies {
 // A `const val` is inlined into its call sites at compile time, so this survives the #194
 // shading unchanged (the constant's own package is ours and is not relocated anyway).
 //
-// #225: `MIN_KOTLIN_VERSION` is generated here for the same reason. It was a hand-kept literal
+// #225: `MIN_KOTLIN_VERSION` is derived from here for the same reason. It was a hand-kept literal
 // that sat at 2.3.20 while the API below moved to 2.4.0, so the guard waved 2.3.x consumers
 // through to a NoClassDefFoundError mid-compilation. It is the catalog's `kotlin-api` — the
 // compiler/KGP API this build compiles against — which is exactly the floor the guard enforces.
@@ -164,7 +165,7 @@ val generatePluginVersion =
                 |internal const val PLUGIN_VERSION: String = "$pluginVersion"
                 |
                 |// Source of truth: `kotlin-api` in gradle/libs.versions.toml (#225).
-                |internal const val MIN_KOTLIN_VERSION: String = "$minKotlinVersion"
+                |internal const val KOTLIN_API_VERSION: String = "$minKotlinVersion"
                 |
                 """.trimMargin(),
             )
@@ -264,7 +265,7 @@ val verifyCatalogPins =
         val repoRoot = layout.projectDirectory.dir("../..").asFile
         val catalog =
             mapOf(
-                "kotlin" to libs.versions.kotlin.get(),
+                "kotlin" to libs.versions.kotlin.asProvider().get(),
                 "kotlin-api" to libs.versions.kotlin.api.get(),
                 "klinker" to libs.versions.klinker.get(),
             )
@@ -291,7 +292,8 @@ val verifyCatalogPins =
                         Regex(
                             """kotlin\("[^"]+"(?:,\s*"([^"]+)")?\)(?:\s+version\s+"([^"]+)")?""" +
                                 """|id\("org\.jetbrains\.kotlin[^"]*"\)\s+version\s+"([^"]+)"""" +
-                                """|"org\.jetbrains\.kotlin:[^:"]+:([^"]+)""""
+                                // A version, not a pattern like shadow's `kotlin:.*:.*` filter.
+                                """|"org\.jetbrains\.kotlin:[^:"]+:([0-9$][^"]*)""""
                         ),
                     "klinker" to
                         Regex("""id\("com\.monkopedia\.klinker\.plugin"\)\s+version\s+"([^"]+)""""),

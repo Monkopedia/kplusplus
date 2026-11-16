@@ -18,17 +18,25 @@ package com.monkopedia.kplusplus.compiler.gradle
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
+import kotlin.test.assertTrue
+import org.gradle.api.Project
 import org.gradle.testfixtures.ProjectBuilder
 import org.jetbrains.kotlin.gradle.plugin.KotlinBasePlugin
 
 /**
  * THE KOTLIN GUARD SITS EXACTLY ON THE API FLOOR (#225).
  *
- * `MIN_KOTLIN_VERSION` sat at 2.3.20 for five months while the compiler API it guards moved to
+ * `MIN_KOTLIN_VERSION` sat at 2.3.20 while the compiler API it guards moved to
  * 2.4.0, so a 2.3.x consumer passed the guard and died mid-compilation. It is generated from the
- * catalog's `kotlin-api` now; these pin that wiring from both ends.
+ * catalog's `kotlin-api` now; these pin that value and that the guard enforces it.
  */
 class MinKotlinVersionTest {
+
+    // The guard's own constant, as the shipped class exposes it (a const in the private companion
+    // is a public static field), so a literal written back over the derivation is caught too.
+    private val minKotlinVersion =
+        KPlusPlusCompilerGradlePlugin::class.java.getField("MIN_KOTLIN_VERSION").get(null) as String
 
     @Test
     fun minKotlinVersionIsTheCatalogApiFloor() {
@@ -36,18 +44,42 @@ class MinKotlinVersionTest {
         val floor =
             Regex("""^kotlin-api\s*=\s*"([^"]+)"""", RegexOption.MULTILINE)
                 .findAll(catalog).map { it.groupValues[1] }.toList()
-        assertEquals(listOf(MIN_KOTLIN_VERSION), floor)
+        assertEquals(listOf(minKotlinVersion), floor)
     }
 
-    // The KGP on this test classpath is the catalog's floor (`kgpUnderTest`), so the guard must
-    // report exactly that version and accept it: a MIN_KOTLIN_VERSION above the floor rejects
-    // every consumer the plugin was built for.
     @Test
-    fun theFloorKotlinPassesTheGuard() {
+    fun theGuardAcceptsTheFloor() {
+        applyUnder(minKotlinVersion)
+    }
+
+    // The case #225 is about: on 0.3.7 a 2.3.20 consumer passed this guard and then failed
+    // inside kotlinc; it must get the guard's own error instead.
+    @Test
+    fun theGuardRejectsKotlinBelowTheFloor() {
+        val failure = assertFails { applyUnder("2.3.20") }
+        val messages = generateSequence(failure, Throwable::cause).map { it.message }.toList()
+        assertTrue(
+            messages.any { "requires Kotlin $minKotlinVersion or later (found 2.3.20)" in it.orEmpty() },
+            "Expected the MIN_KOTLIN_VERSION guard's error, got: $messages"
+        )
+    }
+
+    // The real KGP on this classpath is aligned up past the floor, so a fake drives the version.
+    private fun applyUnder(kotlinVersion: String) {
+        FakeKotlinPlugin.reported = kotlinVersion
         val project = ProjectBuilder.builder().build()
-        project.pluginManager.apply("org.jetbrains.kotlin.multiplatform")
-        val kotlin = project.plugins.withType(KotlinBasePlugin::class.java).single()
-        assertEquals(MIN_KOTLIN_VERSION, kotlin.pluginVersion)
+        project.pluginManager.apply(FakeKotlinPlugin::class.java)
         project.pluginManager.apply(KPlusPlusCompilerGradlePlugin::class.java)
+    }
+}
+
+/** A Kotlin plugin that reports whatever version the test sets, and does nothing else. */
+class FakeKotlinPlugin : KotlinBasePlugin {
+    override val pluginVersion: String get() = reported
+
+    override fun apply(target: Project) = Unit
+
+    companion object {
+        var reported = ""
     }
 }

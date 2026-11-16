@@ -29,7 +29,10 @@ serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-jso
 ksrpc-core = { module = "com.monkopedia.ksrpc:ksrpc-core", version.ref = "ksrpc" }
 ksrpc-sockets = { module = "com.monkopedia.ksrpc:ksrpc-sockets", version.ref = "ksrpc" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
-# The compile-against Kotlin artifacts of the `compiler/` build: all on the floor, `kotlin-api`.
+# The compile-against Kotlin artifacts of the `compiler/` build, requested at the floor. The two
+# compiler jars resolve to exactly that, and they are what set it. kotlin-gradle-plugin is
+# aligned up to `kotlin` by KGP's BOM, through the kotlin-gradle-plugin-api the Gradle plugin
+# declares at the build's own version.
 kotlin-compiler = { module = "org.jetbrains.kotlin:kotlin-compiler", version.ref = "kotlin-api" }
 kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin-api" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin-api" }
