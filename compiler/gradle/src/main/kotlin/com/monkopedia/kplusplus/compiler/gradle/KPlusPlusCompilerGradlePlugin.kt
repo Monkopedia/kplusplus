@@ -108,6 +108,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.files(
                     target.fileTree(krappedDir) { t -> t.include("src/*.kt", "*.cc", "*.h") }
                 ).withPropertyName("committedSeed").withPathSensitivity(PathSensitivity.RELATIVE)
+                // The toolchain decides the wrapper object, and PATH or a reinstall can change
+                // it with no knob moving: declare what it resolves to, version included.
+                it.inputs.property(
+                    "seedToolchain",
+                    target.provider { resolveSeedToolchain(target, ext).identity() }
+                )
             }
             // Read outside the extension: the front-end itself and the -P passthroughs.
             it.inputs.property("frontend", frontend?.toString() ?: "")
@@ -223,7 +229,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             )
         }
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
-        val compilerPath = ext?.compiler ?: resolveDefaultCompiler()
+        val toolchain = resolveSeedToolchain(target, ext)
         // Regenerate the cinterop .def — deterministic from the module name + this checkout's
         // krapped dir, so the committed seed carries no host-specific absolute path. Mirrors
         // DefWriter/CompileFlags for the static-wrapper case the laggards use.
@@ -232,10 +238,11 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // (the committed .cc is self-contained / re-compilable).
         val libFile = File(krappedDir, "lib$moduleName.a")
         val cmd = mutableListOf(
-            compilerPath, "-std=$std", "-c", "-fPIE",
+            toolchain.compiler, "-std=$std", "-c", "-fPIE",
             "-o", libFile.absolutePath,
             "-I${krappedDir.absolutePath}", "-DV8_COMPRESS_POINTERS"
         )
+        toolchain.includeDirs.forEach { cmd += "-I$it" }
         // Dynamic (.so) wrapper deps, matching CompileFlags(linkStatics = true). The laggards
         // pass none (they link Clang/LLVM at the module's own K/N link), but stay general.
         ext?.libraries?.map { target.file(it) }?.filter { it.name.endsWith(".so") }?.let { sos ->
@@ -255,6 +262,37 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     cmd.joinToString(" ")
             )
         }
+    }
+
+    /** The seed wrapper compile's compiler and LLVM include dirs (see [resolveSeedToolchain]). */
+    private inner class SeedToolchain(val compiler: String, val includeDirs: List<String>) {
+        /** Resolved path + `--version` + include dirs: what the compile actually depends on. */
+        fun identity(): String {
+            val exec = resolveExecutable(compiler)
+            val version = exec?.let { probeExec(it, "--version") }
+            return listOf(exec?.absolutePath ?: compiler, version.orEmpty(), includeDirs)
+                .joinToString("\n")
+        }
+    }
+
+    /**
+     * Resolve the seed path's toolchain from the configured LLVM, the way the cpp path does
+     * (#297): include dirs from `llvm-config --includedir` ([resolveLlvmIncludeDirs]), and a
+     * bare-named `compiler` from that LLVM's `--bindir` when [llvmConfigOverride] names one, so
+     * a box whose PATH carries a different LLVM still compiles against the configured one. An
+     * explicit compiler path, or a name the bindir lacks, is used as given; no `compiler` keeps
+     * [resolveDefaultCompiler].
+     */
+    private fun resolveSeedToolchain(target: Project, ext: KPlusPlusExtension?): SeedToolchain {
+        val includeDirs = resolveLlvmIncludeDirs(target, ext)
+        val compiler = ext?.compiler ?: return SeedToolchain(resolveDefaultCompiler(), includeDirs)
+        val fromLlvm = llvmConfigOverride(target, ext)
+            ?.takeUnless { File(compiler).path.contains(File.separatorChar) }
+            ?.let(::resolveExecutable)
+            ?.let { probeExec(it, "--bindir") }
+            ?.let { File(it, compiler) }
+            ?.takeIf { it.canExecute() }
+        return SeedToolchain(fromLlvm?.absolutePath ?: compiler, includeDirs)
     }
 
     /**
