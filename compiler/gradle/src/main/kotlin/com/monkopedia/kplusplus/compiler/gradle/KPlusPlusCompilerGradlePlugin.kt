@@ -238,9 +238,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // (the committed .cc is self-contained / re-compilable).
         val libFile = File(krappedDir, "lib$moduleName.a")
         val cmd = mutableListOf(
-            toolchain.compiler, "-std=$std", "-c", "-fPIE",
-            "-o", libFile.absolutePath,
-            "-I${krappedDir.absolutePath}", "-DV8_COMPRESS_POINTERS"
+            toolchain.compiler,
+            "-std=$std",
+            "-c",
+            "-fPIE",
+            "-o",
+            libFile.absolutePath,
+            "-I${krappedDir.absolutePath}",
+            "-DV8_COMPRESS_POINTERS"
         )
         toolchain.includeDirs.forEach { cmd += "-I$it" }
         // Dynamic (.so) wrapper deps, matching CompileFlags(linkStatics = true). The laggards
@@ -287,7 +292,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         val includeDirs = resolveLlvmIncludeDirs(target, ext)
         val compiler = ext?.compiler ?: return SeedToolchain(resolveDefaultCompiler(), includeDirs)
         val fromLlvm = llvmConfigOverride(target, ext)
-            ?.takeUnless { File(compiler).path.contains(File.separatorChar) }
+            ?.takeUnless { compiler.contains(File.separatorChar) }
             ?.let(::resolveExecutable)
             ?.let { probeExec(it, "--bindir") }
             ?.let { File(it, compiler) }
@@ -531,15 +536,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /** First line of `<exec> <arg>` stdout, trimmed; null on non-zero exit or no output. */
-    private fun probeExec(exec: File, arg: String): String? {
-        return try {
-            val proc = ProcessBuilder(exec.absolutePath, arg)
-                .redirectErrorStream(true).start()
-            val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
-            if (proc.waitFor() != 0) null else out.ifEmpty { null }
-        } catch (_: Exception) {
-            null
-        }
+    private fun probeExec(exec: File, arg: String): String? = try {
+        val proc = ProcessBuilder(exec.absolutePath, arg)
+            .redirectErrorStream(true).start()
+        val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
+        if (proc.waitFor() != 0) null else out.ifEmpty { null }
+    } catch (_: Exception) {
+        null
     }
 
     /**
@@ -606,7 +609,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     private fun extractBundledTool(target: Project, tool: String, resource: URL): File? {
         val cache = File(
             target.gradle.gradleUserHomeDir,
-            "kplusplus/tools/$PLUGIN_VERSION/$tool",
+            "kplusplus/tools/$PLUGIN_VERSION/$tool"
         )
         if (cache.exists() && cache.length() > 0L) return cache
         return try {
@@ -867,10 +870,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
     }
 
-    private fun wireGeneratedBindings(
-        compilation: KotlinNativeCompilation,
-        project: Project
-    ) {
+    private fun wireGeneratedBindings(compilation: KotlinNativeCompilation, project: Project) {
         val moduleName = project.name
         val krappedDir = krappedDirFor(project)
         val krappedDef = File(krappedDir, "$moduleName.def")
