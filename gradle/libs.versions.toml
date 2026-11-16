@@ -3,13 +3,12 @@
 # `compiler/` build's own `kotlin("jvm")`, and the standalone samples that sit on the KGP the
 # published plugin pulls in (samples/minimal; samples/v8 via this catalog).
 kotlin = "2.4.10"
-# The Kotlin compiler/KGP API the `compiler/` modules COMPILE AGAINST — the consumer floor,
-# deliberately behind `kotlin` above. The FIR/IR plugin jar is loaded by the CONSUMER's
-# kotlinc, and those APIs are not stable across minors, so the oldest Kotlin a consumer may
-# run is the one compiled against here; the Gradle plugin's MIN_KOTLIN_VERSION is generated
-# from this entry, and samples/multiproject builds on exactly this version as the floor's
-# canary. Raising it raises the floor for every consumer: that is a policy decision, not a
-# routine bump, so it does NOT follow `kotlin`. (#225)
+# The Kotlin compiler API the FIR plugin jars COMPILE AGAINST: the consumer floor, deliberately
+# behind `kotlin` above. The consumer's own kotlinc loads those jars, and its API is not stable
+# across minors, so this is the oldest Kotlin a consumer may run. The Gradle plugin's
+# MIN_KOTLIN_VERSION is generated from it, and samples/multiproject builds on exactly it as the
+# floor's canary. Raising it raises the floor for every consumer, which is a policy decision,
+# not a routine bump, so it does NOT follow `kotlin` (#225).
 kotlin-api = "2.4.0"
 coroutines = "1.11.0"
 serialization = "1.10.0"
@@ -29,10 +28,9 @@ serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-jso
 ksrpc-core = { module = "com.monkopedia.ksrpc:ksrpc-core", version.ref = "ksrpc" }
 ksrpc-sockets = { module = "com.monkopedia.ksrpc:ksrpc-sockets", version.ref = "ksrpc" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
-# The compile-against Kotlin artifacts of the `compiler/` build, requested at the floor. The two
-# compiler jars resolve to exactly that, and they are what set it. kotlin-gradle-plugin is
-# aligned up to `kotlin` by KGP's BOM, through the kotlin-gradle-plugin-api the Gradle plugin
-# declares at the build's own version.
+# The `compiler/` build's compile-against Kotlin artifacts, requested at the floor. The two
+# compiler jars resolve to exactly it. kotlin-gradle-plugin is aligned up to `kotlin` by KGP's
+# BOM, through the kotlin-gradle-plugin-api the Gradle plugin declares at the build's version.
 kotlin-compiler = { module = "org.jetbrains.kotlin:kotlin-compiler", version.ref = "kotlin-api" }
 kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin-api" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin-api" }

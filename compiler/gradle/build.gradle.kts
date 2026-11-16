@@ -141,17 +141,17 @@ dependencies {
 // A `const val` is inlined into its call sites at compile time, so this survives the #194
 // shading unchanged (the constant's own package is ours and is not relocated anyway).
 //
-// #225: `MIN_KOTLIN_VERSION` is derived from here for the same reason. It was a hand-kept literal
-// that sat at 2.3.20 while the API below moved to 2.4.0, so the guard waved 2.3.x consumers
-// through to a NoClassDefFoundError mid-compilation. It is the catalog's `kotlin-api` — the
-// compiler/KGP API this build compiles against — which is exactly the floor the guard enforces.
+// #225: `MIN_KOTLIN_VERSION` is derived from here for the same reason. As a hand-kept literal it
+// sat at 2.3.20 after the FIR jars moved to the 2.4.0 compiler API, so a 2.3.x consumer passed
+// the guard and then died inside kotlinc (NoSuchFieldError on 0.3.7). It is the catalog's
+// `kotlin-api`, the compiler API those jars compile against: exactly the floor to enforce.
 val generatePluginVersion =
     tasks.register("generatePluginVersion") {
         val pluginVersion = version.toString()
-        val minKotlinVersion = libs.versions.kotlin.api.get()
+        val kotlinApiVersion = libs.versions.kotlin.api.get()
         val outputDir = layout.buildDirectory.dir("generated/pluginVersion/main")
         inputs.property("pluginVersion", pluginVersion)
-        inputs.property("minKotlinVersion", minKotlinVersion)
+        inputs.property("kotlinApiVersion", kotlinApiVersion)
         outputs.dir(outputDir)
         doLast {
             val pkg = outputDir.get().asFile.resolve("com/monkopedia/kplusplus/compiler/gradle")
@@ -165,7 +165,7 @@ val generatePluginVersion =
                 |internal const val PLUGIN_VERSION: String = "$pluginVersion"
                 |
                 |// Source of truth: `kotlin-api` in gradle/libs.versions.toml (#225).
-                |internal const val KOTLIN_API_VERSION: String = "$minKotlinVersion"
+                |internal const val KOTLIN_API_VERSION: String = "$kotlinApiVersion"
                 |
                 """.trimMargin(),
             )
@@ -298,33 +298,38 @@ val verifyCatalogPins =
                     "klinker" to
                         Regex("""id\("com\.monkopedia\.klinker\.plugin"\)\s+version\s+"([^"]+)""""),
                 )
-            val files = scripts.files.associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
-            val problems = mutableListOf<String>()
-            for (path in standalone.keys) {
-                if (path !in files) problems += "  $path: expected standalone build is missing"
-            }
+            val files =
+                scripts.files.associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
+            val problems =
+                standalone.keys.filterNot(files::containsKey)
+                    .mapTo(mutableListOf()) { "  $it: expected standalone build is missing" }
             for ((path, file) in files.toSortedMap()) {
                 val text = file.readText()
                 for ((kind, regex) in pins) {
+                    // (`file:line`, version) for every match that carries a version.
                     val hits =
                         regex.findAll(text).mapNotNull { m ->
-                            val version = m.groupValues.drop(1).firstOrNull(String::isNotEmpty)
                             val line = text.substring(0, m.range.first).count { it == '\n' } + 1
-                            version?.let { "$path:$line" to it }
+                            m.groupValues.drop(1).firstOrNull(String::isNotEmpty)
+                                ?.let { "$path:$line" to it }
                         }.toList()
                     val key = standalone[path]?.get(kind)
-                    when {
-                        key == null ->
-                            hits.forEach { (at, v) ->
-                                problems += "  $at: hardcoded $kind version \"$v\" — use the catalog"
+                    val want = key?.let { "catalog `$it` = ${catalog[it]}" } ?: "the catalog"
+                    problems +=
+                        when {
+                            key == null -> {
+                                hits.map { (at, v) -> "  $at: hardcoded $kind \"$v\"; use $want" }
                             }
-                        hits.isEmpty() ->
-                            problems += "  $path: no $kind pin found; expected `$key` = ${catalog[key]}"
-                        else ->
-                            hits.filter { it.second != catalog[key] }.forEach { (at, v) ->
-                                problems += "  $at: $kind \"$v\" != catalog `$key` = ${catalog[key]}"
+
+                            hits.isEmpty() -> {
+                                listOf("  $path: no $kind pin found; expected $want")
                             }
-                    }
+
+                            else -> {
+                                hits.filter { it.second != catalog[key] }
+                                    .map { (at, v) -> "  $at: $kind \"$v\" != $want" }
+                            }
+                        }
                 }
             }
             check(problems.isEmpty()) {

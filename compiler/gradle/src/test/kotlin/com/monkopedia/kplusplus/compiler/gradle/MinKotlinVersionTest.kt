@@ -57,9 +57,11 @@ class MinKotlinVersionTest {
     @Test
     fun theGuardRejectsKotlinBelowTheFloor() {
         val failure = assertFails { applyUnder("2.3.20") }
-        val messages = generateSequence(failure, Throwable::cause).map { it.message }.toList()
+        val messages =
+            generateSequence(failure, Throwable::cause).mapNotNull { it.message }.toList()
+        val expected = "requires Kotlin $minKotlinVersion or later (found 2.3.20)"
         assertTrue(
-            messages.any { "requires Kotlin $minKotlinVersion or later (found 2.3.20)" in it.orEmpty() },
+            messages.any { expected in it },
             "Expected the MIN_KOTLIN_VERSION guard's error, got: $messages"
         )
     }

@@ -891,7 +891,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // The ONE tool binary (#184) — also the Gradle project name, the bundled-resource name
         // under /com/monkopedia/kplusplus/tools/<host>/, and the published coordinate.
         const val TOOL_NAME = "krapper"
-        // The compiler/KGP API this plugin compiles against, GENERATED from the catalog's
+
+        // The compiler API the FIR jars compile against, GENERATED from the catalog's
         // `kotlin-api` (#225); as a literal it sat at 2.3.20 behind a 2.4.0 API.
         const val MIN_KOTLIN_VERSION = KOTLIN_API_VERSION
 
