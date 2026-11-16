@@ -34,7 +34,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksrpc)
     id("com.monkopedia.kplusplus.compiler")
-    id("com.monkopedia.klinker.plugin") version "0.2.0"
+    alias(libs.plugins.klinker)
 }
 
 repositories {

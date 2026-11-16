@@ -11,8 +11,9 @@ java {
 }
 
 dependencies {
-    // Kotlin/Native loads a plugin compiled against the non-shaded compiler.
-    compileOnly("org.jetbrains.kotlin:kotlin-compiler:2.4.0")
+    // Kotlin/Native loads a plugin compiled against the non-shaded compiler — at the
+    // consumer floor (`kotlin-api` in the catalog, #225), like the JVM plugin module.
+    compileOnly(libs.kotlin.compiler)
 }
 
 // The native plugin shares its sources with the JVM plugin module; sync them in

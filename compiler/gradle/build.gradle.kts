@@ -75,8 +75,10 @@ configurations.compileOnly { extendsFrom(shaded) }
 configurations.testImplementation { extendsFrom(shaded, configurations.shadow.get()) }
 
 // #226: the plugin applied for real — in ProjectBuilder and in TestKit builds — loads KGP types,
-// which the consumer's build supplies and this module only compiles against.
-val kotlinGradlePlugin = "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0"
+// which the consumer's build supplies and this module only compiles against. Requested at the
+// consumer floor (`kotlin-api` in the catalog, #225); KGP's BOM aligns it up to the build's own
+// `kotlin`, because `shadow(kotlin("gradle-plugin-api"))` below is at that version.
+val kotlinGradlePlugin = libs.kotlin.gradle.plugin
 val kgpUnderTest =
     configurations.create("kgpUnderTest") {
         isCanBeConsumed = false
@@ -84,6 +86,13 @@ val kgpUnderTest =
     }
 configurations.testImplementation { extendsFrom(kgpUnderTest) }
 tasks.pluginUnderTestMetadata { pluginClasspath.from(shaded, kgpUnderTest) }
+// MinKotlinVersionTest (#225) pins the generated MIN_KOTLIN_VERSION to the catalog it came from.
+tasks.test {
+    systemProperty(
+        "kplusplus.test.versionCatalog",
+        rootProject.file("../gradle/libs.versions.toml").absolutePath
+    )
+}
 
 dependencies {
     // `shadow` is shadow's bucket for "compile against it, do NOT bundle it, DO declare it for
@@ -131,11 +140,18 @@ dependencies {
 //
 // A `const val` is inlined into its call sites at compile time, so this survives the #194
 // shading unchanged (the constant's own package is ours and is not relocated anyway).
+//
+// #225: `MIN_KOTLIN_VERSION` is derived from here for the same reason. As a hand-kept literal it
+// sat at 2.3.20 after the FIR jars moved to the 2.4.0 compiler API, so a 2.3.x consumer passed
+// the guard and then died inside kotlinc (NoSuchFieldError on 0.3.7). It is the catalog's
+// `kotlin-api`, the compiler API those jars compile against: exactly the floor to enforce.
 val generatePluginVersion =
     tasks.register("generatePluginVersion") {
         val pluginVersion = version.toString()
+        val kotlinApiVersion = libs.versions.kotlin.api.get()
         val outputDir = layout.buildDirectory.dir("generated/pluginVersion/main")
         inputs.property("pluginVersion", pluginVersion)
+        inputs.property("kotlinApiVersion", kotlinApiVersion)
         outputs.dir(outputDir)
         doLast {
             val pkg = outputDir.get().asFile.resolve("com/monkopedia/kplusplus/compiler/gradle")
@@ -147,6 +163,9 @@ val generatePluginVersion =
                 |package com.monkopedia.kplusplus.compiler.gradle
                 |
                 |internal const val PLUGIN_VERSION: String = "$pluginVersion"
+                |
+                |// Source of truth: `kotlin-api` in gradle/libs.versions.toml (#225).
+                |internal const val KOTLIN_API_VERSION: String = "$kotlinApiVersion"
                 |
                 """.trimMargin(),
             )
@@ -230,8 +249,99 @@ val verifyConsumedPluginPins =
         }
     }
 
+// #225: the version catalog is only the source of truth if nothing pins around it. Four
+// klinker pins ignored the catalog's `klinker` entry, and four Kotlin coordinates hardcoded
+// 2.4.0 while the catalog said 2.4.10 — none of which a green build can notice. So every
+// tracked build script in the repo is scanned for a literal Kotlin or klinker version, and the
+// only ones allowed are the standalone samples that cannot see the catalog, each held to the
+// catalog entry it stands for. It runs here, in `-p compiler check`, because that is the
+// cheapest job and the one that already owns the repo-wide pin gates; compiler-check.yml fires
+// on any `*.gradle.kts` change for it, which verifyWorkflowPaths enforces.
+val verifyCatalogPins =
+    tasks.register("verifyCatalogPins") {
+        group = "verification"
+        description =
+            "Check no build script hardcodes a Kotlin or klinker version the catalog governs."
+        val repoRoot = layout.projectDirectory.dir("../..").asFile
+        val catalog =
+            mapOf(
+                "kotlin" to libs.versions.kotlin.asProvider().get(),
+                "kotlin-api" to libs.versions.kotlin.api.get(),
+                "klinker" to libs.versions.klinker.get(),
+            )
+        // Standalone consumer builds: pin kind -> the catalog entry the literal must equal.
+        val standalone =
+            mapOf(
+                // Copy-pasteable from-published consumer; at least the plugin's own KGP.
+                "samples/minimal/build.gradle.kts" to
+                    mapOf("kotlin" to "kotlin", "klinker" to "klinker"),
+                // The consumer-floor canary (see that file).
+                "samples/multiproject/build.gradle.kts" to mapOf("kotlin" to "kotlin-api"),
+            )
+        val scripts =
+            fileTree(repoRoot) {
+                include("**/*.gradle.kts")
+                exclude("**/build/**", "**/.gradle/**", ".claude/**")
+            }
+        inputs.files(scripts)
+        inputs.property("catalog", catalog)
+        doLast {
+            val pins =
+                mapOf(
+                    "kotlin" to
+                        Regex(
+                            """kotlin\("[^"]+"(?:,\s*"([^"]+)")?\)(?:\s+version\s+"([^"]+)")?""" +
+                                """|id\("org\.jetbrains\.kotlin[^"]*"\)\s+version\s+"([^"]+)"""" +
+                                // A version, not a pattern like shadow's `kotlin:.*:.*` filter.
+                                """|"org\.jetbrains\.kotlin:[^:"]+:([0-9$][^"]*)""""
+                        ),
+                    "klinker" to
+                        Regex("""id\("com\.monkopedia\.klinker\.plugin"\)\s+version\s+"([^"]+)""""),
+                )
+            val files =
+                scripts.files.associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
+            val problems =
+                standalone.keys.filterNot(files::containsKey)
+                    .mapTo(mutableListOf()) { "  $it: expected standalone build is missing" }
+            for ((path, file) in files.toSortedMap()) {
+                val text = file.readText()
+                for ((kind, regex) in pins) {
+                    // (`file:line`, version) for every match that carries a version.
+                    val hits =
+                        regex.findAll(text).mapNotNull { m ->
+                            val line = text.substring(0, m.range.first).count { it == '\n' } + 1
+                            m.groupValues.drop(1).firstOrNull(String::isNotEmpty)
+                                ?.let { "$path:$line" to it }
+                        }.toList()
+                    val key = standalone[path]?.get(kind)
+                    val want = key?.let { "catalog `$it` = ${catalog[it]}" } ?: "the catalog"
+                    problems +=
+                        when {
+                            key == null -> {
+                                hits.map { (at, v) -> "  $at: hardcoded $kind \"$v\"; use $want" }
+                            }
+
+                            hits.isEmpty() -> {
+                                listOf("  $path: no $kind pin found; expected $want")
+                            }
+
+                            else -> {
+                                hits.filter { it.second != catalog[key] }
+                                    .map { (at, v) -> "  $at: $kind \"$v\" != $want" }
+                            }
+                        }
+                }
+            }
+            check(problems.isEmpty()) {
+                "Build scripts pin versions around gradle/libs.versions.toml (#225):\n" +
+                    problems.joinToString("\n")
+            }
+            logger.lifecycle("Catalog pins hold across ${files.size} build script(s).")
+        }
+    }
+
 tasks.check {
-    dependsOn(verifyConsumedPluginPins)
+    dependsOn(verifyConsumedPluginPins, verifyCatalogPins)
 }
 
 java {

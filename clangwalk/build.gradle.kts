@@ -20,7 +20,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi
 plugins {
     kotlin("multiplatform")
     id("com.monkopedia.kplusplus.compiler")
-    id("com.monkopedia.klinker.plugin") version "0.2.0"
+    alias(libs.plugins.klinker)
 }
 
 repositories {

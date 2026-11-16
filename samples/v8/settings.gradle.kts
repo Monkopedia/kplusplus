@@ -29,3 +29,13 @@ pluginManagement {
     includeBuild("../../")
     includeBuild("../../compiler")
 }
+
+// The in-tree dev loop builds WITH the repo, so it takes its Kotlin and klinker versions from
+// the repo's catalog (#225) rather than pinning its own copies, the same way compiler/ does.
+dependencyResolutionManagement {
+    versionCatalogs {
+        create("libs") {
+            from(files("../../gradle/libs.versions.toml"))
+        }
+    }
+}

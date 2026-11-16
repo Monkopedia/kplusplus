@@ -23,6 +23,9 @@ buildscript {
 }
 plugins {
     // At least the KGP the kplusplus plugin depends on, or that one silently wins (#276).
+    // These two pins are literals because this is a standalone, copy-pasteable consumer build
+    // that does not see the repo's catalog; `verifyCatalogPins` (compiler/gradle, #225) holds
+    // them to the catalog's `kotlin` and `klinker`, so they cannot drift from it.
     kotlin("multiplatform") version "2.4.10"
     // The kplusplus compiler subplugin, resolved from its published mavenLocal marker
     // (R2, #128) — no includeBuild. Everything kplusplus-specific lives in the narrow
