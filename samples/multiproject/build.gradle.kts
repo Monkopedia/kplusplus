@@ -20,6 +20,12 @@
 // ROOT buildscript classloader, the PARENT of the classloader :bindings' kplusplus plugin
 // loads from. kplusplus is deliberately NOT declared here — a consumer should not have to
 // know about any of this.
+//
+// The pin is DELIBERATELY the consumer floor — the catalog's `kotlin-api`, not the `kotlin` the
+// repo builds with (#225). Declared here, at the root, this KGP is the one that really runs (the
+// kplusplus plugin's newer kotlin-gradle-plugin-api sits on the child classloader and loses), so
+// this sample is the one CI build of the plugin on the oldest Kotlin it accepts.
+// `verifyCatalogPins` (compiler/gradle) holds it to `kotlin-api`; it moves only when that does.
 plugins {
     kotlin("multiplatform") version "2.4.0" apply false
 }

@@ -57,12 +57,14 @@ java {
 }
 
 dependencies {
-    compileOnly("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
+    // The consumer-floor compiler API (`kotlin-api` in the catalog, #225), not the Kotlin
+    // this build runs: the consumer's kotlinc loads this jar.
+    compileOnly(libs.kotlin.compiler.embeddable)
 
     // #206: this module's first tests. `compileOnly` above keeps the compiler off the
     // published runtime classpath (the Kotlin compiler supplies it when it loads this
     // plugin), but the tests instantiate ClassId/FqName/Name for real, so they need it.
-    testImplementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0")
+    testImplementation(libs.kotlin.compiler.embeddable)
     testImplementation(kotlin("test-junit"))
 }
 

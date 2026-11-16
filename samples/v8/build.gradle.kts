@@ -22,12 +22,14 @@ buildscript {
     }
 }
 plugins {
-    kotlin("multiplatform") version "2.4.0"
+    // The repo's own Kotlin (see settings.gradle.kts): the in-tree plugin depends on that KGP,
+    // which would silently win over any older pin here anyway (#225).
+    alias(libs.plugins.kotlin.multiplatform)
     // v2: the compiler subplugin replaces the legacy mapping-DSL plugin.
     // Headers / library / fixups live in the narrow `kplusplus { ... }`
     // block at the bottom of this file; nothing else here changed.
     id("com.monkopedia.kplusplus.compiler")
-    id("com.monkopedia.klinker.plugin") version "0.2.0"
+    alias(libs.plugins.klinker)
 }
 
 repositories {

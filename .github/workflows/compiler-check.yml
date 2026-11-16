@@ -47,6 +47,9 @@ on:
       - 'samples/minimal/build.gradle.kts'
       - 'samples/multiproject/bindings/build.gradle.kts'
       - 'docs/getting-started.md'        # the quickstart pin (#218)
+      # verifyCatalogPins (#225) scans EVERY build script for a version pinned around the catalog,
+      # so a new module's stray literal fires this job too.
+      - '**/*.gradle.kts'
       # verifyModuleDocs (#231) checks every module + sample is named in both module tables. A
       # new sample adds its own settings script, so this glob fires on the PR that adds one.
       - 'README.md'
