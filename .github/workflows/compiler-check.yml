@@ -55,6 +55,9 @@ on:
       - 'README.md'
       - 'docs/ARCHITECTURE.md'
       - 'samples/*/settings.gradle.kts'
+      # The v8-configure job below configures samples/v8, which consumes this build's plugin
+      # in-tree (#306); its other build scripts are matched by the `**/*.gradle.kts` glob.
+      - 'samples/v8/gradle.properties'
       - 'gradle/workflow-paths.gradle.kts'  # the paths self-check below
       # verify.sh (below) reads its fixtures and EVERY `.github/workflows/*.yml` — so a new
       # workflow is covered by the glob, not by someone remembering to list it (#230).
@@ -132,3 +135,42 @@ jobs:
           path: compiler/**/build/test-results/**
           if-no-files-found: warn
           retention-days: 14
+
+  # #306: samples/v8 is the only in-tree consumer of the plugin (an `includeBuild` of this
+  # build), and nothing ran it, so it stopped configuring when #194 made the shadow jar the
+  # artifact and nobody noticed. A dry run of its main task resolves the plugin from THIS build
+  # (building the real shadow jar) and plans the whole composite graph, for the cost of a
+  # configure. Its own job because the root build it also composites probes LLVM at
+  # settings-eval, which the check job above deliberately does without; in parallel, it adds
+  # no latency.
+  v8-configure:
+    runs-on: ubuntu-latest
+    # A configure plus one JVM jar, after an LLVM install; anywhere near this is wedged.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The root build's settings script fails fast without llvm-config + clang++, and the
+      # sample's build script asks clang++ for the system libstdc++. Same install as
+      # root-build.yml.
+      - name: Install LLVM/Clang 22 (apt.llvm.org)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release gnupg ca-certificates software-properties-common
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          sudo ln -sf "$(command -v clang++-22)"     /usr/local/bin/clang++
+          sudo ln -sf "$(command -v clang-22)"       /usr/local/bin/clang
+          sudo ln -sf "$(command -v llvm-config-22)" /usr/local/bin/llvm-config
+          echo "clang++: $(clang++ --version | head -1); llvm-config: $(llvm-config --version)"
+
+      - name: Configure samples/v8 against the in-tree plugin
+        run: ./gradlew -p samples/v8 --dry-run runDebugExecutableKlinker --no-daemon
