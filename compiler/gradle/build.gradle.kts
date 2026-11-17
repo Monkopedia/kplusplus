@@ -421,12 +421,24 @@ tasks.check {
     dependsOn(verifyShadedJar)
 }
 
-// The plain `jar` would write the same archive name as the shadow jar above, and there is
-// nothing left for it to produce: the shadow plugin already makes its jar the artifact of the
-// `java` component, so the shadow jar is what gets published, what the Plugin Portal uploads,
-// and what an `includeBuild` consumer substitutes to.
+// The plain `jar` has nothing to produce: plugin-publish's shadow integration publishes
+// `shadowRuntimeElements` (the shadow jar) and skips `apiElements`/`runtimeElements`, so the
+// shadow jar is what Central and the Plugin Portal get.
 tasks.jar {
     enabled = false
+}
+
+// #306: an `includeBuild` consumer (samples/v8) does NOT pick `shadowRuntimeElements` — its
+// plugin classpath asks for `bundling=external`, which `runtimeElements` matches exactly — and
+// that variant still named the disabled jar's output (`-main.jar`, plugin-publish's rename),
+// so resolution failed on a file nothing builds. Swap both variants' artifacts for the
+// `shadow` configuration, which carries the shadow jar AND the dependencies the POM declares,
+// so an in-tree consumer gets what ships. The publication is unchanged: it skips these two.
+listOf(configurations.apiElements, configurations.runtimeElements).forEach { elements ->
+    elements.configure {
+        outgoing.artifacts.clear()
+        extendsFrom(configurations.shadow.get())
+    }
 }
 
 gradlePlugin {

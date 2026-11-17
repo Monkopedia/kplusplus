@@ -112,9 +112,17 @@ tasks.register("publishPluginToPortal") {
 // file `-p compiler check` reads must be matched there — see gradle/workflow-paths.gradle.kts,
 // shared with the root build's root-build.yml check (#231). On top of what it discovers, this
 // run also executes verify.sh (the step before `check`), which reads every file under
-// .github/test-evidence-gate and .github/workflows.
+// .github/test-evidence-gate and .github/workflows, and the workflow's v8-configure job reads
+// samples/v8's build configuration (#306).
 extra["workflowPaths.workflow"] = rootDir.resolve("../.github/workflows/compiler-check.yml")
-extra["workflowPaths.alsoRead"] = listOf(".github/test-evidence-gate", ".github/workflows")
+extra["workflowPaths.alsoRead"] =
+    listOf(
+        ".github/test-evidence-gate",
+        ".github/workflows",
+        "samples/v8/settings.gradle.kts",
+        "samples/v8/build.gradle.kts",
+        "samples/v8/gradle.properties"
+    )
 apply(from = "../gradle/workflow-paths.gradle.kts")
 
 // #231: README.md and docs/ARCHITECTURE.md each carry a module table, and both silently missed
