@@ -252,7 +252,9 @@ val verifyConsumedPluginPins =
 // #225: the version catalog is only the source of truth if nothing pins around it. Four
 // klinker pins ignored the catalog's `klinker` entry, and four Kotlin coordinates hardcoded
 // 2.4.0 while the catalog said 2.4.10 — none of which a green build can notice. So every
-// tracked build script in the repo is scanned for a literal Kotlin or klinker version, and the
+// tracked build script in the repo (`git ls-files`, as verifyWorkflowPaths does: only a tracked
+// file can reach a PR; with no `.git` the listing fails, and so does this task, rather than
+// pass on nothing) is scanned for a literal Kotlin or klinker version, and the
 // only ones allowed are the standalone samples that cannot see the catalog, each held to the
 // catalog entry it stands for. It runs here, in `-p compiler check`, because that is the
 // cheapest job and the one that already owns the repo-wide pin gates; compiler-check.yml fires
@@ -279,27 +281,28 @@ val verifyCatalogPins =
                 "samples/multiproject/build.gradle.kts" to mapOf("kotlin" to "kotlin-api"),
             )
         val scripts =
-            fileTree(repoRoot) {
-                include("**/*.gradle.kts")
-                exclude("**/build/**", "**/.gradle/**", ".claude/**")
-            }
+            providers.exec { commandLine("git", "-C", repoRoot.path, "ls-files", "*.gradle.kts") }
+                .standardOutput.asText
+                .map { it.lines().map(repoRoot::resolve).filter(File::isFile) }
         inputs.files(scripts)
         inputs.property("catalog", catalog)
         doLast {
+            // Both spellings of a plugin version: infix `version "x"` and the call `.version("x")`.
+            val version = """(?:\s+version\s+|\s*\.version\(\s*)"""
             val pins =
                 mapOf(
                     "kotlin" to
                         Regex(
-                            """kotlin\("[^"]+"(?:,\s*"([^"]+)")?\)(?:\s+version\s+"([^"]+)")?""" +
-                                """|id\("org\.jetbrains\.kotlin[^"]*"\)\s+version\s+"([^"]+)"""" +
+                            """kotlin\("[^"]+"(?:,\s*"([^"]+)")?\)(?:$version"([^"]+)")?""" +
+                                """|id\("org\.jetbrains\.kotlin[^"]*"\)$version"([^"]+)"""" +
                                 // A version, not a pattern like shadow's `kotlin:.*:.*` filter.
                                 """|"org\.jetbrains\.kotlin:[^:"]+:([0-9$][^"]*)""""
                         ),
                     "klinker" to
-                        Regex("""id\("com\.monkopedia\.klinker\.plugin"\)\s+version\s+"([^"]+)""""),
+                        Regex("""id\("com\.monkopedia\.klinker\.plugin"\)$version"([^"]+)""""),
                 )
             val files =
-                scripts.files.associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
+                scripts.get().associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
             val problems =
                 standalone.keys.filterNot(files::containsKey)
                     .mapTo(mutableListOf()) { "  $it: expected standalone build is missing" }
