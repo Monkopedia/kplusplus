@@ -34,3 +34,8 @@ tasks.withType<KotlinCompile> {
         freeCompilerArgs.add("-Xcontext-parameters")
     }
 }
+
+// #234: the main source set is `syncSource`'s gitignored copy of compiler/plugin's sources,
+// which compiler/plugin lints; linting the copy would double-report and format the wrong files.
+tasks.matching { it.name.startsWith("ktlintMainSourceSet") || it.name.endsWith("OverMainSourceSet") }
+    .configureEach { enabled = false }

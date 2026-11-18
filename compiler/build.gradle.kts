@@ -13,6 +13,9 @@ plugins {
     // (run as part of `check`) that diffs the current public API against the committed `.api`
     // dumps. Regenerate the baseline with `apiDump` when the public API changes intentionally.
     alias(libs.plugins.binary.compatibility.validator)
+    // #234: the repo's style gate. The root build applies it to its own subprojects, but this is
+    // a separate build, so root tasks never reach it; applied to every project here (below).
+    alias(libs.plugins.ktlint) apply false
     // Gives this root a `check` lifecycle, so `-p compiler check` runs verifyWorkflowPaths.
     base
 }
@@ -39,6 +42,30 @@ val kplusplusVersion =
 allprojects {
     group = "com.monkopedia.kplusplus"
     version = kplusplusVersion
+}
+
+// #234: lint this build with the same plugin, ktlint-cli version and repo-root .editorconfig as
+// the root build (build.gradle.kts), so `-p compiler check` runs `ktlintCheck` on every module.
+// Lint only the sources this build owns. The rest belong to someone else or are regenerated:
+//   * build/generated/ — `generatePluginVersion`'s output (compiler/gradle);
+//   * krapper/ and krapper_model/ — shared source dirs compiled into compiler/gradle, owned
+//     and already linted by the root build (`:krapper`, `:krapper_model`);
+//   * compiler/native's main source set — a gitignored copy of compiler/plugin's sources made
+//     by `syncSource`, linted where it is owned; its tasks are disabled in that module.
+allprojects {
+    apply(plugin = "org.jlleitschuh.gradle.ktlint")
+    configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
+        version.set(rootProject.libs.versions.ktlint.cli)
+        android.set(true)
+        filter {
+            exclude { element ->
+                val path = element.file.invariantSeparatorsPath
+                "/build/generated/" in path ||
+                    "/krapper/src/" in path ||
+                    "/krapper_model/src/" in path
+            }
+        }
+    }
 }
 
 // Scope the ABI gate to the PUBLISHED modules only. The compiler build's published set is the

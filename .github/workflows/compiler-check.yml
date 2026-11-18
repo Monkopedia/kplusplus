@@ -59,6 +59,7 @@ on:
       # in-tree (#306); its other build scripts are matched by the `**/*.gradle.kts` glob.
       - 'samples/v8/gradle.properties'
       - 'gradle/workflow-paths.gradle.kts'  # the paths self-check below
+      - '.editorconfig'                  # the ktlint rules `check` lints compiler/ with (#234)
       # verify.sh (below) reads its fixtures and EVERY `.github/workflows/*.yml` — so a new
       # workflow is covered by the glob, not by someone remembering to list it (#230).
       - '.github/test-evidence-gate/**'
