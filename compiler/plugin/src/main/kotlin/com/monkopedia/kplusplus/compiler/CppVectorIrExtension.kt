@@ -16,10 +16,10 @@ import org.jetbrains.kotlin.ir.util.callableId
 import org.jetbrains.kotlin.ir.util.companionObject
 import org.jetbrains.kotlin.ir.util.functions
 import org.jetbrains.kotlin.ir.util.hasAnnotation
+import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /**
  * Lowers container-facade calls (`cppVector<T>()`, `cppMap<K,V>()`, …) to a
@@ -35,7 +35,7 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
  * extension call arguments[0] is its MemScope receiver.
  */
 class CppVectorIrExtension : IrGenerationExtension {
-    private val CPP_TEMPLATE_ANNOTATION =
+    private val cppTemplateAnnotation =
         ClassId(FqName("krapper"), Name.identifier("CppTemplate"))
 
     @OptIn(UnsafeDuringIrConstructionAPI::class)
@@ -55,7 +55,7 @@ class CppVectorIrExtension : IrGenerationExtension {
                 // rest of the lowering reads the concrete binding off the already-
                 // refined call type, so it's identical for both.
                 if (!CppVectorMapping.isContainerFacade(callable) &&
-                    !callee.hasAnnotation(CPP_TEMPLATE_ANNOTATION)
+                    !callee.hasAnnotation(cppTemplateAnnotation)
                 ) {
                     return super.visitCall(expression)
                 }

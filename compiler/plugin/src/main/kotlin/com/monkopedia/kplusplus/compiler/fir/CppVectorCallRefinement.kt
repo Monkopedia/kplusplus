@@ -42,10 +42,8 @@ class CppVectorCallRefinement(session: FirSession) :
         return CallReturnType(typeRef)
     }
 
-    override fun transform(
-        call: FirFunctionCall,
-        symbol: FirNamedFunctionSymbol
-    ): FirFunctionCall = call
+    override fun transform(call: FirFunctionCall, symbol: FirNamedFunctionSymbol): FirFunctionCall =
+        call
 
     override fun ownsSymbol(symbol: FirRegularClassSymbol): Boolean = false
 

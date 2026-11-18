@@ -33,10 +33,13 @@ class KPlusPlusCommandLineProcessor : CommandLineProcessor {
         when (option.optionName) {
             REQUEST_MANIFEST_PATH_OPTION.optionName ->
                 configuration.put(REQUEST_MANIFEST_PATH_KEY, value)
+
             ROOT_PACKAGE_OPTION.optionName ->
                 configuration.put(ROOT_PACKAGE_KEY, value)
+
             BINDING_INDEX_PATH_OPTION.optionName ->
                 configuration.put(BINDING_INDEX_PATH_KEY, value)
+
             else -> error("Unexpected kplusplus compiler plugin option: ${option.optionName}")
         }
     }

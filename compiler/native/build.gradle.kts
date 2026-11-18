@@ -18,10 +18,11 @@ dependencies {
 
 // The native plugin shares its sources with the JVM plugin module; sync them in
 // so there is a single source of truth.
-val syncSource = tasks.register<Sync>("syncSource") {
-    from("../plugin/src/main/kotlin")
-    into("src/main/kotlin")
-}
+val syncSource =
+    tasks.register<Sync>("syncSource") {
+        from("../plugin/src/main/kotlin")
+        into("src/main/kotlin")
+    }
 
 afterEvaluate {
     tasks.named("compileKotlin") { dependsOn(syncSource) }
@@ -37,5 +38,7 @@ tasks.withType<KotlinCompile> {
 
 // #234: the main source set is `syncSource`'s gitignored copy of compiler/plugin's sources,
 // which compiler/plugin lints; linting the copy would double-report and format the wrong files.
-tasks.matching { it.name.startsWith("ktlintMainSourceSet") || it.name.endsWith("OverMainSourceSet") }
-    .configureEach { enabled = false }
+tasks
+    .matching {
+        it.name.startsWith("ktlintMainSourceSet") || it.name.endsWith("OverMainSourceSet")
+    }.configureEach { enabled = false }

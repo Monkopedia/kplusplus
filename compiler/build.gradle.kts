@@ -35,7 +35,10 @@ val kplusplusVersion =
         .fileContents(layout.projectDirectory.file("../gradle.properties"))
         .asText
         .map { text ->
-            java.util.Properties().apply { load(text.reader()) }.getProperty("version")
+            java.util
+                .Properties()
+                .apply { load(text.reader()) }
+                .getProperty("version")
                 ?: error("No `version=` in the repo root gradle.properties")
         }.get()
 
@@ -78,8 +81,8 @@ apiValidation {
     ignoredProjects.addAll(
         listOf(
             rootProject.name,
-            "kplusplus-compiler-plugin-native"
-        )
+            "kplusplus-compiler-plugin-native",
+        ),
     )
     // #185: the Gradle plugin compiles krapper's service protocol from shared source (see
     // compiler/gradle/build.gradle.kts) so both ends of the ksrpc channel come from one
@@ -89,8 +92,8 @@ apiValidation {
     ignoredPackages.addAll(
         listOf(
             "com.monkopedia.krapper",
-            "com.monkopedia.krapper.generator.resolvedmodel"
-        )
+            "com.monkopedia.krapper.generator.resolvedmodel",
+        ),
     )
 }
 
@@ -105,7 +108,7 @@ tasks.register("publishCompilerToMavenLocal") {
         "Publish the Gradle plugin (+ marker) and the FIR kotlinc-plugin jar to mavenLocal."
     dependsOn(
         ":kplusplus-compiler-gradle:publishToMavenLocal",
-        ":kplusplus-compiler-plugin:publishToMavenLocal"
+        ":kplusplus-compiler-plugin:publishToMavenLocal",
     )
 }
 
@@ -117,10 +120,10 @@ tasks.register("publishCompilerToMavenCentral") {
     group = "kplusplus"
     description =
         "Publish the Gradle plugin (+ marker) and the FIR kotlinc-plugin jar to the " +
-            "Central Portal (release/CI — requires credentials + signing in the environment)."
+        "Central Portal (release/CI — requires credentials + signing in the environment)."
     dependsOn(
         ":kplusplus-compiler-gradle:publishToMavenCentral",
-        ":kplusplus-compiler-plugin:publishToMavenCentral"
+        ":kplusplus-compiler-plugin:publishToMavenCentral",
     )
 }
 
@@ -131,7 +134,7 @@ tasks.register("publishPluginToPortal") {
     group = "kplusplus"
     description =
         "Publish the com.monkopedia.kplusplus.compiler Gradle plugin to the Gradle Plugin " +
-            "Portal (release/CI — requires GRADLE_PUBLISH_KEY/GRADLE_PUBLISH_SECRET)."
+        "Portal (release/CI — requires GRADLE_PUBLISH_KEY/GRADLE_PUBLISH_SECRET)."
     dependsOn(":kplusplus-compiler-gradle:publishPlugins")
 }
 
@@ -148,7 +151,7 @@ extra["workflowPaths.alsoRead"] =
         ".github/workflows",
         "samples/v8/settings.gradle.kts",
         "samples/v8/build.gradle.kts",
-        "samples/v8/gradle.properties"
+        "samples/v8/gradle.properties",
     )
 apply(from = "../gradle/workflow-paths.gradle.kts")
 
@@ -171,9 +174,11 @@ val verifyModuleDocs =
         doLast {
             // Every argument of every `include(...)`, so `include(":a", ":b")` counts both.
             val included =
-                Regex("""include\(([^)]*)\)""").findAll(settings.readText())
+                Regex("""include\(([^)]*)\)""")
+                    .findAll(settings.readText())
                     .flatMap { Regex("\":([^\"]+)\"").findAll(it.groupValues[1]) }
-                    .map { it.groupValues[1] }.toList()
+                    .map { it.groupValues[1] }
+                    .toList()
             val sampleDirs = samples.files.map { "samples/${it.parentFile.name}" }
             check(included.isNotEmpty() && sampleDirs.isNotEmpty()) {
                 "Discovered includes $included and samples $sampleDirs — the discovery broke."
@@ -182,7 +187,8 @@ val verifyModuleDocs =
             val missing =
                 docs.flatMap { doc ->
                     val text = doc.readText()
-                    modules.filter { "`$it/`" !in text }
+                    modules
+                        .filter { "`$it/`" !in text }
                         .map { "  ${doc.relativeTo(repoRoot)}: `$it/`" }
                 }
             check(missing.isEmpty()) {

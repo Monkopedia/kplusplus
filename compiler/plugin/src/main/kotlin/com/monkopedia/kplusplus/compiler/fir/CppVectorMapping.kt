@@ -39,11 +39,7 @@ internal object CppVectorMapping {
     // reads both out of krapper's own `binding-index.json`. What is left is what the plugin
     // genuinely knows: which callable is the facade, how to spell the C++ instantiation, and
     // how many type arguments it takes.
-    data class Container(
-        val callableId: CallableId,
-        val cppBase: String,
-        val arity: Int
-    )
+    data class Container(val callableId: CallableId, val cppBase: String, val arity: Int)
 
     // Neutral facade package (the eventual kplusplus runtime-lib package). The
     // cppVector/cppMap entry-point functions must be declared here for the plugin
@@ -129,10 +125,7 @@ internal object CppVectorMapping {
      * one from a `@krapper.CppTemplate` annotation on the resolved facade
      * function — the generic path for USER templates (`fun <T> MemScope.Box()`).
      */
-    fun containerForCallable(
-        symbol: FirNamedFunctionSymbol,
-        session: FirSession
-    ): Container? =
+    fun containerForCallable(symbol: FirNamedFunctionSymbol, session: FirSession): Container? =
         containerForCallable(symbol.callableId)
             ?: cppTemplateContainer(symbol, session)
 

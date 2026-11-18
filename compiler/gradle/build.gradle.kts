@@ -47,27 +47,29 @@ plugins {
 //
 // These are `shaded` -> `compileOnly`: compiled against the real coordinates, shipped as
 // relocated bytecode, and published as NO dependency at all.
-val shaded = configurations.create("shaded") {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-}
+val shaded =
+    configurations.create("shaded") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
 
 val shadedPrefix = "com.monkopedia.kplusplus.compiler.shaded"
 
 // Every third-party package that lands in the jar. Anything bundled but NOT listed here keeps
 // its original name and can still collide, so this must cover the whole `shaded` resolution:
 // ksrpc (+ the jnanoid id generator it uses), kotlinx coroutines/serialization/io, ktor-io.
-val shadedPackages = listOf(
-    "com.monkopedia.ksrpc",
-    "com.aventrix.jnanoid",
-    "kotlinx.coroutines",
-    // kotlinx-coroutines' stack-trace-recovery marker package — real classes with real
-    // methods, so a 1.8.0 copy on a parent classloader is the very hazard this fixes.
-    "_COROUTINE",
-    "kotlinx.serialization",
-    "kotlinx.io",
-    "io.ktor"
-)
+val shadedPackages =
+    listOf(
+        "com.monkopedia.ksrpc",
+        "com.aventrix.jnanoid",
+        "kotlinx.coroutines",
+        // kotlinx-coroutines' stack-trace-recovery marker package — real classes with real
+        // methods, so a 1.8.0 copy on a parent classloader is the very hazard this fixes.
+        "_COROUTINE",
+        "kotlinx.serialization",
+        "kotlinx.io",
+        "io.ktor",
+    )
 configurations.compileOnly { extendsFrom(shaded) }
 // The tests exercise the session against the REAL (unrelocated) classes the main source set
 // was compiled against, so they need those — and the un-bundled `shadow` set, which is on the
@@ -90,7 +92,7 @@ tasks.pluginUnderTestMetadata { pluginClasspath.from(shaded, kgpUnderTest) }
 tasks.test {
     systemProperty(
         "kplusplus.test.versionCatalog",
-        rootProject.file("../gradle/libs.versions.toml").absolutePath
+        rootProject.file("../gradle/libs.versions.toml").absolutePath,
     )
 }
 
@@ -148,7 +150,9 @@ dependencies {
 val generatePluginVersion =
     tasks.register("generatePluginVersion") {
         val pluginVersion = version.toString()
-        val kotlinApiVersion = libs.versions.kotlin.api.get()
+        val kotlinApiVersion =
+            libs.versions.kotlin.api
+                .get()
         val outputDir = layout.buildDirectory.dir("generated/pluginVersion/main")
         inputs.property("pluginVersion", pluginVersion)
         inputs.property("kotlinApiVersion", kotlinApiVersion)
@@ -201,8 +205,8 @@ val verifyConsumedPluginPins =
         group = "verification"
         description =
             "Check the consumed kplusplus plugin pins (root settings + samples + the " +
-                "getting-started quickstart) agree with each other and are not ahead of the " +
-                "declared project version."
+            "getting-started quickstart) agree with each other and are not ahead of the " +
+            "declared project version."
         val declaredVersion = version.toString()
         val repoRoot = layout.projectDirectory.dir("../..")
         val pinFiles =
@@ -216,15 +220,16 @@ val verifyConsumedPluginPins =
         // Declared so verifyWorkflowPaths (gradle/workflow-paths.gradle.kts, #230) sees them.
         inputs.files(pinFiles)
         doLast {
-            val pin = Regex("""id\("com\.monkopedia\.kplusplus\.compiler"\)\s+version\s+"([^"]+)"""")
+            val pin =
+                Regex("""id\("com\.monkopedia\.kplusplus\.compiler"\)\s+version\s+"([^"]+)"""")
             val found =
                 pinFiles.associateWith { file ->
                     val hits = pin.findAll(file.readText()).map { it.groupValues[1] }.toList()
                     check(hits.size == 1) {
                         "Expected exactly one `id(\"com.monkopedia.kplusplus.compiler\") " +
-                            "version \"…\"` pin in $file, found ${hits.size}. Either the pin moved " +
-                            "or this check (compiler/gradle/build.gradle.kts, #192) needs its " +
-                            "file list updated."
+                            "version \"…\"` pin in $file, found ${hits.size}. Either the pin " +
+                            "moved or this check (compiler/gradle/build.gradle.kts, #192) needs " +
+                            "its file list updated."
                     }
                     hits.single()
                 }
@@ -243,8 +248,8 @@ val verifyConsumedPluginPins =
             val ahead = pad(pinned).zip(pad(declaredVersion)).firstOrNull { it.first != it.second }
             check(ahead == null || ahead.first < ahead.second) {
                 "The consumed kplusplus plugin pin ($pinned) is AHEAD of the version this build " +
-                    "declares ($declaredVersion, from the repo root gradle.properties). A pin may " +
-                    "lag a release, never lead one:\n$listing"
+                    "declares ($declaredVersion, from the repo root gradle.properties). A pin " +
+                    "may lag a release, never lead one:\n$listing"
             }
         }
     }
@@ -267,8 +272,13 @@ val verifyCatalogPins =
         val repoRoot = layout.projectDirectory.dir("../..").asFile
         val catalog =
             mapOf(
-                "kotlin" to libs.versions.kotlin.asProvider().get(),
-                "kotlin-api" to libs.versions.kotlin.api.get(),
+                "kotlin" to
+                    libs.versions.kotlin
+                        .asProvider()
+                        .get(),
+                "kotlin-api" to
+                    libs.versions.kotlin.api
+                        .get(),
                 "klinker" to libs.versions.klinker.get(),
             )
         // Standalone consumer builds: pin kind -> the catalog entry the literal must equal.
@@ -281,7 +291,8 @@ val verifyCatalogPins =
                 "samples/multiproject/build.gradle.kts" to mapOf("kotlin" to "kotlin-api"),
             )
         val scripts =
-            providers.exec { commandLine("git", "-C", repoRoot.path, "ls-files", "*.gradle.kts") }
+            providers
+                .exec { commandLine("git", "-C", repoRoot.path, "ls-files", "*.gradle.kts") }
                 .standardOutput.asText
                 .map { it.lines().map(repoRoot::resolve).filter(File::isFile) }
         inputs.files(scripts)
@@ -296,7 +307,7 @@ val verifyCatalogPins =
                             """kotlin\("[^"]+"(?:,\s*"([^"]+)")?\)(?:$version"([^"]+)")?""" +
                                 """|id\("org\.jetbrains\.kotlin[^"]*"\)$version"([^"]+)"""" +
                                 // A version, not a pattern like shadow's `kotlin:.*:.*` filter.
-                                """|"org\.jetbrains\.kotlin:[^:"]+:([0-9$][^"]*)""""
+                                """|"org\.jetbrains\.kotlin:[^:"]+:([0-9$][^"]*)"""",
                         ),
                     "klinker" to
                         Regex("""id\("com\.monkopedia\.klinker\.plugin"\)$version"([^"]+)""""),
@@ -304,18 +315,23 @@ val verifyCatalogPins =
             val files =
                 scripts.get().associateBy { it.relativeTo(repoRoot).invariantSeparatorsPath }
             val problems =
-                standalone.keys.filterNot(files::containsKey)
+                standalone.keys
+                    .filterNot(files::containsKey)
                     .mapTo(mutableListOf()) { "  $it: expected standalone build is missing" }
             for ((path, file) in files.toSortedMap()) {
                 val text = file.readText()
                 for ((kind, regex) in pins) {
                     // (`file:line`, version) for every match that carries a version.
                     val hits =
-                        regex.findAll(text).mapNotNull { m ->
-                            val line = text.substring(0, m.range.first).count { it == '\n' } + 1
-                            m.groupValues.drop(1).firstOrNull(String::isNotEmpty)
-                                ?.let { "$path:$line" to it }
-                        }.toList()
+                        regex
+                            .findAll(text)
+                            .mapNotNull { m ->
+                                val line = text.substring(0, m.range.first).count { it == '\n' } + 1
+                                m.groupValues
+                                    .drop(1)
+                                    .firstOrNull(String::isNotEmpty)
+                                    ?.let { "$path:$line" to it }
+                            }.toList()
                     val key = standalone[path]?.get(kind)
                     val want = key?.let { "catalog `$it` = ${catalog[it]}" } ?: "the catalog"
                     problems +=
@@ -329,7 +345,8 @@ val verifyCatalogPins =
                             }
 
                             else -> {
-                                hits.filter { it.second != catalog[key] }
+                                hits
+                                    .filter { it.second != catalog[key] }
                                     .map { (at, v) -> "  $at: $kind \"$v\" != $want" }
                             }
                         }
@@ -406,8 +423,9 @@ val verifyShadedJar =
             zipTree(shadowJar).matching { include("**/*.class") }.visit {
                 if (!isDirectory) classes += relativePath.pathString
             }
-            val ours = listOf(shadedPrefix, "com.monkopedia.kplusplus", "com.monkopedia.krapper")
-                .map { it.replace('.', '/') + "/" }
+            val ours =
+                listOf(shadedPrefix, "com.monkopedia.kplusplus", "com.monkopedia.krapper")
+                    .map { it.replace('.', '/') + "/" }
             val stray = classes.filter { c -> ours.none(c::startsWith) }
             check(stray.isEmpty()) {
                 "${stray.size} bundled class(es) escaped relocation; add their packages to " +
@@ -482,7 +500,7 @@ mavenPublishing {
         name.set("kplusplus compiler Gradle plugin")
         description.set(
             "The com.monkopedia.kplusplus.compiler Gradle plugin: usage-driven C++ template " +
-                "instantiation and Kotlin/Native bindings generation for kplusplus."
+                "instantiation and Kotlin/Native bindings generation for kplusplus.",
         )
         url.set("https://github.com/Monkopedia/kplusplus")
         licenses {
