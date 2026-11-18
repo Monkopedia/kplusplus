@@ -54,15 +54,17 @@ class WrapperToolchainTest {
     private val llvmArgs = File(dir, "llvm-clang.args")
     private val llvmVersion = File(dir, "llvm-clang.version")
     private val pathRan = File(dir, "path-clang.ran")
+    private val probes = File(dir, "probes.log")
 
     @AfterTest
     fun cleanUp() {
         dir.deleteRecursively()
     }
 
+    /** Every stub logs its invocation to [probes]. */
     private fun script(file: File, body: String) {
         file.parentFile.mkdirs()
-        file.writeText("#!/bin/sh\n$body\n")
+        file.writeText("#!/bin/sh\necho \"$file ${'$'}*\" >> \"$probes\"\n$body\n")
         file.setExecutable(true)
     }
 
@@ -208,6 +210,15 @@ class WrapperToolchainTest {
             .cppKrapperJob(project, ext, "demo", File(dir, "krapped-cpp"))
         assertEquals(llvmClang.path, job.config.compiler)
         assertTrue(llvmInclude.path in job.request.includeDirs, "${job.request.includeDirs}")
+    }
+
+    // The identity is probed when the sync runs, not when the build is configured.
+    @Test
+    fun listing_tasks_probes_no_toolchain() {
+        writeFixture(frontend = "cpp", compiler = null)
+        run("tasks")
+        val ran = probes.takeIf { it.exists() }?.readText()
+        assertEquals(null, ran, "configuring the build must not run the toolchain")
     }
 
     // The generator is not under test, only the inputs the plugin declared: a stand-in action
