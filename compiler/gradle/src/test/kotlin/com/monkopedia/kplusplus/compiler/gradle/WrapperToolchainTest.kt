@@ -225,19 +225,15 @@ class WrapperToolchainTest {
     // and an output dir make the cpp sync incremental, as SyncTaskInputsTest does.
     @Test
     fun a_changed_toolchain_reruns_the_cpp_sync() {
-        writeFixture(
-            frontend = "cpp",
-            compiler = null,
-            buildTail =
-            """
+        val standIn = """
             tasks.named("kplusplusSync") {
                 actions.clear()
                 val out = layout.buildDirectory.dir("sync-out")
                 outputs.dir(out)
                 doLast { out.get().asFile.resolve("ran").writeText("") }
             }
-            """.trimIndent()
-        )
+        """.trimIndent()
+        writeFixture(frontend = "cpp", compiler = null, buildTail = standIn)
         assertEquals(TaskOutcome.SUCCESS, sync())
         assertEquals(TaskOutcome.UP_TO_DATE, sync(), "control: nothing changed")
         llvmVersion.writeText("stub clang version 22.1.1\n")
