@@ -27,7 +27,7 @@ mavenPublishing {
         name.set("kplusplus compiler (FIR plugin)")
         description.set(
             "The kplusplus kotlinc (FIR) compiler plugin jar, loaded on the Kotlin/Native " +
-                "compiler classpath by the com.monkopedia.kplusplus.compiler Gradle plugin."
+                "compiler classpath by the com.monkopedia.kplusplus.compiler Gradle plugin.",
         )
         url.set("https://github.com/Monkopedia/kplusplus")
         licenses {
@@ -80,11 +80,11 @@ tasks.withType<Test> {
     // against it. B2 deleted that copy, so there is nothing left to cross-check.)
     systemProperty(
         "kplusplus.test.featuregenRequested",
-        rootProject.file("../featuregen/krapped/requested.txt").absolutePath
+        rootProject.file("../featuregen/krapped/requested.txt").absolutePath,
     )
     systemProperty(
         "kplusplus.test.featuregenBuildScript",
-        rootProject.file("../featuregen/build.gradle.kts").absolutePath
+        rootProject.file("../featuregen/build.gradle.kts").absolutePath,
     )
 }
 

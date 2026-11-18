@@ -252,7 +252,9 @@ private class JsonScanner(private val text: String) {
         skipWhitespace()
         when (val c = peek()) {
             '{', '[' -> skipContainer()
+
             '"' -> readString()
+
             else -> {
                 val start = pos
                 while (pos < text.length && text[pos] !in ",}] \t\r\n") pos++
@@ -269,11 +271,14 @@ private class JsonScanner(private val text: String) {
                     depth++
                     pos++
                 }
+
                 '}', ']' -> {
                     depth--
                     pos++
                 }
+
                 '"' -> readString()
+
                 else -> pos++
             }
         } while (depth > 0 && pos < text.length)
@@ -312,17 +317,24 @@ private class JsonScanner(private val text: String) {
         if (pos >= text.length) fail("truncated escape")
         return when (val c = text[pos++]) {
             '"', '\\', '/' -> c
+
             'b' -> '\b'
+
             'f' -> ''
+
             'n' -> '\n'
+
             'r' -> '\r'
+
             't' -> '\t'
+
             'u' -> {
                 if (pos + 4 > text.length) fail("truncated \\u escape at offset $pos")
                 val hex = text.substring(pos, pos + 4)
                 pos += 4
                 hex.toIntOrNull(16)?.toChar() ?: fail("bad \\u escape '$hex'")
             }
+
             else -> fail("unknown escape '\\$c' at offset ${pos - 1}")
         }
     }

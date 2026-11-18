@@ -49,9 +49,11 @@ internal object CppVectorCallChecker : FirFunctionCallChecker(MppCheckerKind.Com
                     .getClassLikeSymbolByClassId(resolution.classId) != null
                 if (!present) requestSync(resolution.spec, source)
             }
+
             // The index is krapper's own account of what it wrote, so "not listed" is a
             // definitive "not generated" — exactly the case SYNC_REQUIRED exists for.
             is BindingResolution.NotGenerated -> requestSync(resolution.spec, source)
+
             // No index: the plugin cannot tell whether the binding exists, so it must not
             // claim one is missing. Deliberately does NOT append to the manifest — recording a
             // sync request asserts a fact the plugin does not have.

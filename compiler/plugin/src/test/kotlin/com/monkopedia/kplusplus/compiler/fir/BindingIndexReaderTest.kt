@@ -157,15 +157,13 @@ class BindingIndexReaderTest {
         assertTrue("kplusplusSync" in load.reason, load.reason)
     }
 
-    private fun loaded(text: String): LoadedBindingIndex =
-        assertIs<BindingIndexLoad.Loaded>(
-            BindingIndexReader.parse(text, "/tmp/binding-index.json")
-        ).index
+    private fun loaded(text: String): LoadedBindingIndex = assertIs<BindingIndexLoad.Loaded>(
+        BindingIndexReader.parse(text, "/tmp/binding-index.json")
+    ).index
 
-    private fun unavailable(text: String): String =
-        assertIs<BindingIndexLoad.Unavailable>(
-            BindingIndexReader.parse(text, "/tmp/binding-index.json")
-        ).reason
+    private fun unavailable(text: String): String = assertIs<BindingIndexLoad.Unavailable>(
+        BindingIndexReader.parse(text, "/tmp/binding-index.json")
+    ).reason
 
     private companion object {
         /** A single backslash / double quote, spelled once so the JSON below stays legible. */
@@ -231,7 +229,7 @@ class BindingIndexReaderTest {
                     },
                     {
                         "severity": "WARNING",
-                        "message": "a message with a ${BS}${QT}quote${BS}${QT} and a ${BS}${BS}",
+                        "message": "a message with a ${BS}${QT}quote${BS}$QT and a ${BS}$BS",
                         "symbol": null,
                         "location": null,
                         "phase": null,

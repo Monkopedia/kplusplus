@@ -80,7 +80,9 @@ class BindingIndexCoverageTest {
                     } else {
                         "$spec -> ${resolution.classId} (index says ${expected.getValue(spec)})"
                     }
+
                 is BindingResolution.NotGenerated -> "$spec -> reported NOT GENERATED"
+
                 is BindingResolution.NoIndex -> "$spec -> ${resolution.reason}"
             }
         }
@@ -274,11 +276,10 @@ class BindingIndexCoverageTest {
 
     private val tempFiles = mutableListOf<File>()
 
-    private fun newTempFile(): File =
-        File.createTempFile("binding-index", ".json").also {
-            it.deleteOnExit()
-            tempFiles += it
-        }
+    private fun newTempFile(): File = File.createTempFile("binding-index", ".json").also {
+        it.deleteOnExit()
+        tempFiles += it
+    }
 
     private fun writeIndex(bindings: Map<String, String>, rootPackage: String? = null): String =
         newTempFile().also { it.writeText(indexJson(bindings, rootPackage)) }.absolutePath

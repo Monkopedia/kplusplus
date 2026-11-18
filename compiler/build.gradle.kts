@@ -13,6 +13,9 @@ plugins {
     // (run as part of `check`) that diffs the current public API against the committed `.api`
     // dumps. Regenerate the baseline with `apiDump` when the public API changes intentionally.
     alias(libs.plugins.binary.compatibility.validator)
+    // #234: the repo's style gate. The root build applies it to its own subprojects, but this is
+    // a separate build, so root tasks never reach it; applied to every project here (below).
+    alias(libs.plugins.ktlint) apply false
     // Gives this root a `check` lifecycle, so `-p compiler check` runs verifyWorkflowPaths.
     base
 }
@@ -32,13 +35,40 @@ val kplusplusVersion =
         .fileContents(layout.projectDirectory.file("../gradle.properties"))
         .asText
         .map { text ->
-            java.util.Properties().apply { load(text.reader()) }.getProperty("version")
+            java.util
+                .Properties()
+                .apply { load(text.reader()) }
+                .getProperty("version")
                 ?: error("No `version=` in the repo root gradle.properties")
         }.get()
 
 allprojects {
     group = "com.monkopedia.kplusplus"
     version = kplusplusVersion
+}
+
+// #234: lint this build with the same plugin, ktlint-cli version and repo-root .editorconfig as
+// the root build (build.gradle.kts), so `-p compiler check` runs `ktlintCheck` on every module.
+// Lint only the sources this build owns. The rest belong to someone else or are regenerated:
+//   * build/generated/ — `generatePluginVersion`'s output (compiler/gradle);
+//   * krapper/ and krapper_model/ — shared source dirs compiled into compiler/gradle, owned
+//     and already linted by the root build (`:krapper`, `:krapper_model`);
+//   * compiler/native's main source set — a gitignored copy of compiler/plugin's sources made
+//     by `syncSource`, linted where it is owned; its tasks are disabled in that module.
+allprojects {
+    apply(plugin = "org.jlleitschuh.gradle.ktlint")
+    configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
+        version.set(rootProject.libs.versions.ktlint.cli)
+        android.set(true)
+        filter {
+            exclude { element ->
+                val path = element.file.invariantSeparatorsPath
+                "/build/generated/" in path ||
+                    "/krapper/src/" in path ||
+                    "/krapper_model/src/" in path
+            }
+        }
+    }
 }
 
 // Scope the ABI gate to the PUBLISHED modules only. The compiler build's published set is the
@@ -51,8 +81,8 @@ apiValidation {
     ignoredProjects.addAll(
         listOf(
             rootProject.name,
-            "kplusplus-compiler-plugin-native"
-        )
+            "kplusplus-compiler-plugin-native",
+        ),
     )
     // #185: the Gradle plugin compiles krapper's service protocol from shared source (see
     // compiler/gradle/build.gradle.kts) so both ends of the ksrpc channel come from one
@@ -62,8 +92,8 @@ apiValidation {
     ignoredPackages.addAll(
         listOf(
             "com.monkopedia.krapper",
-            "com.monkopedia.krapper.generator.resolvedmodel"
-        )
+            "com.monkopedia.krapper.generator.resolvedmodel",
+        ),
     )
 }
 
@@ -78,7 +108,7 @@ tasks.register("publishCompilerToMavenLocal") {
         "Publish the Gradle plugin (+ marker) and the FIR kotlinc-plugin jar to mavenLocal."
     dependsOn(
         ":kplusplus-compiler-gradle:publishToMavenLocal",
-        ":kplusplus-compiler-plugin:publishToMavenLocal"
+        ":kplusplus-compiler-plugin:publishToMavenLocal",
     )
 }
 
@@ -90,10 +120,10 @@ tasks.register("publishCompilerToMavenCentral") {
     group = "kplusplus"
     description =
         "Publish the Gradle plugin (+ marker) and the FIR kotlinc-plugin jar to the " +
-            "Central Portal (release/CI — requires credentials + signing in the environment)."
+        "Central Portal (release/CI — requires credentials + signing in the environment)."
     dependsOn(
         ":kplusplus-compiler-gradle:publishToMavenCentral",
-        ":kplusplus-compiler-plugin:publishToMavenCentral"
+        ":kplusplus-compiler-plugin:publishToMavenCentral",
     )
 }
 
@@ -104,7 +134,7 @@ tasks.register("publishPluginToPortal") {
     group = "kplusplus"
     description =
         "Publish the com.monkopedia.kplusplus.compiler Gradle plugin to the Gradle Plugin " +
-            "Portal (release/CI — requires GRADLE_PUBLISH_KEY/GRADLE_PUBLISH_SECRET)."
+        "Portal (release/CI — requires GRADLE_PUBLISH_KEY/GRADLE_PUBLISH_SECRET)."
     dependsOn(":kplusplus-compiler-gradle:publishPlugins")
 }
 
@@ -121,7 +151,7 @@ extra["workflowPaths.alsoRead"] =
         ".github/workflows",
         "samples/v8/settings.gradle.kts",
         "samples/v8/build.gradle.kts",
-        "samples/v8/gradle.properties"
+        "samples/v8/gradle.properties",
     )
 apply(from = "../gradle/workflow-paths.gradle.kts")
 
@@ -144,9 +174,11 @@ val verifyModuleDocs =
         doLast {
             // Every argument of every `include(...)`, so `include(":a", ":b")` counts both.
             val included =
-                Regex("""include\(([^)]*)\)""").findAll(settings.readText())
+                Regex("""include\(([^)]*)\)""")
+                    .findAll(settings.readText())
                     .flatMap { Regex("\":([^\"]+)\"").findAll(it.groupValues[1]) }
-                    .map { it.groupValues[1] }.toList()
+                    .map { it.groupValues[1] }
+                    .toList()
             val sampleDirs = samples.files.map { "samples/${it.parentFile.name}" }
             check(included.isNotEmpty() && sampleDirs.isNotEmpty()) {
                 "Discovered includes $included and samples $sampleDirs — the discovery broke."
@@ -155,7 +187,8 @@ val verifyModuleDocs =
             val missing =
                 docs.flatMap { doc ->
                     val text = doc.readText()
-                    modules.filter { "`$it/`" !in text }
+                    modules
+                        .filter { "`$it/`" !in text }
                         .map { "  ${doc.relativeTo(repoRoot)}: `$it/`" }
                 }
             check(missing.isEmpty()) {
