@@ -94,10 +94,15 @@ class SyncTaskInputsTest {
     @Test
     fun a_blank_dsl_llvm_config_declares_the_project_property() {
         val project = cppProject()
-        project.extensions.extraProperties["llvmConfig"] = "/opt/llvm/bin/llvm-config"
+        // A runnable one: reading the inputs also resolves the toolchain through it.
+        val llvmConfig = File(project.projectDir, "llvm-config").apply {
+            writeText("#!/bin/sh\necho ${project.projectDir}\n")
+            setExecutable(true)
+        }
+        project.extensions.extraProperties["llvmConfig"] = llvmConfig.path
         project.extensions.getByType(KPlusPlusExtension::class.java).llvmConfig = ""
         assertEquals(
-            "/opt/llvm/bin/llvm-config",
+            llvmConfig.path,
             project.tasks.getByName("kplusplusSync").inputs.properties["llvmConfig"],
             "the declared llvmConfig must be the one the cpp parse resolves"
         )
@@ -192,6 +197,16 @@ class SyncTaskInputsTest {
     @Test
     fun a_changed_library_reruns_the_sync() =
         assertReRunsAfter("libraries") { arrayOf("-Pknob.library=libother.a") }
+
+    // A rebuilt archive at the same path: the path list is unchanged, the contents are not.
+    @Test
+    fun an_edited_library_reruns_the_sync() {
+        File(projectDir, "libdemo.a").writeText("v1\n")
+        assertReRunsAfter("the library contents") {
+            File(projectDir, "libdemo.a").writeText("v2\n")
+            emptyArray()
+        }
+    }
 
     @Test
     fun an_edited_only_file_reruns_the_sync() = assertReRunsAfter("the onlyFile contents") {

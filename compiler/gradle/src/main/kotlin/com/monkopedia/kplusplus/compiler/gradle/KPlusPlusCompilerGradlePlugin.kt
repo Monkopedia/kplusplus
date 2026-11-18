@@ -108,13 +108,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 it.inputs.files(
                     target.fileTree(krappedDir) { t -> t.include("src/*.kt", "*.cc", "*.h") }
                 ).withPropertyName("committedSeed").withPathSensitivity(PathSensitivity.RELATIVE)
-                // The toolchain decides the wrapper object, and PATH or a reinstall can change
-                // it with no knob moving: declare what it resolves to, version included.
-                it.inputs.property(
-                    "seedToolchain",
-                    target.provider { resolveSeedToolchain(target, ext).identity() }
-                )
             }
+            // The toolchain decides the wrapper object on both paths, and PATH or a reinstall
+            // can change it with no knob moving: declare what it resolves to, version included.
+            // Probed once per build: Gradle reads the property more than once.
+            val toolchainIdentity = lazy { resolveToolchain(target, ext, seedMode).identity() }
+            it.inputs.property("toolchain", target.provider { toolchainIdentity.value })
             // Read outside the extension: the front-end itself and the -P passthroughs.
             it.inputs.property("frontend", frontend?.toString() ?: "")
             it.inputs.property("kppX", target.findProperty("kpp.x")?.toString() ?: "")
@@ -133,6 +132,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 // Ordered: they are search paths.
                 it.inputs.property("headerDirectories", e.headerDirectories.toList())
                 it.inputs.property("libraries", e.libraries.toList())
+                // And what they contain: a rebuilt archive at the same path changes the wrapper.
+                it.inputs.files(e.libraries.map { l -> target.file(l) })
+                    .withPropertyName("libraryFiles").withPathSensitivity(PathSensitivity.NONE)
                 it.inputs.property("only", e.only.sorted())
                 // The allowlist is the file's CONTENTS (resolveAllowList), not its path.
                 it.inputs.files(listOfNotNull(e.onlyFile?.let(target::file)))
@@ -229,7 +231,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             )
         }
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
-        val toolchain = resolveSeedToolchain(target, ext)
+        val toolchain = resolveToolchain(target, ext, seedMode = true)
         // Regenerate the cinterop .def — deterministic from the module name + this checkout's
         // krapped dir, so the committed seed carries no host-specific absolute path. Mirrors
         // DefWriter/CompileFlags for the static-wrapper case the laggards use.
@@ -269,8 +271,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
     }
 
-    /** The seed wrapper compile's compiler and LLVM include dirs (see [resolveSeedToolchain]). */
-    private inner class SeedToolchain(val compiler: String, val includeDirs: List<String>) {
+    /** The wrapper compile's compiler and LLVM include dirs (see [resolveToolchain]). */
+    private inner class Toolchain(val compiler: String, val includeDirs: List<String>) {
         /** Resolved path + `--version` + include dirs: what the compile actually depends on. */
         fun identity(): String {
             val exec = resolveExecutable(compiler)
@@ -281,23 +283,35 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /**
-     * Resolve the seed path's toolchain from the configured LLVM, the way the cpp path does
-     * (#297): include dirs from `llvm-config --includedir` ([resolveLlvmIncludeDirs]), and a
-     * bare-named `compiler` from that LLVM's `--bindir` when [llvmConfigOverride] names one, so
-     * a box whose PATH carries a different LLVM still compiles against the configured one. An
-     * explicit compiler path, or a name the bindir lacks, is used as given; no `compiler` keeps
-     * [resolveDefaultCompiler].
+     * Resolve the wrapper compile's toolchain from the configured LLVM (#297), for both paths:
+     * include dirs from `llvm-config --includedir` ([resolveLlvmIncludeDirs]), and a bare-named
+     * compiler from that LLVM's `--bindir` when [llvmConfigOverride] names one, so a box whose
+     * PATH carries a different LLVM still compiles against the configured one. The compiler is
+     * `kplusplus { compiler }`, else the seed path's [resolveDefaultCompiler] or the cpp path's
+     * `clang++` (what the cpp front-end parsed the header against). A compiler path is used as
+     * given; a name the bindir lacks falls back to PATH.
      */
-    private fun resolveSeedToolchain(target: Project, ext: KPlusPlusExtension?): SeedToolchain {
+    private fun resolveToolchain(
+        target: Project,
+        ext: KPlusPlusExtension?,
+        seedMode: Boolean
+    ): Toolchain {
         val includeDirs = resolveLlvmIncludeDirs(target, ext)
-        val compiler = ext?.compiler ?: return SeedToolchain(resolveDefaultCompiler(), includeDirs)
-        val fromLlvm = llvmConfigOverride(target, ext)
-            ?.takeUnless { compiler.contains(File.separatorChar) }
-            ?.let(::resolveExecutable)
+        val compiler = ext?.compiler ?: if (seedMode) resolveDefaultCompiler() else "clang++"
+        val llvmConfig = llvmConfigOverride(target, ext)
+        if (llvmConfig == null || compiler.contains(File.separatorChar)) {
+            return Toolchain(compiler, includeDirs)
+        }
+        val fromLlvm = resolveExecutable(llvmConfig)
             ?.let { probeExec(it, "--bindir") }
             ?.let { File(it, compiler) }
             ?.takeIf { it.canExecute() }
-        return SeedToolchain(fromLlvm?.absolutePath ?: compiler, includeDirs)
+        if (fromLlvm == null) {
+            target.logger.info(
+                "kplusplus: $llvmConfig's --bindir has no '$compiler'; using the one on PATH."
+            )
+        }
+        return Toolchain(fromLlvm?.absolutePath ?: compiler, includeDirs)
     }
 
     /**
@@ -328,76 +342,9 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         krappedDir: File,
         kexe: File
     ) {
-        val headers = ext?.headers.orEmpty()
-        if (headers.isEmpty()) {
-            throw GradleException(
-                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp requires a " +
-                    "kplusplus { header(...) } — the cpp front-end parses a header to build " +
-                    "its model, but $moduleName declares none."
-            )
-        }
-        val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
-        // The module's `kplusplus { headerDirectory(...) }` roots, resolved to absolute paths.
-        // These reach BOTH the parse (so the front-end's clang sees them) AND the wrapper
-        // compile (so its quote-includes resolve) — a header dropped on either side aborts the
-        // wrapper compile (exit 134) on cross-directory includes.
-        //
-        // The consumer's LLVM include dir rides along (#124, #128 R4): a from-published consumer
-        // whose LLVM-22 headers are NOT on the default include path (e.g. apt.llvm.org under
-        // /usr/lib/llvm-22/include) would otherwise fail to resolve <clang/AST/...>-style
-        // headers, because the tool's bundled Clang only searches its resource-dir + the
-        // driver's default paths. Discovered via `llvm-config --includedir` (or the
-        // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
-        val includeDirs = resolveLlvmIncludeDirs(target, ext) +
-            ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
-
-        val requested = syncWorklist(target, ext)
-
-        krappedDir.mkdirs()
-        val headerPaths = headers.map { target.file(it).absolutePath }
-        val request = IndexRequest(
-            headers = headerPaths,
-            libraries = ext?.libraries.orEmpty().map { target.file(it).absolutePath }
-        ).let {
-            it.copy(
-                headerDirectories = (it.headerDirectories + includeDirs).distinct(),
-                includeDirs = includeDirs,
-                // Debug aid (`-Pkpp.dumpModel`): keep the ModelIo JSON of every tree the run
-                // parsed. Off by default — the parse -> resolve handoff is in-process.
-                dumpModelDir = target.findProperty("kpp.dumpModel")
-                    ?.let { _ -> File(krappedDir, "cpp-models").apply { mkdirs() }.absolutePath }
-            )
-        }
-        val job = KrapperJob(
-            moduleName = moduleName,
-            config = KrapperConfig(
-                pkg = "krapper.$moduleName",
-                // The wrapper is compiled with clang++ (matching what the cpp front-end
-                // PARSED the header against — system libstdc++), NOT the konan-bundled gcc:
-                // a model parsed against system libstdc++ and a wrapper compiled against it
-                // agree. Override via kplusplus { compiler = "..." }.
-                compiler = ext?.compiler ?: "clang++",
-                moduleName = moduleName,
-                errorPolicy = ErrorPolicy.LOG,
-                referencePolicy = ReferencePolicy.valueOf(
-                    ext?.referencePolicy ?: ReferencePolicy.INCLUDE_MISSING.name
-                ),
-                debug = ext?.debug == true,
-                cppStandard = std,
-                rootPackage = ext?.rootPackage,
-                // The two opt-in binding-quality gates (#224). Both default to false, so a
-                // build that sets neither behaves exactly as before; a build that sets one
-                // can finally make degraded bindings fail instead of going green.
-                failOnDrop = ext?.failOnDrop == true,
-                strictDiagnostics = ext?.strictDiagnostics == true,
-                noRtti = ext?.noRtti == true
-            ),
-            request = request,
-            allowList = resolveAllowList(target, ext),
-            instantiations = requested,
-            fixups = ext?.fixups.orEmpty(),
-            outputDir = krappedDir
-        )
+        val job = cppKrapperJob(target, ext, moduleName, krappedDir)
+        val requested = job.instantiations
+        val headerPaths = job.request.headers
         target.logger.lifecycle(
             "kplusplusSync[$moduleName]: krapper over ${requested.size} instantiation(s) from " +
                 "${headerPaths.first()} -> $krappedDir"
@@ -451,6 +398,86 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         target.logger.lifecycle(
             "kplusplusSync[$moduleName]: cpp front-end generated $ktCount Kotlin file(s); " +
                 report.summary()
+        )
+    }
+
+    /** What [runCppSync] asks krapper for: the module's config, as one [KrapperJob]. */
+    internal fun cppKrapperJob(
+        target: Project,
+        ext: KPlusPlusExtension?,
+        moduleName: String,
+        krappedDir: File
+    ): KrapperJob {
+        val headers = ext?.headers.orEmpty()
+        if (headers.isEmpty()) {
+            throw GradleException(
+                "kplusplusSync[$moduleName]: -Pkpp.frontend.$moduleName=cpp requires a " +
+                    "kplusplus { header(...) } — the cpp front-end parses a header to build " +
+                    "its model, but $moduleName declares none."
+            )
+        }
+        val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
+        // The module's `kplusplus { headerDirectory(...) }` roots, resolved to absolute paths.
+        // These reach BOTH the parse (so the front-end's clang sees them) AND the wrapper
+        // compile (so its quote-includes resolve) — a header dropped on either side aborts the
+        // wrapper compile (exit 134) on cross-directory includes.
+        //
+        // The consumer's LLVM include dir rides along (#124, #128 R4): a from-published consumer
+        // whose LLVM-22 headers are NOT on the default include path (e.g. apt.llvm.org under
+        // /usr/lib/llvm-22/include) would otherwise fail to resolve <clang/AST/...>-style
+        // headers, because the tool's bundled Clang only searches its resource-dir + the
+        // driver's default paths. Discovered via `llvm-config --includedir` (or the
+        // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
+        val toolchain = resolveToolchain(target, ext, seedMode = false)
+        val includeDirs = toolchain.includeDirs +
+            ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
+
+        val requested = syncWorklist(target, ext)
+
+        krappedDir.mkdirs()
+        val headerPaths = headers.map { target.file(it).absolutePath }
+        val request = IndexRequest(
+            headers = headerPaths,
+            libraries = ext?.libraries.orEmpty().map { target.file(it).absolutePath }
+        ).let {
+            it.copy(
+                headerDirectories = (it.headerDirectories + includeDirs).distinct(),
+                includeDirs = includeDirs,
+                // Debug aid (`-Pkpp.dumpModel`): keep the ModelIo JSON of every tree the run
+                // parsed. Off by default — the parse -> resolve handoff is in-process.
+                dumpModelDir = target.findProperty("kpp.dumpModel")
+                    ?.let { _ -> File(krappedDir, "cpp-models").apply { mkdirs() }.absolutePath }
+            )
+        }
+        return KrapperJob(
+            moduleName = moduleName,
+            config = KrapperConfig(
+                pkg = "krapper.$moduleName",
+                // The wrapper is compiled with clang++ (matching what the cpp front-end
+                // PARSED the header against — system libstdc++), NOT the konan-bundled gcc:
+                // a model parsed against system libstdc++ and a wrapper compiled against it
+                // agree. Override via kplusplus { compiler = "..." }.
+                compiler = toolchain.compiler,
+                moduleName = moduleName,
+                errorPolicy = ErrorPolicy.LOG,
+                referencePolicy = ReferencePolicy.valueOf(
+                    ext?.referencePolicy ?: ReferencePolicy.INCLUDE_MISSING.name
+                ),
+                debug = ext?.debug == true,
+                cppStandard = std,
+                rootPackage = ext?.rootPackage,
+                // The two opt-in binding-quality gates (#224). Both default to false, so a
+                // build that sets neither behaves exactly as before; a build that sets one
+                // can finally make degraded bindings fail instead of going green.
+                failOnDrop = ext?.failOnDrop == true,
+                strictDiagnostics = ext?.strictDiagnostics == true,
+                noRtti = ext?.noRtti == true
+            ),
+            request = request,
+            allowList = resolveAllowList(target, ext),
+            instantiations = requested,
+            fixups = ext?.fixups.orEmpty(),
+            outputDir = krappedDir
         )
     }
 
@@ -565,11 +592,13 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * what v8's own headers expose); newer host gcc / clang reject those.
      * The konan-bundled toolchain (gcc 8.3 / glibcxx 7) accepts them. Try
      * the konan toolchain first if present; otherwise fall back to clang++.
-     * Override via `kplusplus { compiler = "..." }`.
+     * Override via `kplusplus { compiler = "..." }`. The konan dir is K/N's own: `KONAN_DATA_DIR`,
+     * else `~/.konan`.
      */
     private fun resolveDefaultCompiler(): String {
-        val konanRoot = System.getProperty("user.home") + "/.konan/dependencies"
-        val konanDir = File(konanRoot)
+        val konanData = System.getenv("KONAN_DATA_DIR")
+            ?: (System.getProperty("user.home") + "/.konan")
+        val konanDir = File(konanData, "dependencies")
         if (konanDir.isDirectory) {
             val gpp = konanDir.walkTopDown()
                 .maxDepth(3)
