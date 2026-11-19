@@ -28,6 +28,7 @@ import com.monkopedia.krapper.RemoteLogger
 import com.monkopedia.krapper.Severity
 import com.monkopedia.krapper.generator.resolvedmodel.resolvedSerializerModule
 import com.monkopedia.ksrpc.ErrorListener
+import com.monkopedia.ksrpc.RpcEndpointException
 import com.monkopedia.ksrpc.channels.Connection
 import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.sockets.asConnection
@@ -62,8 +63,14 @@ internal class KrapperJob(
     val outputDir: File
 )
 
-/** What krapper reported while running a [KrapperJob]. */
-internal class KrapperRunReport(val diagnostics: List<Diagnostic>) {
+/**
+ * What krapper reported while running a [KrapperJob]. [includedFiles] is what its parses opened,
+ * or null when the run did not complete or the krapper predates the report (#297).
+ */
+internal class KrapperRunReport(
+    val diagnostics: List<Diagnostic>,
+    val includedFiles: List<String>? = null
+) {
 
     /** `N diagnostic(s) (E error, W warning)` — the one-line tally for a completed run. */
     fun summary(): String {
@@ -146,13 +153,14 @@ internal object KrapperSession {
         val diagnostics = Collections.synchronizedList(mutableListOf<Diagnostic>())
         val sink = GradleLogSink(logger, job.moduleName, diagnostics)
         val session = start(binary, job.moduleName, environment, logger, diagnostics)
-        try {
+        val includedFiles = try {
             val krapper = session.connection.defaultChannel().toStub<KrapperService, String>()
             krapper.setLogger(sink)
             krapper.setConfig(job.config)
             val indexed = krapper.index(job.request)
             try {
                 indexed.generate(job)
+                indexed.includedFilesIfKnown()
             } finally {
                 runCatching { indexed.close() }
             }
@@ -168,7 +176,7 @@ internal object KrapperSession {
         } finally {
             session.shutdown()
         }
-        KrapperRunReport(diagnostics.toList())
+        KrapperRunReport(diagnostics.toList(), includedFiles)
     }
 
     /**
@@ -419,6 +427,17 @@ private class StderrDrain(
         const val MAX_LINE_CHARS = 2000
         const val FINISH_GRACE_SECONDS = 5L
     }
+}
+
+/**
+ * [IndexedService.includedFiles], or null from a krapper older than it, which answers that the
+ * endpoint does not exist: a build can point the plugin at an older tool (`-Pkpp.krapper`, a
+ * stage-zero krapper).
+ */
+internal suspend fun IndexedService.includedFilesIfKnown(): List<String>? = try {
+    includedFiles(Unit)
+} catch (_: RpcEndpointException) {
+    null
 }
 
 /**

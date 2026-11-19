@@ -19,6 +19,7 @@
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/Support/FileSystem.h>
 
 #include <string>
 #include <vector>
@@ -98,6 +99,32 @@ public:
 inline ParseDiagCollector &parseDiagCollector() {
     static ParseDiagCollector instance;
     return instance;
+}
+
+// The last parse's include set, in the format lastParseIncludes() documents. Replaced, like
+// the diagnostics above, by every buildASTWithArgs.
+inline std::string &parseIncludes() {
+    static std::string instance;
+    return instance;
+}
+
+// Every on-disk file [unit]'s parse entered, by canonical path. The main file is the virtual
+// buffer the code was parsed from, so it is not one.
+inline std::string includedFiles(const clang::ASTUnit &unit) {
+    const clang::SourceManager &sm = unit.getSourceManager();
+    clang::OptionalFileEntryRef mainFile = sm.getFileEntryRefForID(sm.getMainFileID());
+    std::string out;
+    for (unsigned i = 0; i < sm.local_sloc_entry_size(); ++i) {
+        const clang::SrcMgr::SLocEntry &entry = sm.getLocalSLocEntry(i);
+        if (!entry.isFile()) continue;
+        clang::OptionalFileEntryRef file = entry.getFile().getContentCache().OrigEntry;
+        if (!file || (mainFile && *file == *mainFile)) continue;
+        llvm::SmallString<256> path;
+        if (llvm::sys::fs::real_path(file->getName(), path)) continue;
+        out += path.str();
+        out += '\n';
+    }
+    return out;
 }
 
 // Where [member] ends AS WRITTEN. Its AST range stops at the declarator when clang REJECTED
@@ -301,13 +328,19 @@ inline clang::ASTUnit *buildASTWithArgs(const char *code, const char *filename,
     // buildASTFromCodeWithArgs' own default argument, respelled because C++ has no way to
     // skip to the last parameter.
     detail::parseDiagCollector().clear();
-    return clang::tooling::buildASTFromCodeWithArgs(
-               code, args, filename, "clang-tool",
-               std::make_shared<clang::PCHContainerOperations>(),
-               clang::tooling::getClangStripDependencyFileAdjuster(),
-               clang::tooling::FileContentMappings(), &detail::parseDiagCollector())
-        .release();
+    std::unique_ptr<clang::ASTUnit> unit = clang::tooling::buildASTFromCodeWithArgs(
+        code, args, filename, "clang-tool", std::make_shared<clang::PCHContainerOperations>(),
+        clang::tooling::getClangStripDependencyFileAdjuster(),
+        clang::tooling::FileContentMappings(), &detail::parseDiagCollector());
+    detail::parseIncludes() = unit ? detail::includedFiles(*unit) : std::string();
+    return unit.release();
 }
+
+// #297 BRIDGE: the files the most recent buildASTWithArgs call opened, one canonical path per
+// line (a file entered twice is listed twice), so a build can re-run when a header the parse
+// reached only transitively changes. Read off the ASTUnit's SourceManager, which is no bindable
+// surface, hence the same one-string shape as lastParseDiagnostics below.
+inline std::string lastParseIncludes() { return detail::parseIncludes(); }
 
 // #224 BRIDGE: the ERROR-severity diagnostics of the most recent buildASTWithArgs call.
 //

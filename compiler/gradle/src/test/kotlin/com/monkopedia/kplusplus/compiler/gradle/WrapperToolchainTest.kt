@@ -206,10 +206,32 @@ class WrapperToolchainTest {
         val ext = project.extensions.getByType(KPlusPlusExtension::class.java)
         ext.header("demo.h")
         ext.llvmConfig = llvmConfig.path
-        val job = KPlusPlusCompilerGradlePlugin()
-            .cppKrapperJob(project, ext, "demo", File(dir, "krapped-cpp"))
+        val plugin = KPlusPlusCompilerGradlePlugin()
+        val toolchain = plugin.resolveToolchain(project, ext, seedMode = false)
+        val job = plugin.cppKrapperJob(project, ext, "demo", File(dir, "krapped-cpp"), toolchain)
         assertEquals(llvmClang.path, job.config.compiler)
         assertTrue(llvmInclude.path in job.request.includeDirs, "${job.request.includeDirs}")
+    }
+
+    // One resolution per run: the compiler the cpp sync declared is the one it hands krapper,
+    // so the fallback is decided, and logged, once. krapper itself is a stub that exits at once:
+    // the job is built before the session starts, so the run is over by the time it fails.
+    @Test
+    fun the_cpp_sync_resolves_its_toolchain_once() {
+        writeFixture(frontend = "cpp", compiler = "kpp-not-in-bindir")
+        val krapper = File(dir, "krapper").apply { writeText("#!/bin/sh\nexit 1\n") }
+        krapper.setExecutable(true)
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withEnvironment(System.getenv() + ("KONAN_DATA_DIR" to noKonan.path))
+            .withArguments("kplusplusSync", "--info", "-Pkpp.krapper=$krapper")
+            .buildAndFail()
+        assertTrue("krapper exited with code 1" in result.output, "the session never ran")
+        val fallbacks = result.output.lines().count { "has no 'kpp-not-in-bindir'" in it }
+        assertEquals(1, fallbacks, "the toolchain was resolved more than once:\n${result.output}")
+        val bindirProbes = probes.readLines().count { it == "$llvmConfig --bindir" }
+        assertEquals(1, bindirProbes, probes.readText())
     }
 
     // The identity is probed when the sync runs, not when the build is configured.

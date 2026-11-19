@@ -144,6 +144,7 @@ private suspend fun parseTu(code: String, filename: String, std: String): Wrappe
             location = it.location
         )
     }
+    run.includedFiles += CppParser.lastIncludes()
     applyParseDiagnostics(
         source = filename,
         diagnostics = CppParser.lastDiagnostics(),

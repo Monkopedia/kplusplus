@@ -265,6 +265,8 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
 
     override suspend fun writeTo(output: String) = KrapperRun.using(run) { writeToInRun(output) }
 
+    override suspend fun includedFiles(u: Unit): List<String> = run.includedFiles.sorted()
+
     private suspend fun writeToInRun(output: String) {
         if (config.debug) {
             Log.i("Running mapping")

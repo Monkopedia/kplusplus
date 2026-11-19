@@ -85,6 +85,9 @@ class KrapperRun(
     /** This run's base-resolve profiler (inert unless `diag.baseBindTiming` is on). */
     val profiler = BaseBindProfiler()
 
+    /** Every file this run's parses opened, by canonical path (#297). */
+    val includedFiles = mutableSetOf<String>()
+
     /**
      * The base tree, kept so each forcing parse can mirror libclang's first-seen ordering
      * against it (O1, #46). Written by `parseHeader`, read by `parseForcingModel`.

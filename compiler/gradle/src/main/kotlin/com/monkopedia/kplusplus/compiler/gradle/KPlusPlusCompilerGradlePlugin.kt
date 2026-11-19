@@ -7,6 +7,8 @@ import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
 import java.net.URL
+import java.nio.file.Files
+import java.security.MessageDigest
 import java.util.concurrent.Callable
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -111,9 +113,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             }
             // The toolchain decides the wrapper object on both paths, and PATH or a reinstall
             // can change it with no knob moving: declare what it resolves to, version included.
-            // Probed once per build: Gradle reads the property more than once.
-            val toolchainIdentity = lazy { resolveToolchain(target, ext, seedMode).identity() }
-            it.inputs.property("toolchain", target.provider { toolchainIdentity.value })
+            // Resolved once per build, at first use: Gradle reads the property more than once,
+            // and the sync must compile with the very toolchain it declared.
+            val toolchain = lazy { resolveToolchain(target, ext, seedMode) }
+            it.inputs.property("toolchain", target.provider { toolchain.value.identity })
             // Read outside the extension: the front-end itself and the -P passthroughs.
             it.inputs.property("frontend", frontend?.toString() ?: "")
             it.inputs.property("kppX", target.findProperty("kpp.x")?.toString() ?: "")
@@ -149,6 +152,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             if (!hasHeadersAtConfig) {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
             }
+            // What the headers include is known only once a run has parsed them (#297): the
+            // cpp sync records it, and a recorded file changed since that run is out of date.
+            if (!seedMode) {
+                val includes = includesFileFor(target)
+                it.outputs.upToDateWhen { _ -> includesUnchanged(includes) }
+            }
             it.doLast {
                 // Every binding-generating module must declare HOW it produces bindings via
                 // `kpp.frontend.<module>`:
@@ -159,7 +168,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 // A module with NEITHER set has no parse path, so fail clearly instead of
                 // silently doing nothing.
                 if (seedMode) {
-                    runSeedSync(target, ext, moduleName, krappedDir)
+                    runSeedSync(target, ext, moduleName, krappedDir, toolchain.value)
                     return@doLast
                 }
                 if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
@@ -182,7 +191,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                                 "An LLVM/Clang toolchain must be present at runtime either way."
                         )
                     }
-                    runCppSync(target, ext, moduleName, krappedDir, execKexe)
+                    runCppSync(target, ext, moduleName, krappedDir, execKexe, toolchain.value)
                     return@doLast
                 }
                 throw GradleException(
@@ -216,7 +225,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         target: Project,
         ext: KPlusPlusExtension?,
         moduleName: String,
-        krappedDir: File
+        krappedDir: File,
+        toolchain: Toolchain
     ) {
         val srcDir = File(krappedDir, "src")
         val bindingSources = srcDir.listFiles { f -> f.isFile && f.extension == "kt" }
@@ -231,7 +241,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             )
         }
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
-        val toolchain = resolveToolchain(target, ext, seedMode = true)
         // Regenerate the cinterop .def — deterministic from the module name + this checkout's
         // krapped dir, so the committed seed carries no host-specific absolute path. Mirrors
         // DefWriter/CompileFlags for the static-wrapper case the laggards use.
@@ -272,12 +281,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /** The wrapper compile's compiler and LLVM include dirs (see [resolveToolchain]). */
-    private inner class Toolchain(val compiler: String, val includeDirs: List<String>) {
+    internal inner class Toolchain(val compiler: String, val includeDirs: List<String>) {
         /** Resolved path + `--version` + include dirs: what the compile actually depends on. */
-        fun identity(): String {
+        val identity: String by lazy {
             val exec = resolveExecutable(compiler)
             val version = exec?.let { probeExec(it, "--version") }
-            return listOf(exec?.absolutePath ?: compiler, version.orEmpty(), includeDirs)
+            listOf(exec?.absolutePath ?: compiler, version.orEmpty(), includeDirs)
                 .joinToString("\n")
         }
     }
@@ -291,7 +300,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * `clang++` (what the cpp front-end parsed the header against). A compiler path is used as
      * given; a name the bindir lacks falls back to PATH.
      */
-    private fun resolveToolchain(
+    internal fun resolveToolchain(
         target: Project,
         ext: KPlusPlusExtension?,
         seedMode: Boolean
@@ -340,9 +349,18 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         ext: KPlusPlusExtension?,
         moduleName: String,
         krappedDir: File,
-        kexe: File
+        kexe: File,
+        toolchain: Toolchain
     ) {
-        val job = cppKrapperJob(target, ext, moduleName, krappedDir)
+        val job = cppKrapperJob(target, ext, moduleName, krappedDir, toolchain)
+        // A fresh file stamps the run's start by the filesystem's clock, so a header edited
+        // while krapper reads it is newer than the record (see [includesUnchanged]). A failed
+        // run is never up to date, so what it leaves here is moot.
+        val includes = includesFileFor(target)
+        includes.delete()
+        includes.parentFile.mkdirs()
+        includes.createNewFile()
+        val started = Files.getLastModifiedTime(includes.toPath())
         val requested = job.instantiations
         val headerPaths = job.request.headers
         target.logger.lifecycle(
@@ -392,6 +410,19 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     "parsed model." + report.detail()
             )
         }
+        val included = report.includedFiles
+        if (included == null) {
+            target.logger.info(
+                "kplusplusSync[$moduleName]: krapper reported no include set; only the " +
+                    "declared headers decide whether the sync is up to date."
+            )
+            includes.delete()
+        } else {
+            includes.writeText(
+                included.joinToString("") { "${sha256(File(it)) ?: "missing"} $it\n" }
+            )
+            Files.setLastModifiedTime(includes.toPath(), started)
+        }
         val ktCount = bindingKt.size + 1 // + the CppBinding.kt boilerplate
         // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
         File(krappedDir, "generated.txt").writeText(requested.joinToString("\n") + "\n")
@@ -406,7 +437,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         target: Project,
         ext: KPlusPlusExtension?,
         moduleName: String,
-        krappedDir: File
+        krappedDir: File,
+        toolchain: Toolchain
     ): KrapperJob {
         val headers = ext?.headers.orEmpty()
         if (headers.isEmpty()) {
@@ -428,7 +460,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // headers, because the tool's bundled Clang only searches its resource-dir + the
         // driver's default paths. Discovered via `llvm-config --includedir` (or the
         // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
-        val toolchain = resolveToolchain(target, ext, seedMode = false)
         val includeDirs = toolchain.includeDirs +
             ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
@@ -996,6 +1027,36 @@ internal data class ResolvedKrapper(
  */
 internal fun requestedManifestFor(project: Project) =
     File(project.projectDir, "krapped/requested.txt")
+
+/**
+ * The files the last cpp sync's parses opened, one `<sha256> <path>` per line (#297). Its mtime is
+ * when that run started.
+ */
+internal fun includesFileFor(project: Project) =
+    File(project.layout.buildDirectory.get().asFile, "kplusplus/includes.txt")
+
+/**
+ * Whether every file [record] lists is unchanged since the run that wrote it: still there, with
+ * the contents it recorded, and last modified before that run started. The contents catch a
+ * change that kept or backdated the mtime (`cp -p`, a package upgrade); the hash is taken after
+ * the run, so the mtime is what catches an edit made while krapper was reading. With no record
+ * (no run yet, or a krapper that does not report its includes), only the declared inputs decide.
+ */
+internal fun includesUnchanged(record: File): Boolean {
+    if (!record.isFile) return true
+    val started = Files.getLastModifiedTime(record.toPath())
+    return record.readLines().filter { it.isNotEmpty() }.all { line ->
+        val file = File(line.substringAfter(' '))
+        file.isFile && Files.getLastModifiedTime(file.toPath()) < started &&
+            sha256(file) == line.substringBefore(' ')
+    }
+}
+
+private fun sha256(file: File): String? = file.takeIf { it.isFile }?.let {
+    MessageDigest.getInstance("SHA-256").digest(it.readBytes()).joinToString("") { b ->
+        "%02x".format(b)
+    }
+}
 
 /**
  * What kplusplusSync instantiates: the [requestedManifestFor] entries plus the build-seeded

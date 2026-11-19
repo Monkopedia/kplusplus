@@ -97,4 +97,14 @@ interface IndexedService : RpcBidiService {
 
     @KsMethod("/output")
     suspend fun writeTo(output: String)
+
+    /**
+     * The canonical paths of every file this service's parses opened, its headers' transitive
+     * includes among them (#297), so a build can re-run when one changes.
+     *
+     * Added after the protocol shipped, so a caller must expect a krapper that predates it: that
+     * one answers ksrpc's endpoint-not-found, and the caller carries on without the list.
+     */
+    @KsMethod("/included_files")
+    suspend fun includedFiles(u: Unit): List<String>
 }
