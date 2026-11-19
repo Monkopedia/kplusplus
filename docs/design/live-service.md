@@ -31,8 +31,8 @@ contradict the ruling; all of them change the *mechanism*.
    not the current compilation. What the compiler can do live is **ask** and **request**.
 3. **Everything the FIR plugin currently needs is immutable for the duration of a sync.** The
    mangling it re-derived (`mangleTemplateArg`, deleted by B2), the Kotlin→C++ type table
-   (`:176-182`), the container list (`:53-107`), the drop reasons — all of it is a pure function of the last
-   krapper run. That means the live client's payload can and should be a **snapshot fetched once
+   (`cppElementType`), the container list (`containers`), the drop reasons — all of it is a pure
+   function of the last krapper run. That means the live client's payload can and should be a **snapshot fetched once
    per compilation**, not a per-call round trip. This is not a retreat from "live client": the
    snapshot is *krapper's own answer* replacing a hand-maintained re-derivation, which is the
    substance of the ruling. It is also the only form that survives the Gradle build-cache and
