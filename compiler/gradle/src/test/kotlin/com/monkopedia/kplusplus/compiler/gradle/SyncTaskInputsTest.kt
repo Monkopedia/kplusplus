@@ -150,7 +150,7 @@ class SyncTaskInputsTest {
                 compiler = knob("compiler", "clang++")
             }
             // The generator is not under test, only the inputs the plugin declared. It records
-            // the include set krapper would report.
+            // the include set krapper would report, as the cpp sync does.
             tasks.named("kplusplusSync") {
                 actions.clear()
                 val out = layout.buildDirectory.dir("sync-out")
@@ -159,7 +159,10 @@ class SyncTaskInputsTest {
                 val inner = file("include/inner.h")
                 doLast {
                     out.get().asFile.resolve("ran").writeText("")
-                    includes.get().asFile.apply { parentFile.mkdirs() }.writeText("${'$'}inner\n")
+                    val sha = java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(inner.readBytes()).joinToString("") { "%02x".format(it) }
+                    includes.get().asFile.apply { parentFile.mkdirs() }
+                        .writeText("${'$'}sha ${'$'}inner\n")
                 }
             }
             """.trimIndent()
@@ -223,9 +226,36 @@ class SyncTaskInputsTest {
         emptyArray()
     }
 
+    // New contents under an old mtime: `cp -p`, `rsync -a`, a package upgrade.
+    @Test
+    fun a_transitive_include_replaced_with_an_older_mtime_reruns_the_sync() =
+        assertReRunsAfter("include/inner.h, backdated") {
+            File(projectDir, "include/inner.h").apply {
+                writeText("struct Replaced {};\n")
+                setLastModified(Y2K)
+            }
+            emptyArray()
+        }
+
+    // `touch -r`: edited, then its mtime put back.
+    @Test
+    fun a_transitive_include_edited_with_its_mtime_restored_reruns_the_sync() =
+        assertReRunsAfter("include/inner.h, mtime restored") {
+            File(projectDir, "include/inner.h").apply {
+                val mtime = lastModified()
+                appendText("struct More {};\n")
+                setLastModified(mtime)
+            }
+            emptyArray()
+        }
+
     @Test
     fun an_edited_only_file_reruns_the_sync() = assertReRunsAfter("the onlyFile contents") {
         File(projectDir, "allow.txt").appendText("Other\n")
         emptyArray()
+    }
+
+    private companion object {
+        const val Y2K = 946_684_800_000L
     }
 }

@@ -34,6 +34,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -126,14 +127,19 @@ class IncludedFilesCompatTest {
     }
 
     @Test
-    fun a_recorded_file_edited_after_the_run_started_is_out_of_date() {
+    fun a_recorded_file_changed_since_the_run_is_out_of_date() {
         val header = File(dir, "inner.h").apply { writeText("v1\n") }
-        val record = File(dir, "includes.txt").apply { writeText("${header.path}\n") }
-        header.setLastModified(record.lastModified() - 2000)
+        val sha = "2d27fbdf4e8ca207afbfa388ca9172fbcc6c70e534af2476b3b704f87debadcf" // "v1\n"
+        val record = File(dir, "includes.txt").apply { writeText("$sha ${header.path}\n") }
+        val before = record.lastModified() - 2000
+        header.setLastModified(before)
         assertTrue(includesUnchanged(record), "control: nothing changed since the run")
         header.setLastModified(record.lastModified() + 2000)
-        assertTrue(!includesUnchanged(record), "an edited include must be out of date")
+        assertFalse(includesUnchanged(record), "modified after the run started")
+        header.writeText("v2\n")
+        header.setLastModified(before)
+        assertFalse(includesUnchanged(record), "other contents under the old mtime")
         header.delete()
-        assertTrue(!includesUnchanged(record), "a deleted include must be out of date")
+        assertFalse(includesUnchanged(record), "deleted")
     }
 }

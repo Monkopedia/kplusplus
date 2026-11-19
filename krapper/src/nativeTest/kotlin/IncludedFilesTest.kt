@@ -30,8 +30,9 @@ import platform.posix.symlink
 /**
  * #297 — krapper reports the files its parses opened, so the sync can re-run when a header the
  * module reaches only transitively changes. The include dir is a symlink, so only the canonical
- * spelling of the included header matches. The root header itself is parsed as the in-memory
- * main buffer, not opened, so the plugin declares it directly.
+ * spelling of the included header matches. The base parse reads the root header as its in-memory
+ * main buffer, so only a forcing parse (one per instantiation, which `#include`s it from disk)
+ * lists it; the plugin declares it directly either way.
  */
 class IncludedFilesTest {
 
