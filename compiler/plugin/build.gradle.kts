@@ -88,6 +88,36 @@ tasks.withType<Test> {
     )
 }
 
+// #237: the SPELLING gate. BindingIndexSpellingGateTest resolves the denominator above against a
+// binding-index.json the IN-TREE krapper emitted, re-spelled by THIS build's cppSpec — the one
+// pairing that tests the code a PR changes (the root build consumes the published plugin, so a
+// root-build test would measure last release's cppSpec). It needs `:featuregen:kplusplusSync` in
+// the root build first, so it is its own task rather than part of `test`/`check`; the
+// generator-suite job of root-build.yml runs it straight after its featuregen build.
+val featuregenBindingIndex = rootProject.file("../featuregen/build/krapped-cpp/binding-index.json")
+val spellingGate = "*.BindingIndexSpellingGateTest"
+
+tasks.test {
+    filter { excludeTestsMatching(spellingGate) }
+}
+
+tasks.register<Test>("bindingIndexGate") {
+    group = "verification"
+    description = "Resolve featuregen's specs, as this plugin spells them, in krapper's index."
+    val testSources = sourceSets.test.get()
+    testClassesDirs = testSources.output.classesDirs
+    classpath = testSources.runtimeClasspath
+    filter { includeTestsMatching(spellingGate) }
+    inputs.files(featuregenBindingIndex)
+    systemProperty("kplusplus.test.featuregenBindingIndex", featuregenBindingIndex.absolutePath)
+    doFirst {
+        check(featuregenBindingIndex.isFile) {
+            "$featuregenBindingIndex does not exist: run `./gradlew :featuregen:kplusplusSync` " +
+                "in the repo root first, so the in-tree krapper emits it."
+        }
+    }
+}
+
 tasks.withType<KotlinCompile> {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_1_8)

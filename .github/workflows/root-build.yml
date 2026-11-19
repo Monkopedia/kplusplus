@@ -55,6 +55,11 @@ on:
       # this fixture, a declared input of that task. It lives under compiler/, so without this
       # line a PR changing only the golden ran just the JVM reader test and merged green.
       - 'compiler/gradle/src/test/resources/defwriter-golden.def'
+      # #237: generator-suite runs the compiler build's spelling gate — the in-tree plugin's
+      # cppSpec against the index the in-tree krapper emits — so the plugin and that build's
+      # scripts trigger this workflow too. verifyWorkflowPaths checks that invocation as well.
+      - 'compiler/plugin/**'
+      - 'compiler/**/*.gradle.kts'
       - '.github/workflows/root-build.yml'
       - '.github/actions/konan-cache/**'
       - '.github/test-evidence-gate/gate.sh'
@@ -164,7 +169,9 @@ jobs:
     # would let a wedged run sit for six hours (#198).
     timeout-minutes: 90
     env:
-      TEST_MODULES: featuregen cppfixture
+      # compiler/plugin is the #237 spelling gate's module; the rest are root-build modules
+      # whose nativeTest the step below runs.
+      TEST_MODULES: featuregen cppfixture compiler/plugin
     steps:
       - uses: actions/checkout@v7
 
@@ -208,8 +215,16 @@ jobs:
       - name: nativeTest (featuregen, cppfixture) + noncopyableDeterminismCheck + matrixReport
         run: |
           # shellcheck disable=SC2046,SC2086 # one task per module
-          ./gradlew --no-daemon $(printf ':%s:nativeTest ' $TEST_MODULES) \
+          ./gradlew --no-daemon $(printf ':%s:nativeTest ' ${TEST_MODULES% compiler/plugin}) \
             :krapper:noncopyableDeterminismCheck :feature-tests:matrixReport :verifyWorkflowPaths
+
+      # #237, the SPELLING gate: featuregen's specs, spelled by the IN-TREE plugin's cppSpec, must
+      # be keys of the index the step above just emitted through the IN-TREE krapper. Only this
+      # job has that index; see compiler/plugin/build.gradle.kts for why it is not a root test.
+      - name: Spelling gate (in-tree plugin vs the index the in-tree krapper emitted)
+        run: |
+          ./gradlew --no-daemon -p compiler :kplusplus-compiler-plugin:bindingIndexGate \
+            :verifyWorkflowPaths -PworkflowPaths.workflow=root-build.yml
 
       - name: Assert docs/features.md matches the tests
         run: |

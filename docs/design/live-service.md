@@ -30,8 +30,8 @@ contradict the ruling; all of them change the *mechanism*.
    on-demand binding driven by the compiler" is real, but its unit of time is **the next sync**,
    not the current compilation. What the compiler can do live is **ask** and **request**.
 3. **Everything the FIR plugin currently needs is immutable for the duration of a sync.** The
-   mangling it re-derives (`CppVectorMapping.kt:248-268`), the Kotlin→C++ type table (`:176-182`),
-   the container list (`:53-107`), the drop reasons — all of it is a pure function of the last
+   mangling it re-derived (`mangleTemplateArg`, deleted by B2), the Kotlin→C++ type table
+   (`:176-182`), the container list (`:53-107`), the drop reasons — all of it is a pure function of the last
    krapper run. That means the live client's payload can and should be a **snapshot fetched once
    per compilation**, not a per-call round trip. This is not a retreat from "live client": the
    snapshot is *krapper's own answer* replacing a hand-maintained re-derivation, which is the
@@ -609,9 +609,17 @@ Machine-checkable gates, per brick:
   `binding-index.json`, a spec the index does not list is a sync request, and a lookup with no
   readable index is a **diagnostic** — never a silently derived name.
   `BindingIndexCoverageTest` is that gate; it reads its denominator from featuregen's committed
-  `krapped/requested.txt` plus the `instantiate(...)` calls in its build script, and every index
-  it builds maps specs to names no mangling could produce, so it cannot pass unless the name came
-  out of the file.
+  `krapped/requested.txt` plus the `instantiate(...)` calls in its build script, and its two
+  coverage tests map every spec to a name no mangling could produce, so they cannot pass unless
+  the name came out of the file. (Its root-package tests use mangling-shaped names on purpose:
+  they assert the root-package cross-check, not where the name came from.)
+
+  Those indexes are written by the test, so they cannot catch the one rule B2 leaves shared: how a
+  spec is *spelled* — krapper keys entries `cls.type.toString()`, the plugin looks them up by
+  `cppSpec`. `BindingIndexSpellingGateTest` (#237) closes that: root-build.yml's generator-suite
+  job syncs featuregen through the in-tree krapper, then runs `-p compiler
+  :kplusplus-compiler-plugin:bindingIndexGate`, which re-spells every denominator spec through the
+  in-tree `cppSpec` and requires it to be a key of that freshly emitted index.
 
   > **Why this is no longer an agreement check.** As first written, G5 compared the index against
   > `CppVectorMapping`'s static derivation and concluded "this is why the static path should be
@@ -815,7 +823,7 @@ Stated plainly, per the brief:
 
 **B1 + B2 + B3 is ~80% of the realizable value of this issue and needs no persistence, no
 socket, and no Sema.** It replaces a silently-drifting re-derivation of the generator's mangling
-(`CppVectorMapping.kt:248-268`) with the generator's own answer, replaces a 4-entry type table
+(`mangleTemplateArg`, which B2 deleted) with the generator's own answer, replaces a 4-entry type table
 with krapper's, and turns `kplusplus-sync-required: <spec>` into a real compiler diagnostic
 carrying the C++ position and the reason. It is three small, independently verifiable changes
 with a coverage gate (G5) over the plugin's real resolution surface.
