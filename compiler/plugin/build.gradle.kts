@@ -78,14 +78,13 @@ tasks.withType<Test> {
     // (This replaces `kplusplus.test.krapperManglingSource`, which pointed at krapper's
     // `WrappedKotlinType.kt` so the plugin's hand-copied mangling could be cross-checked
     // against it. B2 deleted that copy, so there is nothing left to cross-check.)
-    systemProperty(
-        "kplusplus.test.featuregenRequested",
-        rootProject.file("../featuregen/krapped/requested.txt").absolutePath,
-    )
-    systemProperty(
-        "kplusplus.test.featuregenBuildScript",
-        rootProject.file("../featuregen/build.gradle.kts").absolutePath,
-    )
+    val requested = rootProject.file("../featuregen/krapped/requested.txt")
+    val buildScript = rootProject.file("../featuregen/build.gradle.kts")
+    systemProperty("kplusplus.test.featuregenRequested", requested.absolutePath)
+    systemProperty("kplusplus.test.featuregenBuildScript", buildScript.absolutePath)
+    // #237: a path string is not an input. Declared, a denominator change re-runs both gates
+    // instead of leaving them UP-TO-DATE over the old one.
+    inputs.files(requested, buildScript).withPropertyName("featuregenDenominator")
 }
 
 // #237: the SPELLING gate. BindingIndexSpellingGateTest resolves the denominator above against a
