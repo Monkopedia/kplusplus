@@ -111,9 +111,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             }
             // The toolchain decides the wrapper object on both paths, and PATH or a reinstall
             // can change it with no knob moving: declare what it resolves to, version included.
-            // Probed once per build: Gradle reads the property more than once.
-            val toolchainIdentity = lazy { resolveToolchain(target, ext, seedMode).identity() }
-            it.inputs.property("toolchain", target.provider { toolchainIdentity.value })
+            // Resolved once per build, at first use: Gradle reads the property more than once,
+            // and the sync must compile with the very toolchain it declared.
+            val toolchain = lazy { resolveToolchain(target, ext, seedMode) }
+            it.inputs.property("toolchain", target.provider { toolchain.value.identity })
             // Read outside the extension: the front-end itself and the -P passthroughs.
             it.inputs.property("frontend", frontend?.toString() ?: "")
             it.inputs.property("kppX", target.findProperty("kpp.x")?.toString() ?: "")
@@ -159,7 +160,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 // A module with NEITHER set has no parse path, so fail clearly instead of
                 // silently doing nothing.
                 if (seedMode) {
-                    runSeedSync(target, ext, moduleName, krappedDir)
+                    runSeedSync(target, ext, moduleName, krappedDir, toolchain.value)
                     return@doLast
                 }
                 if (target.findProperty("kpp.frontend.$moduleName") == "cpp") {
@@ -182,7 +183,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                                 "An LLVM/Clang toolchain must be present at runtime either way."
                         )
                     }
-                    runCppSync(target, ext, moduleName, krappedDir, execKexe)
+                    runCppSync(target, ext, moduleName, krappedDir, execKexe, toolchain.value)
                     return@doLast
                 }
                 throw GradleException(
@@ -216,7 +217,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         target: Project,
         ext: KPlusPlusExtension?,
         moduleName: String,
-        krappedDir: File
+        krappedDir: File,
+        toolchain: Toolchain
     ) {
         val srcDir = File(krappedDir, "src")
         val bindingSources = srcDir.listFiles { f -> f.isFile && f.extension == "kt" }
@@ -231,7 +233,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             )
         }
         val std = ext?.cppStandard ?: DEFAULT_CPP_STANDARD
-        val toolchain = resolveToolchain(target, ext, seedMode = true)
         // Regenerate the cinterop .def — deterministic from the module name + this checkout's
         // krapped dir, so the committed seed carries no host-specific absolute path. Mirrors
         // DefWriter/CompileFlags for the static-wrapper case the laggards use.
@@ -272,12 +273,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     }
 
     /** The wrapper compile's compiler and LLVM include dirs (see [resolveToolchain]). */
-    private inner class Toolchain(val compiler: String, val includeDirs: List<String>) {
+    internal inner class Toolchain(val compiler: String, val includeDirs: List<String>) {
         /** Resolved path + `--version` + include dirs: what the compile actually depends on. */
-        fun identity(): String {
+        val identity: String by lazy {
             val exec = resolveExecutable(compiler)
             val version = exec?.let { probeExec(it, "--version") }
-            return listOf(exec?.absolutePath ?: compiler, version.orEmpty(), includeDirs)
+            listOf(exec?.absolutePath ?: compiler, version.orEmpty(), includeDirs)
                 .joinToString("\n")
         }
     }
@@ -291,7 +292,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * `clang++` (what the cpp front-end parsed the header against). A compiler path is used as
      * given; a name the bindir lacks falls back to PATH.
      */
-    private fun resolveToolchain(
+    internal fun resolveToolchain(
         target: Project,
         ext: KPlusPlusExtension?,
         seedMode: Boolean
@@ -340,9 +341,10 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         ext: KPlusPlusExtension?,
         moduleName: String,
         krappedDir: File,
-        kexe: File
+        kexe: File,
+        toolchain: Toolchain
     ) {
-        val job = cppKrapperJob(target, ext, moduleName, krappedDir)
+        val job = cppKrapperJob(target, ext, moduleName, krappedDir, toolchain)
         val requested = job.instantiations
         val headerPaths = job.request.headers
         target.logger.lifecycle(
@@ -406,7 +408,8 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         target: Project,
         ext: KPlusPlusExtension?,
         moduleName: String,
-        krappedDir: File
+        krappedDir: File,
+        toolchain: Toolchain
     ): KrapperJob {
         val headers = ext?.headers.orEmpty()
         if (headers.isEmpty()) {
@@ -428,7 +431,6 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         // headers, because the tool's bundled Clang only searches its resource-dir + the
         // driver's default paths. Discovered via `llvm-config --includedir` (or the
         // kplusplus { llvmConfig = ... } / -PllvmConfig override), mirroring settings.gradle.kts.
-        val toolchain = resolveToolchain(target, ext, seedMode = false)
         val includeDirs = toolchain.includeDirs +
             ext?.headerDirectories.orEmpty().map { target.file(it).absolutePath }
 
