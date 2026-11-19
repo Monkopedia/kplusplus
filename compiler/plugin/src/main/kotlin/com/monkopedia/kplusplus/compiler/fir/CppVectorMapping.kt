@@ -135,9 +135,8 @@ internal object CppVectorMapping {
     ): Container? {
         val annotation = symbol.getAnnotationByClassId(CPP_TEMPLATE_ANNOTATION, session)
             ?: return null
-        // Only `base` is read: it is what spells the C++ instantiation the index is keyed on.
-        // The annotation's `prefix`/`pkg` describe the NAME krapper gave the generated class,
-        // and since #206/B2 that name is taken from the index rather than reassembled here.
+        // `base` is what spells the C++ instantiation the index is keyed on; the generated
+        // class's name comes from the index (#206/B2), so the annotation carries nothing else.
         val base = annotation.getStringArgument(CPP_TEMPLATE_BASE_ARG) ?: return null
         // Arity comes from the facade function's own type parameters
         // (`fun <T> MemScope.Box()` -> 1), so the annotation needn't carry an
@@ -253,9 +252,11 @@ internal object CppVectorMapping {
     /**
      * [resolveBinding] keyed directly on the C++ spec, which is how the index is keyed.
      *
-     * krapper spells the specs it indexes exactly as [cppSpec] builds them — verified against
-     * the emitted artifact: `std::map<int, int>` (with the space), `std::vector<Thing*>`,
-     * `Box<Box<int>>`, `std::vector<std::__cxx11::basic_string<char>>`.
+     * krapper spells the specs it indexes exactly as [cppSpec] builds them: `std::map<int, int>`
+     * (with the space), `std::vector<Thing*>`, `Box<Box<int>>`,
+     * `std::vector<std::__cxx11::basic_string<char>>`. Nothing shares that rule between the two
+     * builds, so `BindingIndexSpellingGateTest` checks it in CI against an index the in-tree
+     * krapper really emitted (#237).
      */
     fun resolveSpec(spec: String): BindingResolution {
         val load = bindingIndex()

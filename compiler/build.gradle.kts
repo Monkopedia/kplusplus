@@ -144,15 +144,25 @@ tasks.register("publishPluginToPortal") {
 // run also executes verify.sh (the step before `check`), which reads every file under
 // .github/test-evidence-gate and .github/workflows, and the workflow's v8-configure job reads
 // samples/v8's build configuration (#306).
-extra["workflowPaths.workflow"] = rootDir.resolve("../.github/workflows/compiler-check.yml")
+//
+// #237: root-build.yml also runs this build, for `:kplusplus-compiler-plugin:bindingIndexGate`,
+// and passes `-PworkflowPaths.workflow=root-build.yml` so that invocation's reads are checked
+// against the workflow that runs it. Its steps call only gate.sh, already in that list.
+val workflowName =
+    providers.gradleProperty("workflowPaths.workflow").getOrElse("compiler-check.yml")
+extra["workflowPaths.workflow"] = rootDir.resolve("../.github/workflows/$workflowName")
 extra["workflowPaths.alsoRead"] =
-    listOf(
-        ".github/test-evidence-gate",
-        ".github/workflows",
-        "samples/v8/settings.gradle.kts",
-        "samples/v8/build.gradle.kts",
-        "samples/v8/gradle.properties",
-    )
+    if (workflowName == "compiler-check.yml") {
+        listOf(
+            ".github/test-evidence-gate",
+            ".github/workflows",
+            "samples/v8/settings.gradle.kts",
+            "samples/v8/build.gradle.kts",
+            "samples/v8/gradle.properties",
+        )
+    } else {
+        emptyList()
+    }
 apply(from = "../gradle/workflow-paths.gradle.kts")
 
 // #231: README.md and docs/ARCHITECTURE.md each carry a module table, and both silently missed

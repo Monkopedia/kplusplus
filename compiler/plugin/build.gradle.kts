@@ -78,14 +78,43 @@ tasks.withType<Test> {
     // (This replaces `kplusplus.test.krapperManglingSource`, which pointed at krapper's
     // `WrappedKotlinType.kt` so the plugin's hand-copied mangling could be cross-checked
     // against it. B2 deleted that copy, so there is nothing left to cross-check.)
-    systemProperty(
-        "kplusplus.test.featuregenRequested",
-        rootProject.file("../featuregen/krapped/requested.txt").absolutePath,
-    )
-    systemProperty(
-        "kplusplus.test.featuregenBuildScript",
-        rootProject.file("../featuregen/build.gradle.kts").absolutePath,
-    )
+    val requested = rootProject.file("../featuregen/krapped/requested.txt")
+    val buildScript = rootProject.file("../featuregen/build.gradle.kts")
+    systemProperty("kplusplus.test.featuregenRequested", requested.absolutePath)
+    systemProperty("kplusplus.test.featuregenBuildScript", buildScript.absolutePath)
+    // #237: a path string is not an input. Declared, a denominator change re-runs both gates
+    // instead of leaving them UP-TO-DATE over the old one.
+    inputs.files(requested, buildScript).withPropertyName("featuregenDenominator")
+}
+
+// #237: the SPELLING gate. BindingIndexSpellingGateTest resolves the denominator above against a
+// binding-index.json the IN-TREE krapper emitted, re-spelled by THIS build's cppSpec — the one
+// pairing that tests the code a PR changes (the root build consumes the published plugin, so a
+// root-build test would measure last release's cppSpec). It needs `:featuregen:kplusplusSync` in
+// the root build first, so it is its own task rather than part of `test`/`check`; the
+// generator-suite job of root-build.yml runs it straight after its featuregen build.
+val featuregenBindingIndex = rootProject.file("../featuregen/build/krapped-cpp/binding-index.json")
+val spellingGate = "*.BindingIndexSpellingGateTest"
+
+tasks.test {
+    filter { excludeTestsMatching(spellingGate) }
+}
+
+tasks.register<Test>("bindingIndexGate") {
+    group = "verification"
+    description = "Resolve featuregen's specs, as this plugin spells them, in krapper's index."
+    val testSources = sourceSets.test.get()
+    testClassesDirs = testSources.output.classesDirs
+    classpath = testSources.runtimeClasspath
+    filter { includeTestsMatching(spellingGate) }
+    inputs.files(featuregenBindingIndex)
+    systemProperty("kplusplus.test.featuregenBindingIndex", featuregenBindingIndex.absolutePath)
+    doFirst {
+        check(featuregenBindingIndex.isFile) {
+            "$featuregenBindingIndex does not exist: run `./gradlew :featuregen:kplusplusSync` " +
+                "in the repo root first, so the in-tree krapper emits it."
+        }
+    }
 }
 
 tasks.withType<KotlinCompile> {

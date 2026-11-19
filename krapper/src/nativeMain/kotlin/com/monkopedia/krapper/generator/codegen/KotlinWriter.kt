@@ -1140,10 +1140,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                         appendLine("}")
                     }
                     appendLine()
-                    appendLine(
-                        "@krapper.CppTemplate(base = \"${facade.base}\", " +
-                            "prefix = \"${facade.base}\", pkg = \"${facade.pkg}\")"
-                    )
+                    appendLine("@krapper.CppTemplate(base = \"${facade.base}\")")
                     // The scoped factory now takes the ambient scope as a CONTEXT parameter
                     // (matching the generated `context(scope: MemScope) fun <Type>()`
                     // constructor factories) rather than a MemScope receiver. `Base<Int>()`

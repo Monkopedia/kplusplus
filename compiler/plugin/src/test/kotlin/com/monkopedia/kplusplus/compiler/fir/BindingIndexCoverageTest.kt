@@ -41,15 +41,22 @@ import org.jetbrains.kotlin.name.Name
  * > not list is a sync request; and a lookup with no readable index is a **diagnostic**, never a
  * > silently derived name.
  *
- * The denominator is read from the repo rather than hand-listed ([featuregenSpecs]): featuregen's
- * committed `krapped/requested.txt` — the specs the FIR checker itself asked for — plus the
- * `instantiate(...)` calls in its build script, which are the specs seeded before any compile
- * could request them. A new feature row that adds an instantiation is covered automatically.
+ * The denominator is read from the repo rather than hand-listed ([FeaturegenSurface]):
+ * featuregen's committed `krapped/requested.txt` — the specs the FIR checker itself asked for —
+ * plus the `instantiate(...)` calls in its build script, which are the specs seeded before any
+ * compile could request them. A new feature row that adds an instantiation is covered
+ * automatically.
  *
- * Every index this test builds maps its specs to names that **cannot be derived from the spec**
- * (`probe.Binding17`). That is what makes it a real gate: a plugin that reconstructed krapper's
- * mangling would produce `std.Vector__Int` and fail here, so the test cannot pass unless the
- * name genuinely came out of the file.
+ * The two coverage tests map every spec to a name that **cannot be derived from the spec**
+ * (`probe.B17`). That is what makes them a real gate: a plugin that reconstructed krapper's
+ * mangling would produce `std.Vector__Int` and fail there, so they cannot pass unless the name
+ * genuinely came out of the file. The root-package tests deliberately use mangling-shaped names
+ * (`app.std.Vector__Int`) — what they assert is the root-package cross-check, not where the name
+ * came from.
+ *
+ * These indexes are written by the test, so they prove the plugin *reads* the index; they cannot
+ * prove krapper *spells* its keys the way [CppVectorMapping.cppSpec] does. That is
+ * [BindingIndexSpellingGateTest], run against a real emitted index (#237).
  */
 class BindingIndexCoverageTest {
 
@@ -70,9 +77,10 @@ class BindingIndexCoverageTest {
 
     @Test
     fun everySpecFeaturegenInstantiatesResolvesOutOfTheIndex() {
-        val expected = featuregenSpecs.withIndex().associate { (i, spec) -> spec to "probe.B$i" }
+        val specs = FeaturegenSurface.specs
+        val expected = specs.withIndex().associate { (i, spec) -> spec to "probe.B$i" }
         CppVectorMapping.configureBindingIndex(writeIndex(expected))
-        val wrong = featuregenSpecs.mapNotNull { spec ->
+        val wrong = specs.mapNotNull { spec ->
             when (val resolution = CppVectorMapping.resolveSpec(spec)) {
                 is BindingResolution.Resolved ->
                     if (resolution.classId == expected.getValue(spec).toClassId()) {
@@ -89,7 +97,7 @@ class BindingIndexCoverageTest {
         assertTrue(
             wrong.isEmpty(),
             wrong.joinToString(
-                prefix = "${wrong.size} of ${featuregenSpecs.size} of featuregen's " +
+                prefix = "${wrong.size} of ${specs.size} of featuregen's " +
                     "instantiations did not resolve to the ClassId krapper's index names:\n",
                 separator = "\n"
             ) { "  $it" }
@@ -97,18 +105,12 @@ class BindingIndexCoverageTest {
     }
 
     /**
-     * Guards the denominator. A silently-empty parse would make the test above pass over
-     * nothing, so pin both the size and the shapes that matter — a pointer element, a nested
-     * template, a two-argument container, and a user `@CppTemplate` base.
+     * Guards the denominator. [FeaturegenSurface] already fails a short read; pin the shapes
+     * that matter too — a pointer element, a nested template, a two-argument container, and a
+     * user `@CppTemplate` base.
      */
     @Test
     fun theDenominatorIsReadFromFeaturegen() {
-        assertTrue(
-            featuregenSpecs.size >= MIN_EXPECTED_SPECS,
-            "Only ${featuregenSpecs.size} specs came out of $REQUESTED_PROPERTY and " +
-                "$BUILD_SCRIPT_PROPERTY; featuregen had $MIN_EXPECTED_SPECS when this test " +
-                "was written, so the read is probably broken rather than the surface shrunk."
-        )
         listOf(
             "std::vector<int>",
             "std::vector<Thing*>",
@@ -116,7 +118,7 @@ class BindingIndexCoverageTest {
             "std::map<int, int>",
             "Box<int>"
         ).forEach {
-            assertTrue(it in featuregenSpecs, "featuregen no longer instantiates $it")
+            assertTrue(it in FeaturegenSurface.specs, "featuregen no longer instantiates $it")
         }
     }
 
@@ -330,47 +332,8 @@ class BindingIndexCoverageTest {
             append("}")
         }
 
-    /**
-     * featuregen's real instantiation surface: the committed manifest the FIR checker grew, plus
-     * the build-seeded `instantiate(...)` calls (`Box<int>`, `std::vector<Thing*>`, …) which the
-     * checker cannot request because they are used through generated facades.
-     */
-    private val featuregenSpecs: List<String> by lazy {
-        val requested = repoFile(REQUESTED_PROPERTY).readLines()
-            .map(String::trim)
-            .filter { it.isNotEmpty() }
-        val seeded = INSTANTIATE_CALL.findAll(repoFile(BUILD_SCRIPT_PROPERTY).readText())
-            .map { it.groupValues[1] }
-            .toList()
-        check(seeded.isNotEmpty()) {
-            "No `instantiate(\"…\")` calls found in ${repoFile(BUILD_SCRIPT_PROPERTY)}; the " +
-                "denominator would be short by featuregen's user-template surface."
-        }
-        (requested + seeded).distinct().sorted()
-    }
-
-    private fun repoFile(property: String): File {
-        val path = System.getProperty(property)
-            ?: error(
-                "System property $property is unset; it is wired up in " +
-                    "compiler/plugin/build.gradle.kts."
-            )
-        return File(path).also { check(it.isFile) { "$property does not point at a file: $path" } }
-    }
-
     private companion object {
-        /** featuregen's committed `krapped/requested.txt`, supplied by the build. */
-        const val REQUESTED_PROPERTY = "kplusplus.test.featuregenRequested"
-
-        /** featuregen's `build.gradle.kts`, supplied by the build. */
-        const val BUILD_SCRIPT_PROPERTY = "kplusplus.test.featuregenBuildScript"
-
-        /** featuregen instantiated 17 distinct specs when this gate was written. */
-        const val MIN_EXPECTED_SPECS = 17
-
         /** A name no mangling of any spec could produce. */
         const val Q = "NotAnythingAManglerWouldProduce"
-
-        val INSTANTIATE_CALL = Regex("""instantiate\("([^"]+)"\)""")
     }
 }

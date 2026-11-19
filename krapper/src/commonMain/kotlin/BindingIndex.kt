@@ -229,6 +229,11 @@ data class BindingRef(
     val templateArgs: List<String>? = null
 )
 
-/** A `@CppTemplate` facade: the shape the plugin refines from. Populated in B2 — see above. */
+/**
+ * A `@CppTemplate` facade: the shape the plugin refines from. **Not populated** —
+ * [BindingIndex.templates] is still `null`. B2 did not need it: the plugin reads a facade's `base`
+ * off the annotation on the facade itself and takes the binding's name from
+ * [BindingIndex.bindings], so nothing fills this until a consumer does.
+ */
 @Serializable
 data class TemplateFacadeRef(val base: String, val prefix: String, val pkg: String, val arity: Int)
