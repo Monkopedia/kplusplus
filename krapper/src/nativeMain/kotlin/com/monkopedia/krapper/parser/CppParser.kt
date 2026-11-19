@@ -31,6 +31,7 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toKString
 import kppbridge.buildASTWithArgs
 import kppbridge.lastParseDiagnostics
+import kppbridge.lastParseIncludes
 import platform.posix.fgets
 import platform.posix.pclose
 import platform.posix.popen
@@ -105,6 +106,10 @@ object CppParser {
      */
     internal fun lastDiagnostics(): List<ParseDiagnostic> =
         decodeParseDiagnostics(lastParseDiagnostics().orEmpty())
+
+    /** The canonical paths of the files the MOST RECENT [parse] opened (#297). */
+    internal fun lastIncludes(): List<String> =
+        lastParseIncludes().orEmpty().lines().filter { it.isNotEmpty() }
 }
 
 // ---- #101: the NONCOPYABLE special-member determinism guard --------------------------------

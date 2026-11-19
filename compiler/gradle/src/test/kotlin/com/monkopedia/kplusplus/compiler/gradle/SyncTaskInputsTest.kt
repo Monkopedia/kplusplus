@@ -133,7 +133,9 @@ class SyncTaskInputsTest {
             "kpp.frontend.demo=cpp\norg.gradle.jvmargs=-Xmx512m\n" +
                 "org.gradle.daemon.idletimeout=60000\n"
         )
-        File(projectDir, "demo.h").writeText("struct Demo {};\n")
+        File(projectDir, "demo.h").writeText("#include \"inner.h\"\nstruct Demo {};\n")
+        File(projectDir, "include/inner.h").apply { parentFile.mkdirs() }
+            .writeText("struct Inner {};\n")
         File(projectDir, "allow.txt").writeText("Demo\n")
         File(projectDir, "build.gradle.kts").writeText(
             """
@@ -147,12 +149,18 @@ class SyncTaskInputsTest {
                 onlyFile("allow.txt")
                 compiler = knob("compiler", "clang++")
             }
-            // The generator is not under test, only the inputs the plugin declared.
+            // The generator is not under test, only the inputs the plugin declared. It records
+            // the include set krapper would report.
             tasks.named("kplusplusSync") {
                 actions.clear()
                 val out = layout.buildDirectory.dir("sync-out")
                 outputs.dir(out)
-                doLast { out.get().asFile.resolve("ran").writeText("") }
+                val includes = layout.buildDirectory.file("kplusplus/includes.txt")
+                val inner = file("include/inner.h")
+                doLast {
+                    out.get().asFile.resolve("ran").writeText("")
+                    includes.get().asFile.apply { parentFile.mkdirs() }.writeText("${'$'}inner\n")
+                }
             }
             """.trimIndent()
         )
@@ -206,6 +214,13 @@ class SyncTaskInputsTest {
             File(projectDir, "libdemo.a").writeText("v2\n")
             emptyArray()
         }
+    }
+
+    // #297: reached only through demo.h's #include, so it is no declared input.
+    @Test
+    fun an_edited_transitive_include_reruns_the_sync() = assertReRunsAfter("include/inner.h") {
+        File(projectDir, "include/inner.h").appendText("struct More {};\n")
+        emptyArray()
     }
 
     @Test

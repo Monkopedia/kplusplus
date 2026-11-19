@@ -296,6 +296,9 @@ kplusplus {
         // --strict-diagnostics had nothing to read). DiagnosticsEngine/PresumedLoc aren't a
         // bindable surface; the collection is C++-side and comes back as one string.
         "kppbridge::lastParseDiagnostics",
+        // #297: the files that parse opened, so the sync can track the headers it reached
+        // only transitively. The SourceManager walk is C++-side; one string comes back.
+        "kppbridge::lastParseIncludes",
         // The CIndex GetTemplateArguments mirror — written-args preference + dependent-
         // specialization decode (see clang_slice.h).
         "kppbridge::numTemplateArgs",

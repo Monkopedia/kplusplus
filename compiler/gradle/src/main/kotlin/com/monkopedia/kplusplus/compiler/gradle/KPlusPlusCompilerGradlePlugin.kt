@@ -7,6 +7,7 @@ import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
 import java.net.URL
+import java.nio.file.Files
 import java.util.concurrent.Callable
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -149,6 +150,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             }
             if (!hasHeadersAtConfig) {
                 it.outputs.dir(krappedDir).withPropertyName("krappedDir")
+            }
+            // What the headers include is known only once a run has parsed them (#297): the
+            // cpp sync records it, and a recorded file changed since that run is out of date.
+            if (!seedMode) {
+                val includes = includesFileFor(target)
+                it.outputs.upToDateWhen { _ -> includesUnchanged(includes) }
             }
             it.doLast {
                 // Every binding-generating module must declare HOW it produces bindings via
@@ -345,6 +352,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         toolchain: Toolchain
     ) {
         val job = cppKrapperJob(target, ext, moduleName, krappedDir, toolchain)
+        // A fresh file stamps the run's start by the filesystem's clock, so a header edited
+        // while krapper reads it is newer than the record (see [includesUnchanged]). A failed
+        // run is never up to date, so what it leaves here is moot.
+        val includes = includesFileFor(target)
+        includes.delete()
+        includes.parentFile.mkdirs()
+        includes.createNewFile()
+        val started = Files.getLastModifiedTime(includes.toPath())
         val requested = job.instantiations
         val headerPaths = job.request.headers
         target.logger.lifecycle(
@@ -393,6 +408,14 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                     "$moduleName against nothing. Re-run with -Pkpp.dumpModel to inspect the " +
                     "parsed model." + report.detail()
             )
+        }
+        val included = report.includedFiles
+        if (included == null) {
+            // An older krapper: the declared headers alone decide, as before #297.
+            includes.delete()
+        } else {
+            includes.writeText(included.joinToString("\n", postfix = "\n"))
+            Files.setLastModifiedTime(includes.toPath(), started)
         }
         val ktCount = bindingKt.size + 1 // + the CppBinding.kt boilerplate
         // Mirror generated.txt so the plugin's already-generated bookkeeping stays coherent.
@@ -998,6 +1021,27 @@ internal data class ResolvedKrapper(
  */
 internal fun requestedManifestFor(project: Project) =
     File(project.projectDir, "krapped/requested.txt")
+
+/**
+ * The files the last cpp sync's parses opened, one path per line (#297). Its mtime is when that
+ * run started.
+ */
+internal fun includesFileFor(project: Project) =
+    File(project.layout.buildDirectory.get().asFile, "kplusplus/includes.txt")
+
+/**
+ * Whether every file [record] lists is unchanged since the run that wrote it: still there, and
+ * last modified before that run started. With no record (no run yet, or a krapper that does
+ * not report its includes), only the declared inputs decide.
+ */
+internal fun includesUnchanged(record: File): Boolean {
+    if (!record.isFile) return true
+    val started = Files.getLastModifiedTime(record.toPath())
+    return record.readLines().filter { it.isNotEmpty() }.all { path ->
+        val file = File(path)
+        file.isFile && Files.getLastModifiedTime(file.toPath()) < started
+    }
+}
 
 /**
  * What kplusplusSync instantiates: the [requestedManifestFor] entries plus the build-seeded
