@@ -29,16 +29,17 @@ val workflowPath = workflow.relativeTo(repoRoot).invariantSeparatorsPath
 check(workflowPath.startsWith(".github/workflows/")) { "$workflow is not a workflow file." }
 @Suppress("UNCHECKED_CAST")
 val alsoRead = extra["workflowPaths.alsoRead"] as List<String>
+apply(from = repoRoot.resolve("gradle/git-ls-files.gradle.kts"))
+@Suppress("UNCHECKED_CAST")
+val gitLsFiles = extra["gitLsFiles"] as (File, List<String>) -> Provider<List<String>>
 
 tasks.register("verifyWorkflowPaths") {
     group = "verification"
     description =
-        "Check every tracked file this run reads is matched by $workflowPath's pull_request.paths."
-    // Only a tracked file can be in a PR's diff, so only tracked files need a trigger: build
-    // outputs and generated sources do not, wherever they land.
-    val tracked =
-        providers.exec { commandLine("git", "-C", repoRoot.path, "ls-files") }
-            .standardOutput.asText.map { it.lines().toSet() }
+        "Check every repo file this run reads is matched by $workflowPath's pull_request.paths."
+    // Only a file git would put in a PR's diff needs a trigger: build outputs and generated
+    // sources do not, wherever they land (see gradle/git-ls-files.gradle.kts).
+    val tracked = gitLsFiles(repoRoot, emptyList()).map { it.toSet() }
     fun rel(files: Iterable<File>) =
         files.map { it.canonicalFile.relativeTo(repoRoot).invariantSeparatorsPath }
     fun reads(t: Task) =
@@ -114,7 +115,8 @@ tasks.register("verifyWorkflowPaths") {
             (fromGraph +
                 rel(
                     (
-                        alsoRead + workflowPath + "gradle/workflow-paths.gradle.kts" + "gradlew" +
+                        alsoRead + workflowPath + "gradle/workflow-paths.gradle.kts" +
+                            "gradle/git-ls-files.gradle.kts" + "gradlew" +
                             "gradle/wrapper/gradle-wrapper.properties" +
                             "gradle/libs.versions.toml" + "gradle.properties"
                     ).flatMap { repoRoot.resolve(it).walk().filter(File::isFile).toList() } +

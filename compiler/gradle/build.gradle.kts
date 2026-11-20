@@ -257,13 +257,17 @@ val verifyConsumedPluginPins =
 // #225: the version catalog is only the source of truth if nothing pins around it. Four
 // klinker pins ignored the catalog's `klinker` entry, and four Kotlin coordinates hardcoded
 // 2.4.0 while the catalog said 2.4.10 — none of which a green build can notice. So every
-// tracked build script in the repo (`git ls-files`, as verifyWorkflowPaths does: only a tracked
-// file can reach a PR; with no `.git` the listing fails, and so does this task, rather than
+// build script git would put in a PR (gradle/git-ls-files.gradle.kts, shared with
+// verifyWorkflowPaths; with no `.git` the listing fails, and so does this task, rather than
 // pass on nothing) is scanned for a literal Kotlin or klinker version, and the
 // only ones allowed are the standalone samples that cannot see the catalog, each held to the
 // catalog entry it stands for. It runs here, in `-p compiler check`, because that is the
 // cheapest job and the one that already owns the repo-wide pin gates; compiler-check.yml fires
 // on any `*.gradle.kts` change for it, which verifyWorkflowPaths enforces.
+apply(from = "../../gradle/git-ls-files.gradle.kts")
+
+@Suppress("UNCHECKED_CAST")
+val gitLsFiles = extra["gitLsFiles"] as (File, List<String>) -> Provider<List<String>>
 val verifyCatalogPins =
     tasks.register("verifyCatalogPins") {
         group = "verification"
@@ -291,15 +295,14 @@ val verifyCatalogPins =
                 "samples/multiproject/build.gradle.kts" to mapOf("kotlin" to "kotlin-api"),
             )
         val scripts =
-            providers
-                .exec { commandLine("git", "-C", repoRoot.path, "ls-files", "*.gradle.kts") }
-                .standardOutput.asText
-                .map { it.lines().map(repoRoot::resolve).filter(File::isFile) }
+            gitLsFiles(repoRoot, listOf("*.gradle.kts"))
+                .map { it.map(repoRoot::resolve).filter(File::isFile) }
         inputs.files(scripts)
         inputs.property("catalog", catalog)
         doLast {
-            // Both spellings of a plugin version: infix `version "x"` and the call `.version("x")`.
-            val version = """(?:\s+version\s+|\s*\.version\(\s*)"""
+            // Every spelling of a plugin version: infix `version "x"`, infix with a
+            // parenthesised argument `version("x")`, and the call `.version("x")`.
+            val version = """(?:\s+version\s*\(?\s*|\s*\.version\(\s*)"""
             val pins =
                 mapOf(
                     "kotlin" to
