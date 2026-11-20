@@ -11,15 +11,15 @@ kotlin = "2.4.10"
 # not a routine bump, so it does NOT follow `kotlin` (#225).
 kotlin-api = "2.4.0"
 coroutines = "1.11.0"
-serialization = "1.10.0"
-ksrpc = "1.1.4"
+serialization = "1.13.0"
+ksrpc = "1.1.5"
 clikt = "5.1.0"
 ktlint-gradle = "14.2.0"
 ktlint-cli = "1.8.0"
 klinker = "0.2.0"
 gradle-plugin-publish = "2.1.1"
 vannik = "0.37.0"
-binary-compatibility-validator = "0.18.0"
+binary-compatibility-validator = "0.18.2"
 shadow = "9.6.1"
 
 [libraries]
