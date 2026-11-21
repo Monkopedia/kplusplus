@@ -164,14 +164,14 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         baseInterfaceByFqType = baseInterfaces.values.associateBy { it.baseFqType }
         for (cls in currentClasses.values) {
             val clsFile =
-                File(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_") + ".kt")
+                sourceFile(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_"))
             val builder = KotlinCodeBuilder()
             builder.generate(cls)
             clsFile.writeText(builder.toString())
         }
         val methodsByPkg = classes.filterIsInstance<ResolvedMethod>().groupBy { it.qualified }
         for ((qualified, methods) in methodsByPkg) {
-            val clsFile = File(outputDir, "${qualified.replace("::", "_")}_Functions.kt")
+            val clsFile = sourceFile(outputDir, "${qualified.replace("::", "_")}_Functions")
             val builder = KotlinCodeBuilder()
             val rawPkg = qualified.split("::").joinToString(".") { it.decapitalize() }
             // Root the free-functions container's own package the same way the type
@@ -257,7 +257,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             }
         }
         for (enum in enums.values) {
-            val clsFile = File(outputDir, enum.fullyQualified.replace(".", "_") + ".kt")
+            val clsFile = sourceFile(outputDir, enum.fullyQualified.replace(".", "_"))
             clsFile.writeText(renderEnum(enum))
         }
     }
@@ -1105,10 +1105,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             } else {
                 (1..facade.arity).joinToString(", ") { "T$it" }
             }
-            val clsFile = File(
+            val clsFile = sourceFile(
                 outputDir,
                 (if (facade.pkg.isEmpty()) "" else facade.pkg.replace(".", "_") + "_") +
-                    facade.base + "_Facade.kt"
+                    facade.base + "_Facade"
             )
             clsFile.writeText(
                 buildString {
@@ -1384,10 +1384,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // virtual call through it vtable-dispatches to the real override at the C boundary.
     private fun generateBaseInterfaces(outputDir: File) {
         for (bi in baseInterfaces.values) {
-            val clsFile = File(
+            val clsFile = sourceFile(
                 outputDir,
                 (if (bi.pkg.isEmpty()) "" else bi.pkg.replace(".", "_") + "_") +
-                    bi.interfaceName + ".kt"
+                    bi.interfaceName
             )
             clsFile.writeText(
                 buildString {
@@ -2836,6 +2836,24 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
  * (the input with no top-level comma yields the whole string); segments are not
  * trimmed. Callers apply their own trimming / trailing-blank handling.
  */
+/**
+ * The generated Kotlin source `<stem>.kt` in [outputDir]. Every derived file name goes through
+ * here (#316): a name built from a clang spelling of an unnamed declaration, `(unnamed enum at
+ * /abs/header.h:3:5)`, carries a path, spaces and parentheses, and once aborted the sync with
+ * an unopenable file. Such a name must be stopped where it is built; this fails loudly, naming
+ * it, if one ever gets this far again.
+ */
+internal fun sourceFile(outputDir: File, stem: String): File {
+    check(stem.isNotEmpty() && stem.none { it in UNSAFE_FILE_NAME_CHARS }) {
+        "krapper bug: refusing to write generated source `$stem.kt`. The name is not a plain " +
+            "identifier; it likely comes from clang's spelling of an unnamed declaration. " +
+            "Please report it with the declaration that produced it."
+    }
+    return File(outputDir, "$stem.kt")
+}
+
+private const val UNSAFE_FILE_NAME_CHARS = "()/\\: \t"
+
 internal fun splitTopLevel(s: String, opens: String = "<", closes: String = ">"): List<String> {
     val result = mutableListOf<String>()
     var depth = 0

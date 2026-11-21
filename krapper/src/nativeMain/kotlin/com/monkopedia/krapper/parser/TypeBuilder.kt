@@ -279,7 +279,7 @@ fun buildWrappedType(type: QualType): WrappedType {
         // getQualifiedNameAsString suppresses `__cxx11`, breaking the std::string
         // template-element match — see clang_slice.h).
         val qualified = qualifiedName(record.asNamedDecl())
-            ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+            ?.takeIf { it.isNotEmpty() && !it.spellsUnnamedDecl() } ?: return UNRESOLVABLE
         // #123: an inaccessible nested record can't be named from the wrapper — drop it.
         if (!record.asDecl().isAccessibleTagType()) return UNRESOLVABLE
         // FULLY-DEFAULTED template specialization (#10): a use written with an EMPTY
@@ -627,8 +627,9 @@ private fun functionPointerTypedef(typedef: TypedefNameDecl): WrappedType? {
 // Qualified the same inline-namespace-preserving way as the record leaf.
 context(scope: MemScope)
 private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
+    if (!enumDecl.hasNameForLinkage()) return anonymousEnumType(enumDecl)
     val qualified = qualifiedName(enumDecl.asNamedDecl())
-        ?.takeIf { it.isNotEmpty() } ?: return UNRESOLVABLE
+        ?.takeIf { it.isNotEmpty() && !it.spellsUnnamedDecl() } ?: return UNRESOLVABLE
     // Constants: the decl's EnumConstantDecl children as (spelling, value) pairs, a
     // missing name dropping just that constant (TypeFactories' mapNotNull).
     val constants = enumDecl.asDeclContext().decls()
@@ -653,6 +654,37 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
         buildWrappedType(enumDecl.getIntegerType()),
         constants
     )
+}
+
+// #316: clang prints a declaration with no name, or one nested in such a scope, as
+// `(unnamed struct at /abs/header.h:L:C)` (also `(anonymous ...)`, `(lambda at ...)`). No C++
+// can name that type, and as a type name it leaks the checkout path into generated sources and
+// the binding index (D1), so a type spelled this way is UNRESOLVABLE.
+private fun String.spellsUnnamedDecl(): Boolean =
+    "(unnamed " in this || "(anonymous " in this || "(lambda at " in this
+
+// #316: an enum with no name and no typedef name (`struct S { enum { A, B } e; };`). Clang
+// spells it `(unnamed enum at /abs/header.h:L:C)`, which must never become a type name: it
+// reached a generated file name and aborted the sync. C++ can only name the type through a
+// declarator of it, so the wrapper casts through `decltype(p::S::e)`; with no constants the
+// Kotlin side is the underlying integer (no enum class, so no synthesized name), and the
+// enumerators stay what they are in C++, constants of the enclosing scope. With no declarator
+// whose type is the enum itself (only `enum { A } *p;`), or only one inside another unnamed
+// scope, the type is unspellable: UNRESOLVABLE, so the use is dropped and ledgered.
+context(scope: MemScope)
+private fun anonymousEnumType(enumDecl: EnumDecl): WrappedType {
+    var next = enumDecl.getNextDeclInContext()?.let { Decl(it.ptr) }
+    while (next != null) {
+        val declarator = next.asValueDecl()
+        val tag = declarator?.getType()?.getCanonicalType()?.typePtr()?.getAsTagDecl()
+        if (tag != null && tag.ptr.rawValue == enumDecl.ptr.rawValue) {
+            val name = qualifiedName(declarator.asNamedDecl())
+                ?.takeIf { it.isNotEmpty() && !it.spellsUnnamedDecl() } ?: return UNRESOLVABLE
+            return WrappedEnumType("decltype($name)", buildWrappedType(enumDecl.getIntegerType()))
+        }
+        next = next.getNextDeclInContext()?.let { Decl(it.ptr) }
+    }
+    return UNRESOLVABLE
 }
 
 /**
