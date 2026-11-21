@@ -663,28 +663,24 @@ private fun buildEnumType(enumDecl: EnumDecl): WrappedType {
 private fun String.spellsUnnamedDecl(): Boolean =
     "(unnamed " in this || "(anonymous " in this || "(lambda at " in this
 
-// #316: an enum with no name and no typedef name (`struct S { enum { A, B } e; };`). Clang
-// spells it `(unnamed enum at /abs/header.h:L:C)`, which must never become a type name: it
-// reached a generated file name and aborted the sync. C++ can only name the type through a
-// declarator of it, so the wrapper casts through `decltype(p::S::e)`; with no constants the
-// Kotlin side is the underlying integer (no enum class, so no synthesized name), and the
-// enumerators stay what they are in C++, constants of the enclosing scope. With no declarator
-// whose type is the enum itself (only `enum { A } *p;`), or only one inside another unnamed
-// scope, the type is unspellable: UNRESOLVABLE, so the use is dropped and ledgered.
+// #316: an enum with no name and no typedef name (`struct S { enum { A, B } e; };`). C++ names
+// its type only through a declarator, so the wrapper casts through `decltype(p::S::e)`; with no
+// constants the Kotlin side is the underlying integer (no enum class, so no name to invent), and
+// the enumerators stay what they are in C++, constants of the enclosing scope. With no
+// spellable declarator of the enum itself (only `enum { A } *q;`, or one inside an unnamed
+// struct), the use is UNRESOLVABLE: dropped and ledgered.
+private fun Decl.nextInContext(): Decl? = getNextDeclInContext()?.let { Decl(it.ptr) }
+
 context(scope: MemScope)
 private fun anonymousEnumType(enumDecl: EnumDecl): WrappedType {
-    var next = enumDecl.getNextDeclInContext()?.let { Decl(it.ptr) }
-    while (next != null) {
-        val declarator = next.asValueDecl()
-        val tag = declarator?.getType()?.getCanonicalType()?.typePtr()?.getAsTagDecl()
-        if (tag != null && tag.ptr.rawValue == enumDecl.ptr.rawValue) {
-            val name = qualifiedName(declarator.asNamedDecl())
-                ?.takeIf { it.isNotEmpty() && !it.spellsUnnamedDecl() } ?: return UNRESOLVABLE
-            return WrappedEnumType("decltype($name)", buildWrappedType(enumDecl.getIntegerType()))
-        }
-        next = next.getNextDeclInContext()?.let { Decl(it.ptr) }
-    }
-    return UNRESOLVABLE
+    val declarator = generateSequence(enumDecl.asDecl().nextInContext()) { it.nextInContext() }
+        .mapNotNull { it.asValueDecl() }
+        .firstOrNull {
+            it.getType().getCanonicalType().typePtr()?.getAsTagDecl()?.ptr == enumDecl.ptr
+        } ?: return UNRESOLVABLE
+    val name = qualifiedName(declarator.asNamedDecl())
+        ?.takeIf { it.isNotEmpty() && !it.spellsUnnamedDecl() } ?: return UNRESOLVABLE
+    return WrappedEnumType("decltype($name)", buildWrappedType(enumDecl.getIntegerType()))
 }
 
 /**

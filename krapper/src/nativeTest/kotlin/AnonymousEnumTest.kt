@@ -85,7 +85,10 @@ class AnonymousEnumTest {
             assertFalse(name.any { it in "() /" }, "unsafe generated file name `$name`")
         }
         for ((name, text) in out.kotlin + ("P.cc" to out.wrapper) + ("index" to out.index)) {
-            assertFalse("unnamed" in text || out.dir in text, "$name leaks a clang spelling:\n$text")
+            assertFalse(
+                "unnamed" in text || out.dir in text,
+                "$name leaks a clang spelling:\n$text"
+            )
         }
     }
 

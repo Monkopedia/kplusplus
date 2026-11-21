@@ -2828,15 +2828,6 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
 }
 
 /**
- * Split [s] on top-level commas only, tracking nesting depth across the bracket
- * pairs in [opens]/[closes] (paired by position — `opens[i]` closes with
- * `closes[i]`) so commas inside a nested `Inner<a, b>` / `(a, b)` group are not
- * split on. The delimiting commas are dropped; every other character (incl. the
- * bracket chars) is preserved in its segment. Always returns at least one segment
- * (the input with no top-level comma yields the whole string); segments are not
- * trimmed. Callers apply their own trimming / trailing-blank handling.
- */
-/**
  * The generated Kotlin source `<stem>.kt` in [outputDir]. Every derived file name goes through
  * here (#316): a name built from a clang spelling of an unnamed declaration, `(unnamed enum at
  * /abs/header.h:3:5)`, carries a path, spaces and parentheses, and once aborted the sync with
@@ -2854,6 +2845,15 @@ internal fun sourceFile(outputDir: File, stem: String): File {
 
 private const val UNSAFE_FILE_NAME_CHARS = "()/\\: \t"
 
+/**
+ * Split [s] on top-level commas only, tracking nesting depth across the bracket
+ * pairs in [opens]/[closes] (paired by position — `opens[i]` closes with
+ * `closes[i]`) so commas inside a nested `Inner<a, b>` / `(a, b)` group are not
+ * split on. The delimiting commas are dropped; every other character (incl. the
+ * bracket chars) is preserved in its segment. Always returns at least one segment
+ * (the input with no top-level comma yields the whole string); segments are not
+ * trimmed. Callers apply their own trimming / trailing-blank handling.
+ */
 internal fun splitTopLevel(s: String, opens: String = "<", closes: String = ">"): List<String> {
     val result = mutableListOf<String>()
     var depth = 0

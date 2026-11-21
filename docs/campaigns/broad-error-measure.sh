@@ -12,12 +12,12 @@
 # The single `krapper` binary parses the header in-process (#184), so there is no separate
 # model to produce first: clangwalk builds from its committed seed and has no parse to borrow.
 #
-# KNOWN BLOCKER (#231, 2026-11-19): under DefaultFilter + INCLUDE_MISSING the run now gets
-# through parse, resolve and forcing (2658 classes) and then aborts writing the Kotlin
-# bindings, before any .cc exists: an anonymous enum (clang/Sema/ScopeInfo.h:190) is named
-# `(unnamed enum at /usr/lib/llvm22/include/...)`, and that name, slashes included, becomes a
-# file name under src/ ("Can't open .../src/clang_sema_functionScopeInfo_(unnamed enum at
-# ...).kt"). Until krapper names or skips unnamed enums, this script stops at the check below.
+# STATUS (#316, 2026-11-20): under DefaultFilter + INCLUDE_MISSING the run gets through parse,
+# resolve, forcing and code generation, and writes the full .cc/.h plus ~3760 Kotlin files. The
+# anonymous enum that used to abort it (clang/Sema/ScopeInfo.h:190, named `(unnamed enum at
+# ...)` and used as a file name, #231/#316) now binds through `decltype` of its field. The
+# generator's own final compile then fails on the remaining errors (176 on LLVM 22 at #316),
+# which is the expected exit this script measures past.
 #
 # Usage:  docs/campaigns/broad-error-measure.sh [outdir]
 # Output: prints the total error count + a per-family bucket table.
