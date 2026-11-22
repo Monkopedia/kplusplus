@@ -55,6 +55,7 @@ import com.monkopedia.krapper.generator.builders.defer
 import com.monkopedia.krapper.generator.builders.define
 import com.monkopedia.krapper.generator.builders.dot
 import com.monkopedia.krapper.generator.builders.elvis
+import com.monkopedia.krapper.generator.builders.escapeKotlinEnumEntry
 import com.monkopedia.krapper.generator.builders.escapeKotlinKeyword
 import com.monkopedia.krapper.generator.builders.extensionFunction
 import com.monkopedia.krapper.generator.builders.extensionMethod
@@ -274,8 +275,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // and every reference use `clang.attr.Kind` -> unresolved (issue #73). The canonical
         // name also strips the use-position `?` (an `enum class X?` is illegal).
         val name = enum.plainDeclaredName
-        val entries = enum.enumEntries.joinToString(", ") { entry ->
-            "${entry.name}(${literalForUnderlying(entry.value, underlying)})"
+        val kotlinNames = kotlinEnumEntryNames(enum.enumEntries.map { it.name })
+        val entries = enum.enumEntries.zip(kotlinNames).joinToString(", ") { (entry, kotlinName) ->
+            "$kotlinName(${literalForUnderlying(entry.value, underlying)})"
         }
         return buildString {
             if (enum.pkg.isNotEmpty()) {
@@ -2880,4 +2882,21 @@ internal fun splitTopLevel(s: String, opens: String = "<", closes: String = ">")
     }
     result.add(current.toString())
     return result
+}
+
+// Names a backtick can't rescue as an enum entry: each is a conflicting declaration with a
+// member every Kotlin enum has (`Enum.name`, `Enum.ordinal`, the synthetic `entries`, the
+// `Companion` object) or with the `value` property renderEnum declares (#319). Such an entry
+// gets `_` appended until it collides with no other entry, so `name` beside a real `name_`
+// becomes `name__`. Only the Kotlin spelling changes; the C++ side casts by value and never
+// names an enumerator. Every other entry keeps its C++ spelling, back-ticked if it is a
+// keyword.
+private val ENUM_MEMBER_NAMES = setOf("name", "ordinal", "entries", "Companion", "value")
+
+private fun kotlinEnumEntryNames(cppNames: List<String>): List<String> {
+    val taken = cppNames.toMutableSet()
+    return cppNames.map { cpp ->
+        if (cpp !in ENUM_MEMBER_NAMES) return@map cpp.escapeKotlinEnumEntry()
+        generateSequence("${cpp}_") { "${it}_" }.first { it !in taken }.also { taken += it }
+    }
 }

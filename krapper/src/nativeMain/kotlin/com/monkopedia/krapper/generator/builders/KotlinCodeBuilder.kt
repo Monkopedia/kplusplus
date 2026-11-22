@@ -29,16 +29,35 @@ fun KotlinCodeBuilder(rootScope: Scope<KotlinFactory> = Scope()): KotlinCodeBuil
 
 // Kotlin HARD keywords — illegal as a bare identifier, so a C++ name that collides with one
 // (e.g. a parameter literally named `val`, as on clang::ASTUnit::setOwnsRemappedFileBuffers)
-// must be back-tick-escaped or the generated Kotlin won't parse. Soft/modifier keywords
-// (value, data, in-other-positions) are fine bare and are left alone.
+// must be back-tick-escaped or the generated Kotlin won't parse.
 private val KOTLIN_HARD_KEYWORDS = setOf(
     "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
     "interface", "is", "null", "object", "package", "return", "super", "this", "throw",
     "true", "try", "typealias", "typeof", "val", "var", "when", "while"
 )
 
+// Kotlin soft and modifier keywords, plus the special identifiers `field` and `it`. They parse
+// bare as a method, parameter or field name, so those positions leave them alone. They do not
+// all parse bare as an ENUM ENTRY: there a leading modifier (`data`, `value`, `open`, `out`, ...)
+// or `constructor`/`init` starts a member declaration, and the enum body is a syntax error
+// (#319). Enum entries escape this whole set; a backtick on one that would have parsed bare is
+// harmless. The featuregen KeywordEntry fixture binds every name here that C++ allows as an
+// enumerator, and KeywordEntryCoverageTest checks that fixture against the Kotlin lexer's
+// keyword tables.
+private val KOTLIN_SOFT_KEYWORDS = setOf(
+    "abstract", "actual", "all", "annotation", "by", "catch", "companion", "const",
+    "constructor", "context", "contract", "crossinline", "data", "delegate", "dynamic", "enum",
+    "expect", "external", "field", "file", "final", "finally", "get", "import", "infix", "init",
+    "inline", "inner", "internal", "it", "lateinit", "noinline", "open", "operator", "out",
+    "override", "param", "private", "property", "protected", "public", "receiver", "reified",
+    "sealed", "set", "setparam", "suspend", "tailrec", "value", "vararg", "where"
+)
+
 internal fun String.escapeKotlinKeyword(): String =
     if (this in KOTLIN_HARD_KEYWORDS) "`$this`" else this
+
+internal fun String.escapeKotlinEnumEntry(): String =
+    if (this in KOTLIN_HARD_KEYWORDS || this in KOTLIN_SOFT_KEYWORDS) "`$this`" else this
 
 class KotlinFactory : LangFactory {
     override fun define(

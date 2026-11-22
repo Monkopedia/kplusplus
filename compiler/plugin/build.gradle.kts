@@ -85,6 +85,10 @@ tasks.withType<Test> {
     // #237: a path string is not an input. Declared, a denominator change re-runs both gates
     // instead of leaving them UP-TO-DATE over the old one.
     inputs.files(requested, buildScript).withPropertyName("featuregenDenominator")
+    // #319: KeywordEntryCoverageTest reads featuregen's `KeywordEntry` enum from the header.
+    val header = rootProject.file("../featuregen/src/cppMain/include/strings_feature.h")
+    systemProperty("kplusplus.test.featuregenHeader", header.absolutePath)
+    inputs.files(header).withPropertyName("featuregenHeader")
 }
 
 // #237: the SPELLING gate. BindingIndexSpellingGateTest resolves the denominator above against a

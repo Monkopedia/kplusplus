@@ -18,7 +18,7 @@ class EnKeywordEntriesTest {
             "set", "setparam", "where", "abstract", "actual", "annotation", "companion",
             "context", "crossinline", "data", "expect", "external", "final", "infix", "inner",
             "internal", "lateinit", "noinline", "open", "out", "override", "reified", "sealed",
-            "suspend", "tailrec", "vararg", "it"
+            "suspend", "tailrec", "vararg", "it", "all", "contract"
         )
         val renamed = listOf("value_", "name__", "ordinal_", "entries_", "Companion_", "name_", "A")
         assertEquals(cpp + renamed, KeywordEntry.entries.map { it.name })
@@ -30,12 +30,12 @@ class EnKeywordEntriesTest {
             assertEquals(2, toInt(KeywordEntry.`in`))
             assertEquals(10, toInt(KeywordEntry.`val`))
             assertEquals(35, toInt(KeywordEntry.`data`))
-            assertEquals(53, toInt(KeywordEntry.value_))
-            assertEquals(54, toInt(KeywordEntry.name__))
-            assertEquals(58, toInt(KeywordEntry.name_))
-            assertEquals(KeywordEntry.entries_, fromInt(56))
-            assertEquals(KeywordEntry.Companion_, fromInt(57))
-            assertEquals(KeywordEntry.A, fromInt(59))
+            assertEquals(55, toInt(KeywordEntry.value_))
+            assertEquals(56, toInt(KeywordEntry.name__))
+            assertEquals(60, toInt(KeywordEntry.name_))
+            assertEquals(KeywordEntry.entries_, fromInt(58))
+            assertEquals(KeywordEntry.Companion_, fromInt(59))
+            assertEquals(KeywordEntry.A, fromInt(61))
         }
     }
 }
