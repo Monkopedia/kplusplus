@@ -33,6 +33,8 @@ on:
       # `krapped/requested.txt` + `featuregen/build.gradle.kts`, pinned below.
       - 'featuregen/krapped/requested.txt'
       - 'featuregen/build.gradle.kts'
+      # KeywordEntryCoverageTest (#319) reads featuregen's `KeywordEntry` enum out of this header.
+      - 'featuregen/src/cppMain/include/strings_feature.h'
       - 'gradle/libs.versions.toml'
       - 'gradlew'                        # this job runs the repo-root ./gradlew
       - 'gradle/wrapper/**'

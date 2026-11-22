@@ -133,7 +133,10 @@ data class ResolvedCType(
     override fun cloneWithoutChildren(): ResolvedCType = copy()
 }
 
-/** One entry of a generated Kotlin `enum class`: its Kotlin name and integer value. */
+/**
+ * One C++ enumerator of a generated Kotlin `enum class`: its C++ name and integer value.
+ * KotlinWriter derives the Kotlin spelling from the name (#319).
+ */
 @Serializable
 @SerialName("enum_entry")
 data class ResolvedEnumEntry(val name: String, val value: Long)
