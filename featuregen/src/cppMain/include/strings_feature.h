@@ -107,6 +107,28 @@ struct KeywordMethods {
     bool is() const { return value != 0; }
 };
 
+// EN-keyword-entries (#319): enumerators spelled like Kotlin keywords. One per Kotlin hard,
+// soft and modifier keyword that is a legal C++ identifier, so the parser rejects any of them
+// left bare in enum-entry position. Then the five names a backtick can't rescue, which clash
+// with every Kotlin enum's members (`name`, `ordinal`, `entries`, `Companion`) or the generated
+// `value` property. `name_` is a real enumerator, so the renamed `name` must step past it.
+// Ends with the control `A`. Scoped, so none of these names leak into the global namespace.
+// KeywordEntryCoverageTest (compiler/plugin) checks this list against the Kotlin lexer's
+// keyword tables.
+enum class KeywordEntry : int {
+    as, fun, in, interface, is, null, object, package, super, typealias, val, var, when,
+    by, constructor, delegate, dynamic, field, file, finally, get, import, init, param,
+    property, receiver, set, setparam, where, abstract, actual, annotation, companion,
+    context, crossinline, data, expect, external, final, infix, inner, internal, lateinit,
+    noinline, open, out, override, reified, sealed, suspend, tailrec, vararg, it,
+    value, name, ordinal, entries, Companion, name_, A
+};
+
+struct KeywordEntryFeature {
+    static int toInt(KeywordEntry e) { return static_cast<int>(e); }
+    static KeywordEntry fromInt(int i) { return static_cast<KeywordEntry>(i); }
+};
+
 // Plain user-defined class surface (UC-* rows): default + args ctors, a void
 // mutator, const value-returning methods, a static factory returning by value,
 // and equality / arithmetic operators. All inline so the wrapper carries impls.
