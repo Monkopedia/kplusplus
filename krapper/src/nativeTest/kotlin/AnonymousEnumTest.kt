@@ -18,9 +18,11 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.ErrorPolicy
 import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.InstantiationRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.codegen.checkDeclarationName
 import com.monkopedia.krapper.generator.codegen.sourceFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,7 +48,11 @@ class AnonymousEnumTest {
         val kotlin: Map<String, String>
     )
 
-    private fun generate(body: String, only: List<String>): Output = runBlocking {
+    private fun generate(
+        body: String,
+        only: List<String>,
+        instantiations: List<InstantiationRequest> = emptyList()
+    ): Output = runBlocking {
         val dir = File.createTempDir("krapper_anon_enum")
         try {
             val headerFile = File(dir, "p.h")
@@ -65,6 +71,7 @@ class AnonymousEnumTest {
             )
             val indexed = service.index(IndexRequest(listOf(headerFile.path), emptyList()))
             indexed.filterAndResolve(AllowListFilter(only))
+            instantiations.forEach { indexed.requestInstantiation(it) }
             indexed.writeTo(out.path)
             val src = File(out, "src").listFiles()
             Output(
@@ -166,13 +173,177 @@ class AnonymousEnumTest {
         assertTrue("A(0u), B(1u)" in enum, enum)
     }
 
+    /**
+     * #323: an enum that is a member of a class template specialization (`p::Tm<int>::E`) was
+     * named by a template parse that tore its spelling at the first `<`: `enum class ` with no
+     * name, in `package int>`, file `int>_.kt`, and a field `var g: ` with no type. Each
+     * specialized scope now flattens as the specialization's own binding is named.
+     */
+    private fun assertTemplateMemberEnum(body: String, pkg: String, field: String, cpp: String) {
+        val out = generate(body, listOf("p::U"))
+        assertNoUnnamedSpelling(out)
+        val enumFile = pkg.replace(".", "_") + "_E.kt"
+        val enum = out.kotlin[enumFile] ?: error("no $enumFile in ${out.kotlin.keys}")
+        assertTrue("package $pkg\n" in enum, enum)
+        assertTrue("enum class E(val value: UInt)" in enum, enum)
+        assertTrue("fun fromValue(v: UInt): E =" in enum, enum)
+        val u = out.kotlin.getValue("p_U.kt")
+        assertTrue("import $pkg.E\n" in u, u)
+        assertTrue("var $field: E\n" in u, u)
+        assertTrue("($cpp)value" in out.wrapper, out.wrapper)
+    }
+
+    @Test
+    fun a_typedef_named_anonymous_enum_in_a_class_template_is_named_by_its_specialization() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { typedef enum { A } E; E e; };\n" +
+                "struct U { Tm<int> t; Tm<int>::E g; };",
+            pkg = "p.tm__Int",
+            field = "g",
+            cpp = "p::Tm<int>::E"
+        )
+    }
+
+    @Test
+    fun a_named_enum_in_a_class_template_is_named_by_its_specialization() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; E e; };\n" +
+                "struct U { Tm<int> t; Tm<int>::E g; };",
+            pkg = "p.tm__Int",
+            field = "g",
+            cpp = "p::Tm<int>::E"
+        )
+    }
+
+    /** Every argument names the scope: before #323 this one bound silently as `root.Int`. */
+    @Test
+    fun an_enum_in_a_two_parameter_class_template_keeps_both_arguments() {
+        assertTemplateMemberEnum(
+            "template<class T, class V> struct Tm { typedef enum { A } E; };\n" +
+                "struct U { Tm<int, float>::E h; };",
+            pkg = "p.tm__Int__Float",
+            field = "h",
+            cpp = "p::Tm<int, float>::E"
+        )
+    }
+
+    @Test
+    fun an_enum_in_a_nested_class_template_names_every_specialized_scope() {
+        assertTemplateMemberEnum(
+            "template<class T> struct O {\n" +
+                "template<class V> struct I { typedef enum { A } E; };\n" +
+                "};\nstruct U { O<int>::I<float>::E n; };",
+            pkg = "p.o__Int.i__Float",
+            field = "n",
+            cpp = "p::O<int>::I<float>::E"
+        )
+    }
+
+    /**
+     * `p::Tm<a::X>::E` and `p::Tm<b::X>::E` both flatten to `p.tm__X.E`. Merged, `U.b` read its
+     * `Q = 7` as `E.A` (`fromValue`'s fallback), with no error. The first keeps the name; the
+     * second's use is dropped and ledgered.
+     */
+    @Test
+    fun two_enums_flattened_to_one_kotlin_name_are_not_merged() {
+        val out = generate(
+            "}\nnamespace a { struct X {}; }\nnamespace b { struct X {}; }\nnamespace p {\n" +
+                "template<class T> struct Tm { enum E { A, B }; };\n" +
+                "template<> struct Tm<b::X> { enum E { Q = 7 }; };\n" +
+                "struct U { Tm<a::X>::E a; Tm<b::X>::E b; };",
+            listOf("p::U")
+        )
+        assertEquals(listOf("A(0u), B(1u);"), out.kotlin.values.mapNotNull { enumEntries(it) })
+        val u = out.kotlin.getValue("p_U.kt")
+        assertTrue("var a: E\n" in u, u)
+        assertFalse("var b" in u, u)
+        assertTrue(
+            "Kotlin name `p.tm__X.E` is already bound to `p::Tm<a::X>::E`" in out.index,
+            out.index
+        )
+    }
+
+    /** The class bindings of the two specializations collide the same way (`p.Tm__X`). */
+    @Test
+    fun two_classes_flattened_to_one_kotlin_name_are_not_merged() {
+        val out = generate(
+            "}\nnamespace a { struct X { int i; }; }\nnamespace b { struct X { int i; }; }\n" +
+                "namespace p {\n" +
+                "template<class T> struct Tm { int v; };\n" +
+                "template<> struct Tm<b::X> { long w; };",
+            listOf("a::X", "b::X"),
+            listOf("a::X", "b::X").map { InstantiationRequest("p::Tm", listOf(it)) }
+        )
+        val tm = out.kotlin.getValue("p_Tm__X.kt")
+        assertTrue("@krapper.CppBinding(\"p::Tm<a::X>\")" in tm, tm)
+        assertTrue("var v: Int" in tm && "var w" !in tm, tm)
+        assertTrue("\"spec\": \"p::Tm<a::X>\"" in out.index, out.index)
+        assertFalse("\"spec\": \"p::Tm<b::X>\"" in out.index, out.index)
+        assertTrue(
+            "Kotlin name `p.Tm__X` is already bound to `p::Tm<a::X>`" in out.index,
+            out.index
+        )
+    }
+
+    private fun enumEntries(kotlin: String): String? =
+        kotlin.lines().takeIf { "enum class E(val value: UInt) {" in it }
+            ?.let { it[it.indexOf("enum class E(val value: UInt) {") + 1].trim() }
+
+    @Test
+    fun a_template_argument_reference_or_negative_names_its_scope() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; };\nstruct U { Tm<int&>::E r; };",
+            pkg = "p.tm__Int__R",
+            field = "r",
+            cpp = "p::Tm<int &>::E"
+        )
+        assertTemplateMemberEnum(
+            "template<int N> struct Tn { enum E { A }; };\nstruct U { Tn<-1>::E m; };",
+            pkg = "p.tn___M1",
+            field = "m",
+            cpp = "p::Tn<-1>::E"
+        )
+        // Punctuation with no mapping of its own becomes `_`.
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; };\nstruct U { Tm<void(int)>::E f; };",
+            pkg = "p.tm__Void__int_",
+            field = "f",
+            cpp = "p::Tm<void (int)>::E"
+        )
+    }
+
+    @Test
+    fun a_declaration_name_must_be_a_kotlin_identifier() {
+        assertEquals("E", checkDeclarationName("p.tm__Int", "E"))
+        assertEquals("E", checkDeclarationName("", "E"))
+        val invalid = listOf("int>" to "", "p" to "", "int>" to "E", "p" to "1E", "p..q" to "E")
+        for ((pkg, name) in invalid) {
+            val error = assertFailsWith<IllegalStateException> { checkDeclarationName(pkg, name) }
+            assertTrue("refusing to declare Kotlin `$name` in package `$pkg`" in error.message!!)
+        }
+    }
+
     @Test
     fun a_clang_unnamed_spelling_cannot_become_a_file_name() {
         val dir = File("/tmp/out")
         assertEquals("p_S.kt", sourceFile(dir, "p_S").name)
-        for (stem in listOf("p_s_(unnamed enum at /abs/p.h:2:26)", "a b", "a/b", "")) {
+        val unsafe = listOf(
+            "p_s_(unnamed enum at /abs/p.h:2:26)", "a b", "a/b", "",
+            // #323: a template spelling torn mid-name, and the rest of its punctuation.
+            "int>_", "Tm<int", "a,b", "a*", "a&"
+        )
+        for (stem in unsafe) {
             val error = assertFailsWith<IllegalStateException> { sourceFile(dir, stem) }
             assertTrue("refusing to write generated source `$stem.kt`" in error.message!!)
+        }
+        // #323: a second declaration reaching a written name is refused, not overwritten.
+        val written = File.createTempDir("krapper_written")
+        try {
+            sourceFile(written, "p_E").writeText("first")
+            val error = assertFailsWith<IllegalStateException> { sourceFile(written, "p_E") }
+            assertTrue("refusing to overwrite generated source `p_E.kt`" in error.message!!)
+        } finally {
+            written.rmR()
         }
     }
 }

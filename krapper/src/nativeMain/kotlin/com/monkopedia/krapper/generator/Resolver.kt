@@ -557,12 +557,41 @@ data class ResolveContext(
 
     suspend fun mapAndResolve(type: WrappedType): Pair<WrappedType, ResolvedCppType>? {
         val type = map(type) ?: return null
-        return type to toResolvedCppType(type)
+        return type to (claimKotlinName(type) ?: return null)
     }
 
-    suspend fun resolve(type: WrappedType): ResolvedCppType? {
-        val type = map(type) ?: return null
-        return toResolvedCppType(type)
+    suspend fun resolve(type: WrappedType): ResolvedCppType? = map(type)?.let(::claimKotlinName)
+
+    /**
+     * [type] resolved, unless its Kotlin binding or enum class has a name another C++ type
+     * already holds (#323). Naming flattens a template argument to its last scope, so
+     * `p::Tm<a::X>::E` and `p::Tm<b::X>::E` are both `p.tm__X.E`. Sharing the name, the second
+     * would read as the first: same entries, and a value of its own that `fromValue` maps to
+     * the first entry, with no error. The first C++ type to resolve keeps the name, and every
+     * use of another one is dropped and ledgered here, where the C++ spelling is still known.
+     */
+    private fun claimKotlinName(type: WrappedType): ResolvedCppType? {
+        val resolved = toResolvedCppType(type)
+        val kotlin = resolved.kotlinType
+        if (!kotlin.isWrapper && !kotlin.isEnum) return resolved
+        var cpp = type
+        while (true) {
+            cpp = when {
+                cpp.isPointer -> cpp.pointed
+                cpp.isReference -> cpp.unreferenced
+                cpp.isConst -> cpp.unconst
+                else -> break
+            }
+        }
+        val name = kotlin.identity()
+        val owner = KrapperRun.current.kotlinNameOwners.getOrPut(name) { cpp.toString() }
+        if (owner == cpp.toString()) return resolved
+        dropLedger.record(
+            cpp.toString(),
+            "Kotlin name `$name` is already bound to `$owner`",
+            DropPhase.RESOLVE
+        )
+        return null
     }
 
     suspend fun findBases(cls: WrappedClass): List<WrappedClass> {
@@ -964,6 +993,10 @@ fun toResolvedCppType(type: WrappedType) = ResolvedCppType(
         )
     }
 )
+
+// A Kotlin type's name with its type arguments: `std.Vector<kotlin.Int>`.
+private fun ResolvedKotlinType.identity(): String = fullyQualified +
+    if (templates.isEmpty()) "" else templates.joinToString(", ", "<", ">") { it.identity() }
 
 fun toResolvedCType(type: WrappedType) = ResolvedCType(
     type.toString(),
