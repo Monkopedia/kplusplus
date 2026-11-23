@@ -342,8 +342,11 @@ private fun String.splitScopes(): List<String> {
 }
 
 // One scope or argument of a template binding's name: its last `::` segment, capitalized and
-// mangled to identifier characters.
+// mangled to identifier characters. Punctuation with no mapping of its own (`void(int)`) becomes
+// `_`, so no argument can make the name unwritable; two arguments that then read alike share a
+// name, which the resolver refuses (ResolveContext.claimKotlinName).
 private fun String.templateNamePart(): String = split("::").last().capitalize().mangleToIdentifier()
+    .map { if (it.isLetterOrDigit() || it == '_') it else '_' }.joinToString("")
 
 // Skip-not-crash wrapper shared by the two template-parsing entry points. The
 // hand-rolled index math (parseTypes/findQualifiers/findTemplates/findEnd) can
@@ -378,10 +381,13 @@ private fun opaqueLeaf(spelling: String): WrappedKotlinType = fullyQualifiedType
 )
 
 // Collapse template/pointer punctuation that can't appear in a Kotlin
-// identifier: '< > , space' -> '_', and pointer '*' -> '_P'. Callers handle any
-// '::' themselves (map to '.' or split away) before calling.
+// identifier: '< > , space' -> '_', pointer '*' -> '_P', reference '&' -> '_R' and a
+// negative argument's '-' -> '_M'. Callers handle any '::' themselves (map to '.' or split
+// away) before calling.
 private fun String.mangleToIdentifier(): String = this
     .replace("*", "_P")
+    .replace("&", "_R")
+    .replace("-", "_M")
     .replace("<", "_")
     .replace(">", "_")
     .replace(",", "_")

@@ -18,6 +18,7 @@ package com.monkopedia.krapper.generator
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.ErrorPolicy
 import com.monkopedia.krapper.IndexRequest
+import com.monkopedia.krapper.InstantiationRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
@@ -47,7 +48,11 @@ class AnonymousEnumTest {
         val kotlin: Map<String, String>
     )
 
-    private fun generate(body: String, only: List<String>): Output = runBlocking {
+    private fun generate(
+        body: String,
+        only: List<String>,
+        instantiations: List<InstantiationRequest> = emptyList()
+    ): Output = runBlocking {
         val dir = File.createTempDir("krapper_anon_enum")
         try {
             val headerFile = File(dir, "p.h")
@@ -66,6 +71,7 @@ class AnonymousEnumTest {
             )
             val indexed = service.index(IndexRequest(listOf(headerFile.path), emptyList()))
             indexed.filterAndResolve(AllowListFilter(only))
+            instantiations.forEach { indexed.requestInstantiation(it) }
             indexed.writeTo(out.path)
             val src = File(out, "src").listFiles()
             Output(
@@ -230,6 +236,72 @@ class AnonymousEnumTest {
             pkg = "p.o__Int.i__Float",
             field = "n",
             cpp = "p::O<int>::I<float>::E"
+        )
+    }
+
+    /**
+     * `p::Tm<a::X>::E` and `p::Tm<b::X>::E` both flatten to `p.tm__X.E`. Merged, `U.b` read its
+     * `Q = 7` as `E.A` (`fromValue`'s fallback), with no error. The first keeps the name; the
+     * second's use is dropped and ledgered.
+     */
+    @Test
+    fun two_enums_flattened_to_one_kotlin_name_are_not_merged() {
+        val out = generate(
+            "}\nnamespace a { struct X {}; }\nnamespace b { struct X {}; }\nnamespace p {\n" +
+                "template<class T> struct Tm { enum E { A, B }; };\n" +
+                "template<> struct Tm<b::X> { enum E { Q = 7 }; };\n" +
+                "struct U { Tm<a::X>::E a; Tm<b::X>::E b; };",
+            listOf("p::U")
+        )
+        assertEquals(listOf("A(0u), B(1u);"), out.kotlin.values.mapNotNull { enumEntries(it) })
+        val u = out.kotlin.getValue("p_U.kt")
+        assertTrue("var a: E\n" in u, u)
+        assertFalse("var b" in u, u)
+        assertTrue(
+            "Kotlin name `p.tm__X.E` is already bound to `p::Tm<a::X>::E`" in out.index,
+            out.index
+        )
+    }
+
+    /** The class bindings of the two specializations collide the same way (`p.Tm__X`). */
+    @Test
+    fun two_classes_flattened_to_one_kotlin_name_are_not_merged() {
+        val out = generate(
+            "}\nnamespace a { struct X { int i; }; }\nnamespace b { struct X { int i; }; }\n" +
+                "namespace p {\n" +
+                "template<class T> struct Tm { int v; };\n" +
+                "template<> struct Tm<b::X> { long w; };",
+            listOf("a::X", "b::X"),
+            listOf("a::X", "b::X").map { InstantiationRequest("p::Tm", listOf(it)) }
+        )
+        val tm = out.kotlin.getValue("p_Tm__X.kt")
+        assertTrue("@krapper.CppBinding(\"p::Tm<a::X>\")" in tm, tm)
+        assertTrue("var v: Int" in tm && "var w" !in tm, tm)
+        assertTrue("\"spec\": \"p::Tm<a::X>\"" in out.index, out.index)
+        assertFalse("\"spec\": \"p::Tm<b::X>\"" in out.index, out.index)
+        assertTrue(
+            "Kotlin name `p.Tm__X` is already bound to `p::Tm<a::X>`" in out.index,
+            out.index
+        )
+    }
+
+    private fun enumEntries(kotlin: String): String? =
+        kotlin.lines().takeIf { "enum class E(val value: UInt) {" in it }
+            ?.let { it[it.indexOf("enum class E(val value: UInt) {") + 1].trim() }
+
+    @Test
+    fun a_template_argument_reference_or_negative_names_its_scope() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; };\nstruct U { Tm<int&>::E r; };",
+            pkg = "p.tm__Int__R",
+            field = "r",
+            cpp = "p::Tm<int &>::E"
+        )
+        assertTemplateMemberEnum(
+            "template<int N> struct Tn { enum E { A }; };\nstruct U { Tn<-1>::E m; };",
+            pkg = "p.tn___M1",
+            field = "m",
+            cpp = "p::Tn<-1>::E"
         )
     }
 

@@ -85,6 +85,13 @@ class KrapperRun(
     /** This run's base-resolve profiler (inert unless `diag.baseBindTiming` is on). */
     val profiler = BaseBindProfiler()
 
+    /**
+     * The C++ type that owns each generated Kotlin type name (#323), so a second C++ type
+     * flattened to the same name is dropped instead of silently merged. See
+     * `ResolveContext.claimKotlinName`.
+     */
+    internal val kotlinNameOwners = mutableMapOf<String, String>()
+
     /** Every file this run's parses opened, by canonical path (#297). */
     val includedFiles = mutableSetOf<String>()
 

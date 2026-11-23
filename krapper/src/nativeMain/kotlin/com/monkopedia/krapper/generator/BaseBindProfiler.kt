@@ -166,8 +166,6 @@ class BaseBindProfiler {
             "basebind: includeMaterializations=$includeMaterializations reentries=$includeReentries"
         )
         val topSum = slowest.sumOf { it.second }
-        // NB: no literal '%' — printerrln passes the string straight to fprintf as a FORMAT
-        // string, so a '%' would be interpreted as a conversion. Report the fraction as "pct".
         printerrln(
             "basebind: top-$TOP_N slowest sum=${fmt(topSum)}ms " +
                 "(${fmt(if (totalMs > 0) topSum * 100 / totalMs else 0.0)} pct of total):"

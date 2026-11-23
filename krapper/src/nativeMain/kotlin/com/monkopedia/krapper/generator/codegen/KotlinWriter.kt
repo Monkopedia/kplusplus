@@ -2844,7 +2844,14 @@ internal fun sourceFile(outputDir: File, stem: String): File {
             "identifier; it likely comes from clang's spelling of an unnamed declaration or a " +
             "mangled template name. Please report it with the declaration that produced it."
     }
-    return File(outputDir, "$stem.kt")
+    // generate() empties the directory first, so an existing file means two declarations
+    // reached one Kotlin name (#323), which the resolver should have refused.
+    return File(outputDir, "$stem.kt").also {
+        check(!it.exists()) {
+            "krapper bug: refusing to overwrite generated source `$stem.kt`: two declarations " +
+                "map to one Kotlin name. Please report it with the declarations that produced it."
+        }
+    }
 }
 
 /**
