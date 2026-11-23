@@ -122,16 +122,14 @@ kotlin {
 // Resolve a host shared library by absolute, canonical path (a GNU-ld linker script or symlink
 // is followed to the real .so) — host-portable, nothing hardcoded.
 fun hostLibrary(name: String): File {
-    val proc =
-        ProcessBuilder("clang++", "-print-file-name=$name")
-            .redirectErrorStream(true)
-            .start()
-    val out =
-        proc.inputStream
-            .readBytes()
-            .toString(Charsets.UTF_8)
-            .trim()
-    proc.waitFor()
+    val printFileName =
+        providers.exec {
+            commandLine("clang++", "-print-file-name=$name")
+            isIgnoreExitValue = true
+        }
+    val stdout = printFileName.standardOutput.asText.get()
+    val stderr = printFileName.standardError.asText.get()
+    val out = (stdout + stderr).trim()
     return File(out).canonicalFile.takeIf { it.isFile }
         ?: error("could not resolve $name from `clang++ -print-file-name=$name` (got: '$out')")
 }

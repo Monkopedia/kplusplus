@@ -56,19 +56,20 @@ fun resolveExecutable(name: String): File? {
         .firstOrNull { it.canExecute() }
 }
 
-// First line of `<exec> <arg>` stdout, trimmed (e.g. `llvm-config --version`/`--libdir`).
+// `<exec> <arg>` stdout then stderr, trimmed (e.g. `llvm-config --version`/`--libdir`); the exit
+// status is ignored, as the callers fall back on an empty result. `providers.exec`, not a raw
+// ProcessBuilder: Gradle 9.9 deprecates starting a process at configuration time any other way
+// (#326), and this way the configuration cache tracks the probe's output as an input.
 fun probe(
     exec: File,
     arg: String,
 ): String {
-    val proc = ProcessBuilder(exec.absolutePath, arg).redirectErrorStream(true).start()
-    val out =
-        proc.inputStream
-            .readBytes()
-            .toString(Charsets.UTF_8)
-            .trim()
-    proc.waitFor()
-    return out
+    val probed =
+        providers.exec {
+            commandLine(exec.absolutePath, arg)
+            isIgnoreExitValue = true
+        }
+    return (probed.standardOutput.asText.get() + probed.standardError.asText.get()).trim()
 }
 
 // `-PllvmConfig=<exec>` is ONLY a LOCATION OVERRIDE: it points the probe at a specific

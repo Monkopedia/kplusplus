@@ -74,10 +74,16 @@ val compileGeometryLib = tasks.register<Exec>("compileGeometryLib") {
 // (a GNU-ld linker script/symlink), canonicalized to the real shared object — host-
 // portable, not hardcoded. Same mechanism clangwalk/krapper/featuregen/v8 all use.
 val systemStdcxxSo: File = run {
-    val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
-        .redirectErrorStream(true).start()
-    val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
-    proc.waitFor()
+    // Run clang++ through `providers.exec`, not a raw ProcessBuilder: it is the supported way
+    // to start a process while the build script is configured (Gradle 9.9 deprecates the
+    // others, Gradle 11 rejects them), and the configuration cache records its output.
+    val printFileName = providers.exec {
+        commandLine("clang++", "-print-file-name=libstdc++.so")
+        isIgnoreExitValue = true // a bad answer is reported below, with what clang++ said
+    }
+    val stdout = printFileName.standardOutput.asText.get()
+    val stderr = printFileName.standardError.asText.get()
+    val out = (stdout + stderr).trim()
     File(out).canonicalFile.takeIf { it.isFile }
         ?: error(
             "could not resolve the system libstdc++.so from " +
