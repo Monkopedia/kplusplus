@@ -303,6 +303,13 @@ class AnonymousEnumTest {
             field = "m",
             cpp = "p::Tn<-1>::E"
         )
+        // Punctuation with no mapping of its own becomes `_`.
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; };\nstruct U { Tm<void(int)>::E f; };",
+            pkg = "p.tm__Void__int_",
+            field = "f",
+            cpp = "p::Tm<void (int)>::E"
+        )
     }
 
     @Test
@@ -328,6 +335,15 @@ class AnonymousEnumTest {
         for (stem in unsafe) {
             val error = assertFailsWith<IllegalStateException> { sourceFile(dir, stem) }
             assertTrue("refusing to write generated source `$stem.kt`" in error.message!!)
+        }
+        // #323: a second declaration reaching a written name is refused, not overwritten.
+        val written = File.createTempDir("krapper_written")
+        try {
+            sourceFile(written, "p_E").writeText("first")
+            val error = assertFailsWith<IllegalStateException> { sourceFile(written, "p_E") }
+            assertTrue("refusing to overwrite generated source `p_E.kt`" in error.message!!)
+        } finally {
+            written.rmR()
         }
     }
 }
