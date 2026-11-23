@@ -51,10 +51,15 @@ repositories {
 // hardcoded. This is the SAME mechanism clangwalk/krapper/featuregen already use for
 // their klinked binaries; here it is applied to the example's EXECUTABLE binary.
 val systemStdcxxSo: File = run {
-    val proc = ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
-        .redirectErrorStream(true).start()
-    val out = proc.inputStream.readBytes().toString(Charsets.UTF_8).trim()
-    proc.waitFor()
+    // `providers.exec`, not ProcessBuilder: Gradle 9.9 deprecates starting a process at
+    // configuration time any other way (#326).
+    val printFileName = providers.exec {
+        commandLine("clang++", "-print-file-name=libstdc++.so")
+        isIgnoreExitValue = true
+    }
+    val stdout = printFileName.standardOutput.asText.get()
+    val stderr = printFileName.standardError.asText.get()
+    val out = (stdout + stderr).trim()
     File(out).canonicalFile.takeIf { it.isFile }
         ?: error(
             "#99: could not resolve the system libstdc++.so from " +

@@ -86,16 +86,14 @@ if (providers.gradleProperty("kpp.frontend.featuregen").orNull == "cpp") {
     // link path is untouched.
     val systemStdcxxSo: File =
         run {
-            val proc =
-                ProcessBuilder("clang++", "-print-file-name=libstdc++.so")
-                    .redirectErrorStream(true)
-                    .start()
-            val out =
-                proc.inputStream
-                    .readBytes()
-                    .toString(Charsets.UTF_8)
-                    .trim()
-            proc.waitFor()
+            val printFileName =
+                providers.exec {
+                    commandLine("clang++", "-print-file-name=libstdc++.so")
+                    isIgnoreExitValue = true
+                }
+            val stdout = printFileName.standardOutput.asText.get()
+            val stderr = printFileName.standardError.asText.get()
+            val out = (stdout + stderr).trim()
             File(out).canonicalFile.takeIf { it.isFile }
                 ?: error(
                     "#78: could not resolve the system libstdc++.so from " +
