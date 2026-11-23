@@ -164,6 +164,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         baseInterfaces = computeBaseInterfaces()
         baseInterfaceByFqType = baseInterfaces.values.associateBy { it.baseFqType }
         for (cls in currentClasses.values) {
+            checkDeclarationName(cls.type.kotlinType.pkg, cls.type.kotlinType.plainDeclaredName)
             val clsFile =
                 sourceFile(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_"))
             val builder = KotlinCodeBuilder()
@@ -274,7 +275,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // that alias into this declaration — `enum class AttrKind` while the file/package
         // and every reference use `clang.attr.Kind` -> unresolved (issue #73). The canonical
         // name also strips the use-position `?` (an `enum class X?` is illegal).
-        val name = enum.plainDeclaredName
+        val name = checkDeclarationName(enum.pkg, enum.plainDeclaredName)
         val kotlinNames = kotlinEnumEntryNames(enum.enumEntries.map { it.name })
         val entries = enum.enumEntries.zip(kotlinNames).joinToString(", ") { (entry, kotlinName) ->
             "$kotlinName(${literalForUnderlying(entry.value, underlying)})"
@@ -2833,19 +2834,38 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
  * The generated Kotlin source `<stem>.kt` in [outputDir]. Every derived file name goes through
  * here (#316): a name built from a clang spelling of an unnamed declaration, `(unnamed enum at
  * /abs/header.h:3:5)`, carries a path, spaces and parentheses, and once aborted the sync with
- * an unopenable file. Such a name must be stopped where it is built; this fails loudly, naming
- * it, if one ever gets this far again.
+ * an unopenable file; a template spelling torn mid-name (#323) left `int>_`. Such a name must
+ * be stopped where it is built; this fails loudly, naming it, if one ever gets this far again.
+ * A stem is identifier characters only, as every legitimate one is.
  */
 internal fun sourceFile(outputDir: File, stem: String): File {
-    check(stem.isNotEmpty() && stem.none { it in UNSAFE_FILE_NAME_CHARS }) {
+    check(stem.isNotEmpty() && stem.all { it.isIdentifierChar() }) {
         "krapper bug: refusing to write generated source `$stem.kt`. The name is not a plain " +
-            "identifier; it likely comes from clang's spelling of an unnamed declaration. " +
-            "Please report it with the declaration that produced it."
+            "identifier; it likely comes from clang's spelling of an unnamed declaration or a " +
+            "mangled template name. Please report it with the declaration that produced it."
     }
     return File(outputDir, "$stem.kt")
 }
 
-private const val UNSAFE_FILE_NAME_CHARS = "()/\\: \t"
+/**
+ * [name], once it and every segment of its [pkg] are checked to be Kotlin identifiers (#323). A
+ * generated `class`/`enum class` declaration named from a mangled C++ spelling once came out
+ * as `enum class (val value: UInt)` in `package int>`: uncompilable Kotlin, written silently.
+ */
+internal fun checkDeclarationName(pkg: String, name: String): String {
+    val pkgOk = pkg.isEmpty() || pkg.split('.').all { it.isKotlinIdentifier() }
+    check(name.isKotlinIdentifier() && pkgOk) {
+        "krapper bug: refusing to declare Kotlin `$name` in package `$pkg`: not an identifier. " +
+            "It comes from a C++ spelling the generator failed to name. Please report it with " +
+            "the declaration that produced it."
+    }
+    return name
+}
+
+private fun Char.isIdentifierChar(): Boolean = isLetterOrDigit() || this == '_'
+
+private fun String.isKotlinIdentifier(): Boolean =
+    isNotEmpty() && !first().isDigit() && all { it.isIdentifierChar() }
 
 /**
  * Split [s] on top-level commas only, tracking nesting depth across the bracket

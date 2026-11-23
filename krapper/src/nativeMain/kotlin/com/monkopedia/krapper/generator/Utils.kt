@@ -22,7 +22,8 @@ object Utils {
     val STDERR = platform.posix.fdopen(2, "w")
 
     fun printerrln(message: String) {
-        fprintf(STDERR, message + "\n")
+        // The message is an argument, never the format: one may carry a `%` (`operator%`).
+        fprintf(STDERR, "%s\n", message)
         fflush(STDERR)
     }
 }

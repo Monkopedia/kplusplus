@@ -15,5 +15,18 @@
  */
 import com.github.ajalt.clikt.core.main
 import com.monkopedia.krapper.generator.Krapper
+import com.monkopedia.krapper.generator.Utils
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.system.exitProcess
 
-fun main(args: Array<String>) = Krapper().main(args)
+@OptIn(ExperimentalNativeApi::class)
+fun main(args: Array<String>) {
+    // #323: an exception nothing caught, on any thread (a generator guard's `check`, a service
+    // call's failure), would otherwise abort the process: exit 134 and a core dump, with the
+    // message buried in a Kotlin/Native crash report. Report it as one line on stderr, exit 1.
+    setUnhandledExceptionHook { t ->
+        Utils.printerrln("krapper: fatal: ${t::class.simpleName}: ${t.message}")
+        exitProcess(1)
+    }
+    Krapper().main(args)
+}

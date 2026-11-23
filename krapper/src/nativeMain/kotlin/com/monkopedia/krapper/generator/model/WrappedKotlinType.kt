@@ -22,6 +22,7 @@ import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_OPAQU
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_POINTER_VAR
 import com.monkopedia.krapper.generator.builders.KotlinFactory.Companion.C_VALUES_REF
+import com.monkopedia.krapper.generator.codegen.splitTopLevel
 import com.monkopedia.krapper.generator.dropLedger
 import com.monkopedia.krapper.generator.model.type.WrappedEnumConstant
 import com.monkopedia.krapper.generator.model.type.WrappedEnumType
@@ -157,9 +158,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
         return WrappedKotlinType(
             WrappedKotlinType(type.baseType).pkg + "." +
                 (listOf(type.baseType) + type.templateArgs).joinToString("__") {
-                    it.toString().split("::").last()
-                        .capitalize()
-                        .mangleToIdentifier()
+                    it.toString().templateNamePart()
                 }
         )
     }
@@ -173,7 +172,7 @@ fun WrappedKotlinType(type: WrappedType): WrappedKotlinType {
     if (type is WrappedEnumType) {
         if (type.constants.isEmpty()) return WrappedKotlinType(type.underlying)
         return EnumKotlinType(
-            WrappedKotlinType(type.cppName),
+            parseOrOpaqueLeaf(type.cppName) { enumKotlinType(type.cppName) },
             type.constants,
             WrappedKotlinType(type.underlying)
         )
@@ -300,6 +299,51 @@ fun WrappedKotlinType(nameIn: String): WrappedKotlinType {
     }
     return fullyQualifiedType(name.replace("::", ".").replace("*", "_P"), isWrapper = true)
 }
+
+// #323: an enum's Kotlin name is its C++ spelling, which for a member of a class template
+// specialization carries an argument list MID-name (`p::Tm<int>::E`). The template-spelling
+// parse above reads everything after the first `<` as one trailing argument list, so it named
+// that enum `int>.` (an empty class in package `int>`). Instead each specialized scope flattens
+// the way the specialization's own binding is named (`Tm<int>` -> `Tm__Int`), giving
+// `p.Tm__Int.E` (package `p.tm__Int`): a leaf name, stable and distinct per specialization.
+private fun enumKotlinType(cppName: String): WrappedKotlinType = WrappedKotlinType(
+    cppName.splitScopes().joinToString("::") { scope ->
+        val start = scope.indexOf('<')
+        if (start < 0) {
+            scope
+        } else {
+            val args = splitTopLevel(scope.substring(start + 1, scope.lastIndexOf('>')))
+            (listOf(scope.substring(0, start)) + args).joinToString("__") {
+                it.trim().templateNamePart()
+            }
+        }
+    }
+)
+
+// [this] split on its `::` separators outside any template argument list. (findQualifiers
+// cannot: it mis-pairs the brackets of a second templated scope, `O<int>::I<float>::E`.)
+private fun String.splitScopes(): List<String> {
+    val scopes = mutableListOf<String>()
+    var depth = 0
+    var from = 0
+    for ((i, c) in withIndex()) {
+        when {
+            c == '<' -> depth++
+
+            c == '>' -> depth--
+
+            c == ':' && depth == 0 && getOrNull(i + 1) == ':' -> {
+                scopes += substring(from, i)
+                from = i + 2
+            }
+        }
+    }
+    return scopes + substring(from)
+}
+
+// One scope or argument of a template binding's name: its last `::` segment, capitalized and
+// mangled to identifier characters.
+private fun String.templateNamePart(): String = split("::").last().capitalize().mangleToIdentifier()
 
 // Skip-not-crash wrapper shared by the two template-parsing entry points. The
 // hand-rolled index math (parseTypes/findQualifiers/findTemplates/findEnd) can

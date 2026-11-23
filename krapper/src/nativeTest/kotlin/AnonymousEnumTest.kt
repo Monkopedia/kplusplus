@@ -21,6 +21,7 @@ import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import com.monkopedia.krapper.generator.codegen.File
+import com.monkopedia.krapper.generator.codegen.checkDeclarationName
 import com.monkopedia.krapper.generator.codegen.sourceFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -166,11 +167,93 @@ class AnonymousEnumTest {
         assertTrue("A(0u), B(1u)" in enum, enum)
     }
 
+    /**
+     * #323: an enum that is a member of a class template specialization (`p::Tm<int>::E`) was
+     * named by a template parse that tore its spelling at the first `<`: `enum class ` with no
+     * name, in `package int>`, file `int>_.kt`, and a field `var g: ` with no type. Each
+     * specialized scope now flattens as the specialization's own binding is named.
+     */
+    private fun assertTemplateMemberEnum(body: String, pkg: String, field: String, cpp: String) {
+        val out = generate(body, listOf("p::U"))
+        assertNoUnnamedSpelling(out)
+        val enumFile = pkg.replace(".", "_") + "_E.kt"
+        val enum = out.kotlin[enumFile] ?: error("no $enumFile in ${out.kotlin.keys}")
+        assertTrue("package $pkg\n" in enum, enum)
+        assertTrue("enum class E(val value: UInt)" in enum, enum)
+        assertTrue("fun fromValue(v: UInt): E =" in enum, enum)
+        val u = out.kotlin.getValue("p_U.kt")
+        assertTrue("import $pkg.E\n" in u, u)
+        assertTrue("var $field: E\n" in u, u)
+        assertTrue("($cpp)value" in out.wrapper, out.wrapper)
+    }
+
+    @Test
+    fun a_typedef_named_anonymous_enum_in_a_class_template_is_named_by_its_specialization() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { typedef enum { A } E; E e; };\n" +
+                "struct U { Tm<int> t; Tm<int>::E g; };",
+            pkg = "p.tm__Int",
+            field = "g",
+            cpp = "p::Tm<int>::E"
+        )
+    }
+
+    @Test
+    fun a_named_enum_in_a_class_template_is_named_by_its_specialization() {
+        assertTemplateMemberEnum(
+            "template<class T> struct Tm { enum E { A }; E e; };\n" +
+                "struct U { Tm<int> t; Tm<int>::E g; };",
+            pkg = "p.tm__Int",
+            field = "g",
+            cpp = "p::Tm<int>::E"
+        )
+    }
+
+    /** Every argument names the scope: before #323 this one bound silently as `root.Int`. */
+    @Test
+    fun an_enum_in_a_two_parameter_class_template_keeps_both_arguments() {
+        assertTemplateMemberEnum(
+            "template<class T, class V> struct Tm { typedef enum { A } E; };\n" +
+                "struct U { Tm<int, float>::E h; };",
+            pkg = "p.tm__Int__Float",
+            field = "h",
+            cpp = "p::Tm<int, float>::E"
+        )
+    }
+
+    @Test
+    fun an_enum_in_a_nested_class_template_names_every_specialized_scope() {
+        assertTemplateMemberEnum(
+            "template<class T> struct O {\n" +
+                "template<class V> struct I { typedef enum { A } E; };\n" +
+                "};\nstruct U { O<int>::I<float>::E n; };",
+            pkg = "p.o__Int.i__Float",
+            field = "n",
+            cpp = "p::O<int>::I<float>::E"
+        )
+    }
+
+    @Test
+    fun a_declaration_name_must_be_a_kotlin_identifier() {
+        assertEquals("E", checkDeclarationName("p.tm__Int", "E"))
+        assertEquals("E", checkDeclarationName("", "E"))
+        val invalid = listOf("int>" to "", "p" to "", "int>" to "E", "p" to "1E", "p..q" to "E")
+        for ((pkg, name) in invalid) {
+            val error = assertFailsWith<IllegalStateException> { checkDeclarationName(pkg, name) }
+            assertTrue("refusing to declare Kotlin `$name` in package `$pkg`" in error.message!!)
+        }
+    }
+
     @Test
     fun a_clang_unnamed_spelling_cannot_become_a_file_name() {
         val dir = File("/tmp/out")
         assertEquals("p_S.kt", sourceFile(dir, "p_S").name)
-        for (stem in listOf("p_s_(unnamed enum at /abs/p.h:2:26)", "a b", "a/b", "")) {
+        val unsafe = listOf(
+            "p_s_(unnamed enum at /abs/p.h:2:26)", "a b", "a/b", "",
+            // #323: a template spelling torn mid-name, and the rest of its punctuation.
+            "int>_", "Tm<int", "a,b", "a*", "a&"
+        )
+        for (stem in unsafe) {
             val error = assertFailsWith<IllegalStateException> { sourceFile(dir, stem) }
             assertTrue("refusing to write generated source `$stem.kt`" in error.message!!)
         }
