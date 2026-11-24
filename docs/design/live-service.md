@@ -62,7 +62,7 @@ is a separate included build, hence the relative paths). The plugin drives one p
 subprocess stdio pipe (`KrapperSession.run`, `compiler/gradle/.../KrapperSession.kt:135-169`),
 in the fixed order `setLogger → setConfig → index → filterAndResolve / requestInstantiation →
 applyFixups → writeTo` (`:215-226`). The tool hosts the service in `-s` mode and exits when the
-pipe closes (`App.kt:348-371`, `connection.onClose { exitProcess(0) }`).
+pipe closes (`App.runService` exits on EOF on its stdin; #329).
 
 `KrapperSession`'s own KDoc already names this issue: *"The session is per-run… Keeping it alive
 across builds (and adding query methods to interrogate a live model) is #186"* (`:130-131`).
