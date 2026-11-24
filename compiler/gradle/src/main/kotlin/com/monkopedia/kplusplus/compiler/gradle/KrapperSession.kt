@@ -271,9 +271,10 @@ private class KrapperProcess(
 
     /**
      * Close the channel and settle the process. Closing our end of the pipes is how the tool's
-     * service mode is told to exit (`App.runService`'s `connection.onClose { exitProcess(0) }`)
-     * — `quit` would exit it mid-call and leave this side awaiting a response that can never
-     * arrive. Idempotent: the outcome is observed once and reused.
+     * service mode is told to exit: `App.runService` exits as soon as its stdin reaches EOF
+     * (#329). `quit` would exit it mid-call and leave this side awaiting a response that can
+     * never arrive. The [SHUTDOWN_GRACE_SECONDS] kill is only a backstop for a wedged tool.
+     * Idempotent: the outcome is observed once and reused.
      */
     suspend fun shutdown() {
         settle()
