@@ -45,8 +45,9 @@ import com.monkopedia.ksrpc.ksrpcEnvironment
 import com.monkopedia.ksrpc.sockets.asConnection
 import com.monkopedia.ksrpc.sockets.posixFileReadChannel
 import com.monkopedia.ksrpc.sockets.posixFileWriteChannel
+import io.ktor.utils.io.copyTo
+import io.ktor.utils.io.writer
 import kotlin.system.exitProcess
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import platform.posix.STDIN_FILENO
@@ -361,10 +362,16 @@ class Krapper : CliktCommand() {
     }
 
     private fun runService() {
-        val input = posixFileReadChannel(STDIN_FILENO)
+        val stdin = posixFileReadChannel(STDIN_FILENO)
         val output = posixFileWriteChannel(STDOUT_FILENO)
         withoutIcanon {
             runBlocking {
+                // #329: the driver ends a session by closing its end of the pipe, so EOF on
+                // stdin is the exit signal. `connection.onClose` cannot be: ksrpc runs it on a
+                // LOCAL close only, and a peer's close just ends the receive loop, so the
+                // process idled until the plugin killed it, after every session. Relaying
+                // stdin is what lets this side see the EOF itself.
+                val input = writer { stdin.copyTo(channel) }
                 val env = ksrpcEnvironment(
                     Json {
                         serializersModule = resolvedSerializerModule
@@ -374,13 +381,10 @@ class Krapper : CliktCommand() {
                         println("Exception: " + t.message + "\n" + t.stackTraceToString())
                     }
                 }
-                val connection = (input to output).asConnection(env)
+                val connection = (input.channel to output).asConnection(env)
                 connection.registerDefault(KrapperServiceImpl())
-                val deferred = CompletableDeferred<Unit>()
-                connection.onClose {
-                    exitProcess(0)
-                }
-                deferred.await()
+                input.job.join()
+                exitProcess(0)
             }
         }
     }
