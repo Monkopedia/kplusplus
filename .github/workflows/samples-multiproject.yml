@@ -27,6 +27,7 @@ on:
       - 'gradlew'
       - '.github/workflows/samples-multiproject.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/actions/gradle-cache/**'
   pull_request:
     paths:
       - 'samples/multiproject/**'
@@ -34,6 +35,7 @@ on:
       - 'gradlew'
       - '.github/workflows/samples-multiproject.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/actions/gradle-cache/**'
   workflow_dispatch:
 
 jobs:
@@ -55,16 +57,10 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # The first-party actions/cache pattern samples-minimal.yml uses (see there for why not
-      # setup-gradle's caching).
-      - name: Cache the Gradle user home
-        uses: actions/cache@v6
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-samples-multiproject-${{ runner.os }}-${{ hashFiles('samples/multiproject/**/*.gradle.kts', 'samples/multiproject/gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-samples-multiproject-${{ runner.os }}-
+          name: samples-multiproject
 
       # The Kotlin pin is the root's `apply false` declaration, which :bindings inherits (#281).
       - name: Cache the Kotlin/Native distribution

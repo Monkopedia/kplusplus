@@ -116,10 +116,14 @@ subprojects {
 // self-checking the same way compiler-check.yml's is (see gradle/workflow-paths.gradle.kts).
 // Both root-build jobs name `verifyWorkflowPaths` beside their test tasks, so each checks the
 // graph it actually runs. On top of what it discovers, the workflow's own steps run gate.sh
-// and the konan-cache action.
+// and the konan-cache and gradle-cache actions.
 extra["workflowPaths.workflow"] = file(".github/workflows/root-build.yml")
 extra["workflowPaths.alsoRead"] =
-    listOf(".github/test-evidence-gate/gate.sh", ".github/actions/konan-cache")
+    listOf(
+        ".github/test-evidence-gate/gate.sh",
+        ".github/actions/konan-cache",
+        ".github/actions/gradle-cache",
+    )
 apply(from = "gradle/workflow-paths.gradle.kts")
 
 // Publishing is driven from the `compiler` included build (see docs/releasing.md): the

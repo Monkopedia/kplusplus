@@ -62,6 +62,7 @@ on:
       - 'compiler/**/*.gradle.kts'
       - '.github/workflows/root-build.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/actions/gradle-cache/**'
       - '.github/test-evidence-gate/gate.sh'
       # #223: :feature-tests:matrixReport (generator-suite) stamps this file from the tests and
       # proves its own verdicts on these fixtures first.
@@ -91,6 +92,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      # Every dependency, otherwise fetched from Maven Central and the Plugin Portal on every
+      # run, where a 429 or a truncated POM failed configuration (#331).
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
+        with:
+          name: root-unit-tests
 
       # The Kotlin/Native distribution is a ~1 GB download that is identical for every run of
       # a given Kotlin version, and it is the largest fixed cost in a cold root build. This is
@@ -180,6 +188,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
+        with:
+          name: root-generator-suite
 
       - name: Cache the Kotlin/Native distribution
         id: konan

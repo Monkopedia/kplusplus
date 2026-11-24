@@ -1,0 +1,32 @@
+name: Cache Gradle's dependency cache
+description: >-
+  Restores, and on a miss saves, the downloaded dependencies and the Gradle distribution, so a
+  job resolves from the runner instead of Maven Central and the Plugin Portal (#331).
+
+inputs:
+  name:
+    description: >-
+      The caller's own entry. Jobs resolve different graphs, and actions/cache never re-saves
+      an exact hit, so jobs sharing an entry would keep only the first saver's.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Only what is downloaded: `modules-2` (which Gradle documents as relocatable) and the
+    # wrapper's distributions, ~250-450 MB an entry. The rest of ~/.gradle/caches is derived
+    # (transforms ~200 MB, jars-9 under 1 MB) and is no network fetch. Nothing in the workspace.
+    #
+    # One key for every caller: every catalog, build script and wrapper pin in the tree, so no
+    # entry outlives a change to what it resolved. The prefix fallback is safe because no build
+    # here uses a dynamic or changing version: Gradle fetches whatever a pin moves to, and the
+    # stale rest goes unused. Without dependency verification the restored files are trusted
+    # unchecked, which is why release.yml does not use this.
+    - name: Restore the Gradle dependency cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.gradle/caches/modules-2
+          ~/.gradle/wrapper/dists
+        key: gradle-deps-v1-${{ inputs.name }}-${{ runner.os }}-${{ hashFiles('**/libs.versions.toml', '**/*.gradle.kts', '**/gradle/wrapper/gradle-wrapper.properties') }}
+        restore-keys: gradle-deps-v1-${{ inputs.name }}-${{ runner.os }}-

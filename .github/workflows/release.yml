@@ -52,7 +52,10 @@ jobs:
       # it. setup-gradle's `cache-read-only` default (`ref_name != default_branch`) already made
       # it read-only here for exactly that reason. An actions/cache step would be decoration, so
       # there isn't one; a release is not latency-sensitive, and the job pays a ~1 GB Kotlin/Native
-      # download anyway.
+      # download anyway. Nor does it restore the gradle-cache action's entries from main (#331):
+      # with no dependency verification, Gradle trusts a restored modules-2 without checking it,
+      # so what ends up in the signed artifacts would come from an earlier CI run, not from the
+      # repositories. A rate-limited release is retried.
 
       # #222: the release path used to be LESS gated than a pull request. compiler-check.yml
       # (#210) runs `-p compiler check` on every PR — apiCheck on BOTH published ABIs,
