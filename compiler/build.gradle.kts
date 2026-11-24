@@ -142,8 +142,8 @@ tasks.register("publishPluginToPortal") {
 // file `-p compiler check` reads must be matched there — see gradle/workflow-paths.gradle.kts,
 // shared with the root build's root-build.yml check (#231). On top of what it discovers, this
 // run also executes verify.sh (the step before `check`), which reads every file under
-// .github/test-evidence-gate and .github/workflows, and the workflow's v8-configure job reads
-// samples/v8's build configuration (#306).
+// .github/test-evidence-gate and .github/workflows, both its jobs run the gradle-cache action
+// (#331), and the workflow's v8-configure job reads samples/v8's build configuration (#306).
 //
 // #237: root-build.yml also runs this build, for `:kplusplus-compiler-plugin:bindingIndexGate`,
 // and passes `-PworkflowPaths.workflow=root-build.yml` so that invocation's reads are checked
@@ -156,6 +156,7 @@ extra["workflowPaths.alsoRead"] =
         listOf(
             ".github/test-evidence-gate",
             ".github/workflows",
+            ".github/actions/gradle-cache",
             "samples/v8/settings.gradle.kts",
             "samples/v8/build.gradle.kts",
             "samples/v8/gradle.properties",

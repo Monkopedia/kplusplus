@@ -66,6 +66,7 @@ on:
       # workflow is covered by the glob, not by someone remembering to list it (#230).
       - '.github/test-evidence-gate/**'
       - '.github/workflows/*.yml'
+      - '.github/actions/gradle-cache/**'  # both jobs restore through it (#331)
       # This list cannot report its own gaps, so `-p compiler check` does it:
       # verifyWorkflowPaths (gradle/workflow-paths.gradle.kts) fails when a file the check
       # reads is matched by no entry here (#230).
@@ -90,24 +91,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # This job deliberately does not use gradle/actions/setup-gradle: its v6 moved caching
-      # into `gradle-actions-caching`, a proprietary non-MIT component whose Terms of Use a
-      # workflow accepts merely by upgrading. That question was open in #209 when this file
-      # was written, which is why the job ran the wrapper directly and forwent caching
-      # entirely, with a note to add it once #209 settled. #209 settled it by declining the
-      # component repo-wide, so the caching this file was waiting on is here — first-party
-      # actions/cache, the same pattern root-build.yml uses. `main` writes it on push, PRs
-      # restore it via the prefix key. A miss just means the dependencies are re-downloaded.
-      # `compiler/` resolves the ROOT version catalog (compiler/settings.gradle.kts:17), so
-      # that file is part of the key.
-      - name: Cache the Gradle user home
-        uses: actions/cache@v6
+      # First-party actions/cache, not setup-gradle's non-MIT caching, which #209 declined.
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-compiler-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'compiler/**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-compiler-${{ runner.os }}-
+          name: compiler-check
 
       # Executable evidence for .github/test-evidence-gate/gate.sh, the one gate every
       # workflow calls: runs it on JUnit fixtures and judges its exit status, and checks
@@ -174,6 +162,11 @@ jobs:
           sudo ln -sf "$(command -v clang-22)"       /usr/local/bin/clang
           sudo ln -sf "$(command -v llvm-config-22)" /usr/local/bin/llvm-config
           echo "clang++: $(clang++ --version | head -1); llvm-config: $(llvm-config --version)"
+
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
+        with:
+          name: compiler-v8-configure
 
       - name: Configure samples/v8 against the in-tree plugin
         run: ./gradlew -p samples/v8 --dry-run runDebugExecutableKlinker --no-daemon

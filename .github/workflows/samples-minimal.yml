@@ -29,12 +29,14 @@ on:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/actions/gradle-cache/**'
       - '.github/test-evidence-gate/gate.sh'
   pull_request:
     paths:
       - 'samples/minimal/**'
       - '.github/workflows/samples-minimal.yml'
       - '.github/actions/konan-cache/**'
+      - '.github/actions/gradle-cache/**'
       - '.github/test-evidence-gate/gate.sh'
   workflow_dispatch:
 
@@ -66,22 +68,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # Replaces the Gradle User Home caching that setup-gradle used to do here, with the
-      # first-party actions/cache pattern root-build.yml already uses. setup-gradle's v6 caching
-      # is the proprietary component described above; rather than answer the licence question
-      # (`cache-provider: basic` would have), this dissolves it — no gradle.com Terms of Use are
-      # accepted anywhere in this repo. `caches` + `wrapper` is a superset of setup-gradle's own
-      # `gradle-home-cache-includes` default (`caches`, `notifications`). What is genuinely lost
-      # is setup-gradle's cache cleanup/dedup and its job summary; neither is load-bearing.
-      # `main` writes the cache on push, PRs restore it via the prefix key.
-      - name: Cache the Gradle user home
-        uses: actions/cache@v6
+      # setup-gradle's caching is the proprietary component described above (#209), so this is
+      # the first-party actions/cache one every workflow shares (#331).
+      - name: Cache Gradle's dependency cache
+        uses: ./.github/actions/gradle-cache
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-samples-minimal-${{ runner.os }}-${{ hashFiles('samples/minimal/**/*.gradle.kts', 'samples/minimal/gradle.properties', 'samples/minimal/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-samples-minimal-${{ runner.os }}-
+          name: samples-minimal
 
       # samples/minimal pins its own Kotlin version in its plugins block, not in the root
       # catalog, so the composite action is pointed there. A pin below the KGP the kplusplus
