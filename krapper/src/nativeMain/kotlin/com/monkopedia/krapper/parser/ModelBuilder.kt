@@ -41,6 +41,7 @@ import clang.decl.Kind
 import clang.templateArgument.ArgKind
 import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.ClassMetadata
+import com.monkopedia.krapper.generator.model.TemplateSpecialization
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -52,7 +53,6 @@ import com.monkopedia.krapper.generator.model.WrappedMethod
 import com.monkopedia.krapper.generator.model.WrappedNamespace
 import com.monkopedia.krapper.generator.model.WrappedTU
 import com.monkopedia.krapper.generator.model.WrappedTemplate
-import com.monkopedia.krapper.generator.model.TemplateSpecialization
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
@@ -205,9 +205,10 @@ private class ModelBuilder(
         val primary = spec.getSpecializedTemplate()
             ?.let { templates[Decl(it.ptr).cppUsr()] } ?: return
         val partial = partialPattern(spec)?.let { CXXRecordDecl(it.ptr) }
-        val body = when {
-            spec.isExplicitSpecialization() -> CXXRecordDecl(spec.ptr).definitionOrNull()
-            else -> partial
+        val body = if (spec.isExplicitSpecialization()) {
+            CXXRecordDecl(spec.ptr).definitionOrNull()
+        } else {
+            partial
         } ?: return
         val params = partial?.let { partialParameters(it) }?.let { TemplateParameterList(it.ptr) }
         val pattern = patterns.getOrPut(body.asDecl().cppUsr()) {
@@ -235,7 +236,9 @@ private class ModelBuilder(
     ): List<WrappedType> = with(memScope) {
         val args = spec.getTemplateInstantiationArgs() ?: return emptyList()
         (0u until params.size())
-            .filter { params.getParam(it)?.let { p -> NamedDecl(p.ptr).getKind() } == Kind.TemplateTypeParm }
+            .filter { i ->
+                params.getParam(i)?.let { Decl(it.ptr).getKind() } == Kind.TemplateTypeParm
+            }
             .map { i ->
                 args.get(i)?.takeIf { it.getKind() == ArgKind.Type }
                     ?.let { buildWrappedType(it.getAsType()) } ?: UNRESOLVABLE
