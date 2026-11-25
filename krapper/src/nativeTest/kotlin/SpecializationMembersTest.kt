@@ -47,12 +47,22 @@ class SpecializationMembersTest {
         "#pragma once\n" +
             "namespace b { struct X { int i; }; }\n" +
             "namespace p {\n" +
-            "template<class T> struct Tm { int v; };\n" +
-            "template<> struct Tm<b::X> { long w; long twice() const { return w * 2; } };\n" +
+            "template<class T> struct Tm { int v; int get() const { return v; } };\n" +
+            "template<> struct Tm<b::X> {\n" +
+            "  long w; int get() const { return 1; } long twice() const { return w * 2; }\n" +
+            "};\n" +
             "template<class T> struct Tm<T*> { T *q; short s; };\n" +
-            "}\n"
+            "}\n" +
+            // Un-namespaced, so it also gets the generated `interface Bx<T>` + facade.
+            "template<class T> struct Bx { T get() const { return T(); } };\n" +
+            "template<> struct Bx<long> {\n" +
+            "  int get() const { return 1; } long twice() const { return 2; }\n" +
+            "};\n"
 
-    private fun generate(vararg args: String): Output = runBlocking {
+    private fun generate(vararg args: String): Output =
+        generate(args.map { InstantiationRequest("p::Tm", listOf(it)) })
+
+    private fun generate(requests: List<InstantiationRequest>): Output = runBlocking {
         val dir = File.createTempDir("krapper_specialization")
         try {
             val headerFile = File(dir, "p.h").also { it.writeText(header) }
@@ -70,7 +80,7 @@ class SpecializationMembersTest {
             )
             val indexed = service.index(IndexRequest(listOf(headerFile.path), emptyList()))
             indexed.filterAndResolve(AllowListFilter(listOf("b::X")))
-            for (arg in args) indexed.requestInstantiation(InstantiationRequest("p::Tm", listOf(arg)))
+            requests.forEach { indexed.requestInstantiation(it) }
             // Compiles P.cc: a member the specialization lacks fails the run here.
             indexed.writeTo(out.path)
             val src = File(out, "src").listFiles()
@@ -102,7 +112,7 @@ class SpecializationMembersTest {
         val out = generate("int*")
         val tm = out.bindingOf("p::Tm<int*>")
         // `T *q` substituted with the partial's deduced `T = int`, not the written `int*`.
-        assertTrue("var s: Short" in tm && "var q: CPointer<IntVar>?" in tm, tm)
+        assertTrue("var s: Short" in tm && "var q: CValuesRef<IntVar>?" in tm, tm)
         assertFalse("var v" in tm, tm)
         assertTrue("->q" in out.wrapper && "->v" !in out.wrapper, out.wrapper)
     }
@@ -115,5 +125,19 @@ class SpecializationMembersTest {
         val out = generate("b::X", "int")
         assertExplicit(out)
         assertPrimary(out)
+    }
+
+    @Test
+    fun the_template_interface_offers_only_what_every_instantiation_binds() {
+        val out = generate(listOf("int", "long").map { InstantiationRequest("Bx", listOf(it)) })
+        val bxLong = out.bindingOf("Bx<long>")
+        assertTrue(") : Bx<Long> {" in bxLong, bxLong)
+        assertTrue("override fun get(): Int" in bxLong && "fun twice(): Long" in bxLong, bxLong)
+        assertTrue("override fun get(): Int" in out.bindingOf("Bx<int>"))
+        // `get` returns `int` on both, so the interface fixes it to Int (the primary alone
+        // would have made it `T`); `twice` exists only on the specialization.
+        val facade = out.kotlin.getValue("root_Bx_Facade.kt")
+        assertTrue("interface Bx<T> {\n    fun get(): kotlin.Int\n" in facade, facade)
+        assertFalse("twice" in facade, facade)
     }
 }
