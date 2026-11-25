@@ -401,6 +401,26 @@ inline clang::QualType templateArgAsType(const clang::QualType &type, unsigned i
     return clang::QualType();
 }
 
+// #332 BRIDGE: the partial specialization clang instantiated [spec] from (`Tm<T*>` for
+// `Tm<int*>`), or null when it came from the primary template or is an explicit
+// specialization. The choice is clang's partial ordering, made when it instantiated [spec];
+// getSpecializedTemplateOrPartial returns a PointerUnion, which is no bindable surface.
+inline const clang::CXXRecordDecl *
+partialPattern(const clang::ClassTemplateSpecializationDecl *spec) {
+    if (!spec || spec->isExplicitSpecialization()) return nullptr;
+    return spec->getSpecializedTemplateOrPartial()
+        .dyn_cast<clang::ClassTemplatePartialSpecializationDecl *>();
+}
+
+// #332 BRIDGE: a partial specialization's own template parameters (the `T` of `Tm<T*>`); null
+// for any other record. They live on ClassTemplatePartialSpecializationDecl, which is unbound.
+inline const clang::TemplateParameterList *
+partialParameters(const clang::CXXRecordDecl *pattern) {
+    const auto *partial =
+        llvm::dyn_cast_or_null<clang::ClassTemplatePartialSpecializationDecl>(pattern);
+    return partial ? partial->getTemplateParameters() : nullptr;
+}
+
 // Phase D BRIDGE (#46): the "::"-joined qualified name INCLUDING inline namespaces.
 // libclang's fullyQualified walk joins every named semantic parent — `std::string`'s
 // template spells `std::__cxx11::basic_string` — but NamedDecl::getQualifiedNameAsString

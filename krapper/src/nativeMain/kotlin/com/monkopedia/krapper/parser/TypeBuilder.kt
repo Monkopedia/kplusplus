@@ -17,6 +17,7 @@ package com.monkopedia.krapper.parser
 
 import clang.AccessSpecifier
 import clang.CXXRecordDecl
+import clang.ClassTemplateSpecializationDecl
 import clang.Decl
 import clang.EnumDecl
 import clang.NamedDecl
@@ -78,6 +79,20 @@ private fun Type.asTypedefTypeOrNull(): TypedefType? = with(TypedefType.Companio
 // after construction (a pointee's qualifier instead nests inside, via the recursion).
 private fun WrappedType.maybeConst(isConst: Boolean): WrappedType =
     if (isConst) const(this) else this
+
+/**
+ * #332: told of each class-template specialization a CONCRETE type decodes to — clang's decl
+ * for it and the [WrappedTemplateType] that spells it — so the model builder can attach the
+ * members clang specialized it with ([ModelBuilder] sets it for the length of one walk). The
+ * decoded type is the same either way.
+ */
+internal var onSpecialization: ((ClassTemplateSpecializationDecl, WrappedTemplateType) -> Unit)? =
+    null
+
+private fun WrappedTemplateType.reportedFor(type: QualType): WrappedTemplateType = also {
+    type.typePtr()?.asRecord()?.asClassTemplateSpecializationDecl()
+        ?.let { spec -> onSpecialization?.invoke(spec, it) }
+}
 
 // cAliasTypedefElement's alias set (TypeFactories.C_ALIAS_TYPEDEFS): C typedefs whose
 // Kotlin form is the platform-correct `platform.posix.<name>`, preserved by NAME instead
@@ -209,7 +224,8 @@ fun buildWrappedType(type: QualType): WrappedType {
             val arg = templateArgAsType(type, i)
             if (arg.typePtr() == null) UNRESOLVABLE else buildWrappedType(arg)
         }
-        return WrappedTemplateType(WrappedTypeReference(baseName), args).maybeConst(isConst)
+        return WrappedTemplateType(WrappedTypeReference(baseName), args).reportedFor(type)
+            .maybeConst(isConst)
     }
 
     if (typedef != null) {
@@ -312,7 +328,7 @@ fun buildWrappedType(type: QualType): WrappedType {
             // value params. `time_point`/`BumpPtrAllocatorImpl` carry no `void` arg and expand.
             if (args.none { it.isVoid }) {
                 return WrappedTemplateType(WrappedTypeReference(qualified), args)
-                    .maybeConst(isConst)
+                    .reportedFor(canonical).maybeConst(isConst)
             }
         }
         return WrappedTypeReference(qualified).maybeConst(isConst)

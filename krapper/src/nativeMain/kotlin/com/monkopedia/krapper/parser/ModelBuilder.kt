@@ -22,6 +22,7 @@ import clang.CXXDestructorDecl
 import clang.CXXMethodDecl
 import clang.CXXRecordDecl
 import clang.ClassTemplateDecl
+import clang.ClassTemplateSpecializationDecl
 import clang.Decl
 import clang.DeclContext
 import clang.FieldDecl
@@ -37,8 +38,10 @@ import clang.TemplateTypeParmDecl
 import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
+import clang.templateArgument.ArgKind
 import com.monkopedia.krapper.SourceLocation
 import com.monkopedia.krapper.generator.model.ClassMetadata
+import com.monkopedia.krapper.generator.model.TemplateSpecialization
 import com.monkopedia.krapper.generator.model.WrappedArgument
 import com.monkopedia.krapper.generator.model.WrappedBase
 import com.monkopedia.krapper.generator.model.WrappedClass
@@ -53,12 +56,15 @@ import com.monkopedia.krapper.generator.model.WrappedTemplate
 import com.monkopedia.krapper.generator.model.WrappedTemplateParam
 import com.monkopedia.krapper.generator.model.WrappedTypedef
 import com.monkopedia.krapper.generator.model.type.WrappedType
+import com.monkopedia.krapper.generator.model.type.WrappedType.Companion.UNRESOLVABLE
 import com.monkopedia.krapper.generator.resolvedmodel.MethodType
 import kotlinx.cinterop.MemScope
 import kppbridge.baseLocation
 import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
+import kppbridge.partialParameters
+import kppbridge.partialPattern
 import kppbridge.qualifiedName
 import kppbridge.reachesRecoveredDecl
 
@@ -137,9 +143,7 @@ data class InvalidDecl(val symbol: String, val location: SourceLocation?)
  */
 context(scope: MemScope)
 fun buildWrappedTU(tuDecl: TranslationUnitDecl, onInvalid: (InvalidDecl) -> Unit = {}): WrappedTU =
-    WrappedTU().also {
-        ModelBuilder(scope, onInvalid).addContextDecls(tuDecl.asDeclContext(), it)
-    }
+    WrappedTU().also { ModelBuilder(scope, onInvalid).build(tuDecl.asDeclContext(), it) }
 
 // The former per-wrapper `memScope` field is gone from the generated bindings; the ONE
 // ambient MemScope for this parse (from the enclosing `memScoped { }`) is threaded in here
@@ -163,6 +167,83 @@ private class ModelBuilder(
     // redecl's own children).
     private val classes = mutableMapOf<String, WrappedClass>()
     private val templates = mutableMapOf<String, WrappedTemplate>()
+
+    // #332: the specializations the walk's types decoded to, by spelling, waiting for their
+    // patterns to attach to the primary template (once the walk has built every template —
+    // a use can precede the template's definition). [patterns] holds each specialization
+    // body built so far, by its decl's identity: a partial specialization is shared by every
+    // specialization instantiated from it.
+    private val seenSpecializations = mutableSetOf<String>()
+    private val pendingSpecializations = ArrayDeque<Pair<String, ClassTemplateSpecializationDecl>>()
+    private val patterns = mutableMapOf<String, WrappedTemplate>()
+
+    // Walk [context] into [tu], then attach every specialization pattern the walk met. A
+    // pattern's own member types can meet further specializations, so this drains until none
+    // is left.
+    fun build(context: DeclContext, tu: WrappedTU) {
+        onSpecialization = { spec, type ->
+            val key = type.toString()
+            if (seenSpecializations.add(key)) pendingSpecializations.addLast(key to spec)
+        }
+        try {
+            addContextDecls(context, tu)
+            while (pendingSpecializations.isNotEmpty()) {
+                val (key, spec) = pendingSpecializations.removeFirst()
+                attachSpecialization(key, spec)
+            }
+        } finally {
+            onSpecialization = null
+        }
+    }
+
+    // Record on [spec]'s primary template the members [spec] really has, unless they are the
+    // primary pattern's: an explicit specialization's own body, or the partial specialization
+    // clang instantiated it from, with the arguments clang deduced for that partial. Without
+    // this the resolver substitutes into the primary pattern, binding members the
+    // specialization does not have.
+    private fun attachSpecialization(key: String, spec: ClassTemplateSpecializationDecl) {
+        val primary = spec.getSpecializedTemplate()
+            ?.let { templates[Decl(it.ptr).cppUsr()] } ?: return
+        val partial = partialPattern(spec)?.let { CXXRecordDecl(it.ptr) }
+        val body = if (spec.isExplicitSpecialization()) {
+            CXXRecordDecl(spec.ptr).definitionOrNull()
+        } else {
+            partial
+        } ?: return
+        val params = partial?.let { partialParameters(it) }?.let { TemplateParameterList(it.ptr) }
+        val pattern = patterns.getOrPut(body.asDecl().cppUsr()) {
+            WrappedTemplate(primary.name).also { pattern ->
+                // Detached, like a materialized specialization: it is named through the
+                // primary's scope but is never one of its children.
+                pattern.parent = primary.parent
+                pattern.locatedAt(body.asDecl(), isDefinition = true)
+                params?.let { addTypeParams(pattern, it) }
+                if (!skippedAsInvalid(body.asDecl())) {
+                    addBasesAndMembers(body, pattern, pattern.metadata)
+                }
+            }
+        }
+        val args = params?.let { deducedTypeArgs(spec, it) }.orEmpty()
+        primary.specializations[key] = TemplateSpecialization(pattern, args)
+    }
+
+    // The arguments clang deduced for [params] (a partial specialization's) when it
+    // instantiated [spec], one per TYPE parameter — the parameters addTypeParams binds, so
+    // they line up positionally — and UNRESOLVABLE where an argument is not a type.
+    private fun deducedTypeArgs(
+        spec: ClassTemplateSpecializationDecl,
+        params: TemplateParameterList
+    ): List<WrappedType> = with(memScope) {
+        val args = spec.getTemplateInstantiationArgs() ?: return emptyList()
+        (0u until params.size())
+            .filter { i ->
+                params.getParam(i)?.let { Decl(it.ptr).getKind() } == Kind.TemplateTypeParm
+            }
+            .map { i ->
+                args.get(i)?.takeIf { it.getKind() == ArgKind.Type }
+                    ?.let { buildWrappedType(it.getAsType()) } ?: UNRESOLVABLE
+            }
+    }
 
     // Canonical ids of the invalid declarations already reported, so a record met through
     // several redeclarations (forward decl + invalid definition) is ledgered once.
@@ -338,6 +419,16 @@ private class ModelBuilder(
             .getTemplateParameters()
             ?.let { TemplateParameterList(it.ptr) }
             ?: return
+        addTypeParams(template, params)
+        if (templateDecl.isThisDeclarationADefinition()) {
+            addBasesAndMembers(record, template, template.metadata)
+        }
+    }
+
+    // Each TYPE parameter of [params] as a WrappedTemplateParam child of [template], with
+    // its default type's residue (shared by a primary template and a partial specialization's
+    // pattern, #332).
+    private fun addTypeParams(template: WrappedTemplate, params: TemplateParameterList) {
         var typeParamIndex = 0
         for (i in 0u until params.size()) {
             val param = params.getParam(i)
@@ -368,9 +459,6 @@ private class ModelBuilder(
             with(memScope) {
                 for (residue in defaultTypeResidue(default)) canonical.addChild(residue)
             }
-        }
-        if (templateDecl.isThisDeclarationADefinition()) {
-            addBasesAndMembers(record, template, template.metadata)
         }
     }
 

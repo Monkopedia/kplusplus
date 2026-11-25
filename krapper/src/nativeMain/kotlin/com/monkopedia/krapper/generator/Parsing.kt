@@ -584,7 +584,11 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
         return when (type) {
             is WrappedTemplateType -> {
                 val template = resolveTemplate(type.baseType, context)
-                template.typedAs(type, context)
+                // #332: a specialization clang did not build from the primary pattern binds
+                // the members of the pattern it did use.
+                template.specializations[key]
+                    ?.let { (pattern, args) -> pattern.typedAs(type, context, args) }
+                    ?: template.typedAs(type, context)
             }
 
             is WrappedTemplateRef -> {
@@ -630,19 +634,23 @@ suspend fun parseHeader(headerPath: String, std: String): Resolver {
     return prepareParsed(tu)
 }
 
+/**
+ * Materialize [templateSpec] from this template pattern, substituting [args] for its type
+ * parameters in order: the specialization's own arguments for the primary pattern, or those
+ * clang deduced for a partial specialization's pattern (#332).
+ */
 suspend fun WrappedTemplate.typedAs(
     templateSpec: WrappedTemplateType,
-    baseContext: ResolveContext
+    baseContext: ResolveContext,
+    args: List<WrappedType> = templateSpec.templateArgs
 ): Pair<ResolvedClass, WrappedClass>? {
     val fullyQualified = templateSpec.baseType.toString()
     val templates =
         filterRecursive { it is WrappedTemplateParam }.filterIsInstance<WrappedTemplateParam>()
     val mapping = mutableMapOf<String, WrappedType?>()
-    for (i in 0 until min(templates.size, templateSpec.templateArgs.size)) {
-        val mappedType = baseContext.map(templateSpec.templateArgs[i])
-            ?: throw IllegalArgumentException(
-                "Can't resolve ${templateSpec.templateArgs[i]} in $templateSpec"
-            )
+    for (i in 0 until min(templates.size, args.size)) {
+        val mappedType = baseContext.map(args[i])
+            ?: throw IllegalArgumentException("Can't resolve ${args[i]} in $templateSpec")
         mapping[templates[i].name] = mappedType
         mapping[templates[i].usr] = mappedType
         for (extra in templates[i].otherParams) {
@@ -680,7 +688,7 @@ suspend fun WrappedTemplate.typedAs(
         }
     }
     val localContext = baseContext.copy(typeMapping = mapper, mappingCache = mutableMapOf())
-    for (i in min(templates.size, templateSpec.templateArgs.size) until templates.size) {
+    for (i in min(templates.size, args.size) until templates.size) {
         val defaultType = templates[i].defaultType ?: continue
         val mappedType = mapper(defaultType, localContext)
         if (mappedType is RemoveElement) continue
@@ -689,7 +697,7 @@ suspend fun WrappedTemplate.typedAs(
         mapping[templates[i].usr] = type
     }
     val outputClass = WrappedClass(name, false, templateSpec)
-    // The instantiation has no declaration of its own; it is reported at the template's (#255).
+    // The instantiation has no declaration of its own; it is reported at its pattern's (#255).
     outputClass.sourceLocation = sourceLocation
     outputClass.metadata = metadata.copy()
     outputClass.parent = parent

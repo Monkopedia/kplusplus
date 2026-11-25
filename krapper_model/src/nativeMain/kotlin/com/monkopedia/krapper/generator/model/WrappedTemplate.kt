@@ -47,6 +47,15 @@ class WrappedTemplate(val name: String) : WrappedElement() {
         get() = children.filterIsInstance<WrappedMethod>()
     var templateArgCounter = 0
 
+    /**
+     * The specializations of this template whose members are NOT this primary pattern's, by
+     * the spelling of the specialization's type (`p::Tm<b::X>`) (#332). Each maps to the
+     * pattern clang specialized it with — an explicit specialization's own body, or the
+     * partial specialization it was instantiated from — and that pattern's arguments.
+     * Never children: the patterns' parameters must not mix with this template's.
+     */
+    val specializations = mutableMapOf<String, TemplateSpecialization>()
+
     override fun addChild(child: WrappedElement) {
         if (child is WrappedTemplateParam) {
             if (templateArgCounter < templateArgs.size) {
@@ -84,8 +93,16 @@ class WrappedTemplate(val name: String) : WrappedElement() {
         it.addAllChildren(children)
         it.parent = parent
         it.metadata = metadata.copy()
+        it.specializations.putAll(specializations)
     }
 }
+
+/**
+ * The members one specialization of a class template binds (#332): [pattern] is an explicit
+ * specialization's body (no parameters, no [args]) or a partial specialization's (its own
+ * parameters, with the [args] clang deduced for them).
+ */
+data class TemplateSpecialization(val pattern: WrappedTemplate, val args: List<WrappedType>)
 
 class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement() {
     val defaultType: WrappedType?

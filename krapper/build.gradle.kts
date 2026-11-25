@@ -302,6 +302,10 @@ kplusplus {
         "kppbridge::numTemplateArgs",
         "kppbridge::templateArgAsType",
         "kppbridge::templateBaseName",
+        // #332: the partial specialization clang instantiated a specialization from, and its
+        // own parameters (ClassTemplatePartialSpecializationDecl is unbound).
+        "kppbridge::partialPattern",
+        "kppbridge::partialParameters",
     )
     // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation emits
     // invalid Kotlin for four of llvm::APSInt's C++ operators —
