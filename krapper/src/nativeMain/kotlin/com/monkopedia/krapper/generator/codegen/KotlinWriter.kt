@@ -143,6 +143,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // FQ name ("root.ShapeApi"), for remapping a base-typed method position to the
     // interface. Derived from baseInterfaces; built once in generate().
     private var baseInterfaceByFqType = mapOf<String, BaseInterface>()
+
+    // The file stems this generate() has given out; see [claimStem].
+    private var claimedStems = mutableSetOf<String>()
     private var needsCCaller = false
     private val staticRouterPkg = "krapper.static"
     private val staticRouterName = "router"
@@ -161,6 +164,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         currentKotlinFqTypes =
             currentClasses.values.mapTo(mutableSetOf()) { it.type.kotlinType.fullyQualified }
         templateInterfaces = computeTemplateInterfaces()
+        val enums = collectEnums(classes)
+        claimedStems = (currentKotlinFqTypes + enums.map { it.fullyQualified })
+            .mapTo(mutableSetOf()) { it.replace(".", "_") }
         baseInterfaces = computeBaseInterfaces()
         baseInterfaceByFqType = baseInterfaces.values.associateBy { it.baseFqType }
         for (cls in currentClasses.values) {
@@ -173,7 +179,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         }
         val methodsByPkg = classes.filterIsInstance<ResolvedMethod>().groupBy { it.qualified }
         for ((qualified, methods) in methodsByPkg) {
-            val clsFile = sourceFile(outputDir, "${qualified.replace("::", "_")}_Functions")
+            val clsFile =
+                sourceFile(outputDir, claimStem("${qualified.replace("::", "_")}_Functions"))
             val builder = KotlinCodeBuilder()
             val rawPkg = qualified.split("::").joinToString(".") { it.decapitalize() }
             // Root the free-functions container's own package the same way the type
@@ -191,7 +198,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             builder.comment("END KRAPPER GEN for $pkg Functions")
             clsFile.writeText(builder.toString())
         }
-        generateEnums(outputDir, classes)
+        for (enum in enums) {
+            sourceFile(outputDir, enum.fullyQualified.replace(".", "_")).writeText(renderEnum(enum))
+        }
         generateTemplateFacades(outputDir, classes)
         generateBaseInterfaces(outputDir)
         if (needsCCaller) {
@@ -234,12 +243,26 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     }
 
     /**
-     * Emit a Kotlin `enum class` file for every distinct enum surfaced by the
-     * generated bindings. Enums aren't lifted into the model as elements; they
-     * only appear as the [ResolvedKotlinType] of a method/field/arg, so we walk
-     * those, dedupe by fully-qualified name, and synthesize the declaration.
+     * [stem], or the first of `stem_`, `stem__`, ... that no other file of this generate()
+     * has (#333). The file of a declaration C++ named (a class binding or an enum) is claimed
+     * before any derived one: a C++ class `p::Functions`, `p::FooApi` or `Box_Facade` keeps
+     * its name, and the namespace's free-functions file, `Foo`'s base interface or `Box`'s
+     * template facade yields, instead of both reaching one file.
      */
-    private fun generateEnums(outputDir: File, classes: List<ResolvedElement>) {
+    private fun claimStem(stem: String): String =
+        generateSequence(stem) { "${it}_" }.first(claimedStems::add)
+
+    // The file stem of Kotlin declaration [name] in [pkg]: its FQ name, `.` -> `_`.
+    private fun stemOf(pkg: String, name: String): String =
+        if (pkg.isEmpty()) name else pkg.replace(".", "_") + "_" + name
+
+    /**
+     * Every distinct enum surfaced by the generated bindings, each to get an `enum class`
+     * file. Enums aren't lifted into the model as elements; they only appear as the
+     * [ResolvedKotlinType] of a method/field/arg, so we walk those, dedupe by
+     * fully-qualified name, and synthesize the declaration.
+     */
+    private fun collectEnums(classes: List<ResolvedElement>): Collection<ResolvedKotlinType> {
         val enums = LinkedHashMap<String, ResolvedKotlinType>()
         fun consider(type: ResolvedKotlinType?) {
             if (type != null && type.isEnum) {
@@ -258,10 +281,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                 else -> {}
             }
         }
-        for (enum in enums.values) {
-            val clsFile = sourceFile(outputDir, enum.fullyQualified.replace(".", "_"))
-            clsFile.writeText(renderEnum(enum))
-        }
+        return enums.values
     }
 
     // A plain string builder rather than KotlinCodeBuilder: the enum-class body is
@@ -1110,8 +1130,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             }
             val clsFile = sourceFile(
                 outputDir,
-                (if (facade.pkg.isEmpty()) "" else facade.pkg.replace(".", "_") + "_") +
-                    facade.base + "_Facade"
+                claimStem(stemOf(facade.pkg, facade.base + "_Facade"))
             )
             clsFile.writeText(
                 buildString {
@@ -1172,7 +1191,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
      * name + user-arg count and is emitted with `override`).
      *
      * @param baseClass the base's ResolvedClass
-     * @param interfaceName the Kotlin interface name (`<KotlinName>Api`)
+     * @param interfaceName the Kotlin interface name (`<KotlinName>Api`, `_`-suffixed when a
+     *   C++ class already has that name; see claimStem)
      * @param interfaceFqType the interface's fully-qualified Kotlin name (for remapping)
      * @param baseFqType the base binding's own fully-qualified Kotlin name
      * @param pkg the package the base (and so its interface) lives in
@@ -1223,8 +1243,10 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         for (typeString in baseTypeStrings) {
             val baseCls = currentClasses[typeString] ?: continue
             val kotlinName = baseCls.type.kotlinType.plainName
-            val interfaceName = kotlinName + "Api"
             val pkg = baseCls.type.kotlinType.pkg
+            // The stem spells the interface's FQ name, so a free stem is a free name too.
+            val interfaceName =
+                claimStem(stemOf(pkg, kotlinName + "Api")).removePrefix(stemOf(pkg, ""))
             val interfaceFqType = if (pkg.isEmpty()) interfaceName else "$pkg.$interfaceName"
             val methods = baseInterfaceMethods(baseCls)
             result[typeString] = BaseInterface(
@@ -1387,11 +1409,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // virtual call through it vtable-dispatches to the real override at the C boundary.
     private fun generateBaseInterfaces(outputDir: File) {
         for (bi in baseInterfaces.values) {
-            val clsFile = sourceFile(
-                outputDir,
-                (if (bi.pkg.isEmpty()) "" else bi.pkg.replace(".", "_") + "_") +
-                    bi.interfaceName
-            )
+            val clsFile = sourceFile(outputDir, stemOf(bi.pkg, bi.interfaceName))
             clsFile.writeText(
                 buildString {
                     if (bi.pkg.isNotEmpty()) {
