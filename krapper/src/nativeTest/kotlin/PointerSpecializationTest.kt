@@ -52,18 +52,17 @@ class PointerSpecializationTest {
             ?: error("no single binding of $spec in ${kotlin.keys}")
     }
 
-    private fun header(user: String) =
-        "#pragma once\n" +
-            "namespace b { struct X { int i; }; }\n" +
-            "namespace p {\n" +
-            "template<class T> struct Tm { int v; int get() const { return v; } };\n" +
-            "template<> struct Tm<b::X> { long w; long twice() const { return w * 2; } };\n" +
-            "template<class T> struct Tm<T*> { T *q; short s; };\n" +
-            "template<class T> struct Q;\n" +
-            // No `int::nope`: clang cannot instantiate `Tm<int**>`.
-            "template<class T> struct Tm<T**> { typename T::nope n; };\n" +
-            "struct User { $user };\n" +
-            "}\n"
+    private fun header(user: String) = "#pragma once\n" +
+        "namespace b { struct X { int i; }; }\n" +
+        "namespace p {\n" +
+        "template<class T> struct Tm { int v; int get() const { return v; } };\n" +
+        "template<> struct Tm<b::X> { long w; long twice() const { return w * 2; } };\n" +
+        "template<class T> struct Tm<T*> { T *q; short s; };\n" +
+        "template<class T> struct Q;\n" +
+        // No `int::nope`: clang cannot instantiate `Tm<int**>`.
+        "template<class T> struct Tm<T**> { typename T::nope n; };\n" +
+        "struct User { $user };\n" +
+        "}\n"
 
     private fun generate(user: String): Output = runBlocking {
         val dir = File.createTempDir("krapper_pointer_specialization")

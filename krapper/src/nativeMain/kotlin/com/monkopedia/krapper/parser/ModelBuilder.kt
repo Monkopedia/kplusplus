@@ -15,9 +15,9 @@
  */
 package com.monkopedia.krapper.parser
 
+import clang.ASTUnit
 import clang.AccessSpecifier
 import clang.CXXBaseSpecifier
-import clang.ASTUnit
 import clang.CXXConstructorDecl
 import clang.CXXDestructorDecl
 import clang.CXXMethodDecl
@@ -211,8 +211,10 @@ private class ModelBuilder(
     private fun attachSpecialization(key: String, spec: ClassTemplateSpecializationDecl) {
         val primary = spec.getSpecializedTemplate()
             ?.let { templates[Decl(it.ptr).cppUsr()] } ?: return
-        // #341: a specialization only named through a pointer or reference is not yet
-        // instantiated, so it would still report the primary as its pattern.
+        // #341: clang leaves a specialization named only through a pointer or reference
+        // uninstantiated, still naming the primary as its pattern. Instantiating it here,
+        // after the walk, changes no declaration the walk read. One clang cannot instantiate
+        // does not resolve, so its users drop rather than bind the primary's members.
         if (!instantiateSpecialization(unit, spec)) {
             onInvalid(InvalidDecl(key, declLocation(Decl(spec.ptr))?.let(SourceLocation::parse)))
             primary.specializations[key] = TemplateSpecialization(null, emptyList())
