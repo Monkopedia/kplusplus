@@ -69,6 +69,22 @@ class DerivedNameCollisionTest {
     private fun Map<String, String>.file(name: String): String =
         this[name] ?: error("no $name in $keys")
 
+    private val packageLine = Regex("^package (\\S+)$", RegexOption.MULTILINE)
+    private val classifier =
+        Regex("^(?:[a-z]+ )*(?:class|interface|object) (\\w+)", RegexOption.MULTILINE)
+
+    // Every top-level classifier the generated sources declare, as `pkg.Name`.
+    private fun Map<String, String>.declaredClassifiers(): List<String> = values.flatMap { text ->
+        val pkg = packageLine.find(text)?.groupValues?.get(1)?.let { "$it." }.orEmpty()
+        classifier.findAll(text).map { pkg + it.groupValues[1] }.toList()
+    }
+
+    // Two sources declaring one classifier is a Kotlin redeclaration the writer must not emit.
+    private fun Map<String, String>.assertNoRedeclaration() {
+        val declared = declaredClassifiers()
+        assertEquals(declared.distinct().sorted(), declared.sorted(), "redeclared in $keys")
+    }
+
     @Test
     fun a_class_named_functions_keeps_its_file_beside_the_free_functions() {
         val out = generate(
@@ -118,5 +134,45 @@ class DerivedNameCollisionTest {
         val facade = out.file("root_Box_Facade_.kt")
         assertTrue("interface Box<T>" in facade, facade)
         assertTrue("fun <T> Box(): Box<T> =" in facade, facade)
+    }
+
+    @Test
+    fun a_base_interface_yields_to_a_template_facades_name() {
+        val out = generate(
+            // #339: the facade file is `root_QApi_Facade.kt`, but it declares `root.QApi`,
+            // which is also `Q`'s base interface name.
+            "}\ntemplate<class T> struct QApi { T v; };\nstruct Q { virtual ~Q(); };\n" +
+                "struct R : Q {};\nnamespace p {",
+            listOf("Q", "R"),
+            listOf(InstantiationRequest("QApi", listOf("int")))
+        )
+        out.assertNoRedeclaration()
+        val facade = out.file("root_QApi_Facade.kt")
+        assertTrue("interface QApi<T>" in facade, facade)
+        val api = out.file("root_QApi_.kt")
+        assertTrue("interface QApi_ {" in api, api)
+        for (implementor in listOf("root_Q.kt", "root_R.kt")) {
+            val text = out.file(implementor)
+            assertTrue("QApi_" in text, text)
+        }
+    }
+
+    @Test
+    fun a_template_facade_yields_to_a_class_of_its_kotlin_name() {
+        val out = generate(
+            // `box` binds as `root.Box`, the name template `Box`'s facade declares.
+            "}\ntemplate<class T> struct Box { T v; };\nstruct box { int i; };\nnamespace p {",
+            listOf("box"),
+            listOf(InstantiationRequest("Box", listOf("int")))
+        )
+        out.assertNoRedeclaration()
+        val cls = out.file("root_Box.kt")
+        assertTrue("@krapper.CppBinding(\"box\")" in cls, cls)
+        val facade = out.file("root_Box__Facade.kt")
+        assertTrue("interface Box_<T>" in facade, facade)
+        assertTrue("@krapper.CppTemplate(base = \"Box\")" in facade, facade)
+        assertTrue("fun <T> Box_(): Box_<T> =" in facade, facade)
+        val instantiation = out.file("root_Box__Int.kt")
+        assertTrue("Box_<Int>" in instantiation, instantiation)
     }
 }
