@@ -88,8 +88,6 @@ object CppParser {
     ): WrappedTU = memScoped {
         buildWrappedTU(
             buildASTWithArgs(code, filename, args)
-                ?.getASTContext()
-                ?.getTranslationUnitDecl()
                 ?: fail("clang could not build an AST for $filename"),
             onInvalid
         )

@@ -586,9 +586,9 @@ class ParsedResolver(val tu: WrappedTU) : Resolver {
                 val template = resolveTemplate(type.baseType, context)
                 // #332: a specialization clang did not build from the primary pattern binds
                 // the members of the pattern it did use.
-                template.specializations[key]
-                    ?.let { (pattern, args) -> pattern.typedAs(type, context, args) }
-                    ?: template.typedAs(type, context)
+                val specialization = template.specializations[key]
+                    ?: return template.typedAs(type, context)
+                specialization.pattern?.typedAs(type, context, specialization.args)
             }
 
             is WrappedTemplateRef -> {

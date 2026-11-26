@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.parser
 
+import clang.ASTUnit
 import clang.AccessSpecifier
 import clang.CXXBaseSpecifier
 import clang.CXXConstructorDecl
@@ -35,7 +36,6 @@ import clang.RecordDecl
 import clang.TemplateDecl
 import clang.TemplateParameterList
 import clang.TemplateTypeParmDecl
-import clang.TranslationUnitDecl
 import clang.TypedefNameDecl
 import clang.decl.Kind
 import clang.templateArgument.ArgKind
@@ -63,6 +63,7 @@ import kppbridge.baseLocation
 import kppbridge.declLocation
 import kppbridge.defaultArgText
 import kppbridge.defaultArgType
+import kppbridge.instantiateSpecialization
 import kppbridge.partialParameters
 import kppbridge.partialPattern
 import kppbridge.qualifiedName
@@ -142,14 +143,20 @@ data class InvalidDecl(val symbol: String, val location: SourceLocation?)
  * instead, once per declaration (see [InvalidDecl]).
  */
 context(scope: MemScope)
-fun buildWrappedTU(tuDecl: TranslationUnitDecl, onInvalid: (InvalidDecl) -> Unit = {}): WrappedTU =
-    WrappedTU().also { ModelBuilder(scope, onInvalid).build(tuDecl.asDeclContext(), it) }
+fun buildWrappedTU(unit: ASTUnit, onInvalid: (InvalidDecl) -> Unit = {}): WrappedTU {
+    val tuDecl = unit.getASTContext()?.getTranslationUnitDecl()
+        ?: error("clang built no translation unit")
+    return WrappedTU().also {
+        ModelBuilder(scope, unit, onInvalid).build(tuDecl.asDeclContext(), it)
+    }
+}
 
 // The former per-wrapper `memScope` field is gone from the generated bindings; the ONE
 // ambient MemScope for this parse (from the enclosing `memScoped { }`) is threaded in here
 // and used wherever an allocating/`context(scope: MemScope)` binding member is called.
 private class ModelBuilder(
     private val memScope: MemScope,
+    private val unit: ASTUnit,
     private val onInvalid: (InvalidDecl) -> Unit
 ) {
     // Mirrors ModelFactories' USR-keyed elementLookup memo for namespaces: every block of
@@ -204,6 +211,16 @@ private class ModelBuilder(
     private fun attachSpecialization(key: String, spec: ClassTemplateSpecializationDecl) {
         val primary = spec.getSpecializedTemplate()
             ?.let { templates[Decl(it.ptr).cppUsr()] } ?: return
+        // #341: clang leaves a specialization named only through a pointer or reference
+        // uninstantiated, still naming the primary as its pattern. Instantiating it here,
+        // after the walk, changes no declaration the walk read. One clang cannot complete
+        // (invalid, ambiguous, or undefined) does not resolve, so its users drop rather than
+        // bind the primary's members.
+        if (!instantiateSpecialization(unit, spec)) {
+            onInvalid(InvalidDecl(key, declLocation(Decl(spec.ptr))?.let(SourceLocation::parse)))
+            primary.specializations[key] = TemplateSpecialization(null, emptyList())
+            return
+        }
         val partial = partialPattern(spec)?.let { CXXRecordDecl(it.ptr) }
         val body = if (spec.isExplicitSpecialization()) {
             CXXRecordDecl(spec.ptr).definitionOrNull()
