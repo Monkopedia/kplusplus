@@ -69,15 +69,15 @@ class DerivedNameCollisionTest {
     private fun Map<String, String>.file(name: String): String =
         this[name] ?: error("no $name in $keys")
 
-    // Every top-level classifier the generated sources declare, as `pkg.Name`, in file order.
-    private fun Map<String, String>.declaredClassifiers(): List<String> =
-        values.flatMap { text ->
-            val pkg = Regex("^package (\\S+)$", RegexOption.MULTILINE).find(text)?.groupValues?.get(1)
-            Regex("^(?:[a-z]+ )*(?:class|interface|object) (\\w+)", RegexOption.MULTILINE)
-                .findAll(text)
-                .map { if (pkg == null) it.groupValues[1] else "$pkg.${it.groupValues[1]}" }
-                .toList()
-        }
+    private val packageLine = Regex("^package (\\S+)$", RegexOption.MULTILINE)
+    private val classifier =
+        Regex("^(?:[a-z]+ )*(?:class|interface|object) (\\w+)", RegexOption.MULTILINE)
+
+    // Every top-level classifier the generated sources declare, as `pkg.Name`.
+    private fun Map<String, String>.declaredClassifiers(): List<String> = values.flatMap { text ->
+        val pkg = packageLine.find(text)?.groupValues?.get(1)?.let { "$it." }.orEmpty()
+        classifier.findAll(text).map { pkg + it.groupValues[1] }.toList()
+    }
 
     // Two sources declaring one classifier is a Kotlin redeclaration the writer must not emit.
     private fun Map<String, String>.assertNoRedeclaration() {

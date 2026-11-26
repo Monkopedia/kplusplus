@@ -152,7 +152,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private var claimedStems = mutableSetOf<String>()
 
     // The FQ stem of every classifier this generate() has declared; see [declare].
-    private val declaredStems = mutableSetOf<String>()
+    private var declaredStems = mutableSetOf<String>()
     private var needsCCaller = false
     private val staticRouterPkg = "krapper.static"
     private val staticRouterName = "router"
@@ -174,7 +174,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val enums = collectEnums(classes)
         claimedStems = (currentKotlinFqTypes + enums.map { it.fullyQualified })
             .mapTo(mutableSetOf()) { it.replace(".", "_") }
-        declaredStems.clear()
+        declaredStems = mutableSetOf()
         templateFacades = collectTemplateFacades()
         baseInterfaces = computeBaseInterfaces()
         baseInterfaceByFqType = baseInterfaces.values.associateBy { it.baseFqType }
@@ -285,12 +285,15 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     private fun declare(pkg: String, name: String): String {
         checkDeclarationName(pkg, name)
         val stem = stemOf(pkg, name)
-        check(stem in claimedStems && declaredStems.add(stem)) {
-            "krapper bug: refusing to declare `$name` in package `$pkg`: its name is " +
-                "${if (stem in claimedStems) "already declared" else "unclaimed"}. Please " +
-                "report it with the declarations that produced it."
+        val problem = when {
+            stem !in claimedStems -> "unclaimed"
+            !declaredStems.add(stem) -> "already declared"
+            else -> return name
         }
-        return name
+        error(
+            "krapper bug: refusing to declare `$name` in package `$pkg`: its name is $problem. " +
+                "Please report it with the declarations that produced it."
+        )
     }
 
     /**
@@ -959,6 +962,15 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         return if (segments.last().isBlank()) segments.dropLast(1) else segments
     }
 
+    // One facade per user template base, in class order, each claiming its declared name.
+    private fun collectTemplateFacades(): Map<String, TemplateFacade> {
+        val byBase = LinkedHashMap<String, TemplateFacade>()
+        for (cls in currentClasses.values) {
+            templateInstantiationFacade(cls)?.let { byBase.getOrPut(it.base) { it } }
+        }
+        return byBase.mapValues { (_, f) -> f.copy(name = claimName(f.pkg, f.base)) }
+    }
+
     /**
      * One method of a generated `interface Base<T..>`. [renderedParams]/[renderedReturn]
      * are already-rendered Kotlin type strings: a type-param token (`T`/`T1`/`T2`, with a
@@ -1012,15 +1024,6 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
      * omits the whole method — correctness over completeness (a partial interface still
      * lets callers abstract over the methods that are sound).
      */
-    // One facade per user template base, in class order, each claiming its declared name.
-    private fun collectTemplateFacades(): Map<String, TemplateFacade> {
-        val byBase = LinkedHashMap<String, TemplateFacade>()
-        for (cls in currentClasses.values) {
-            templateInstantiationFacade(cls)?.let { byBase.getOrPut(it.base) { it } }
-        }
-        return byBase.mapValues { (_, f) -> f.copy(name = claimName(f.pkg, f.base)) }
-    }
-
     private fun computeTemplateInterfaces(): Map<String, List<TemplateInterfaceMethod>> {
         // base -> instantiations (concrete class + its per-param FQ types).
         val byBase = LinkedHashMap<String, MutableList<Pair<ResolvedClass, List<String>>>>()
