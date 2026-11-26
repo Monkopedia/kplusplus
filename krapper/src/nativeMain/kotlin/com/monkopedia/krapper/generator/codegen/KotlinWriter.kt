@@ -144,8 +144,15 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // interface. Derived from baseInterfaces; built once in generate().
     private var baseInterfaceByFqType = mapOf<String, BaseInterface>()
 
-    // The file stems this generate() has given out; see [claimStem].
+    // C++ template base ("Box") -> its facade, carrying the Kotlin name the facade declares.
+    // Built once in generate(), claiming each name; see claimName.
+    private var templateFacades = mapOf<String, TemplateFacade>()
+
+    // The file stems and declaration names this generate() has given out; see [claimStem].
     private var claimedStems = mutableSetOf<String>()
+
+    // The FQ stem of every classifier this generate() has declared; see [declare].
+    private val declaredStems = mutableSetOf<String>()
     private var needsCCaller = false
     private val staticRouterPkg = "krapper.static"
     private val staticRouterName = "router"
@@ -167,10 +174,12 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val enums = collectEnums(classes)
         claimedStems = (currentKotlinFqTypes + enums.map { it.fullyQualified })
             .mapTo(mutableSetOf()) { it.replace(".", "_") }
+        declaredStems.clear()
+        templateFacades = collectTemplateFacades()
         baseInterfaces = computeBaseInterfaces()
         baseInterfaceByFqType = baseInterfaces.values.associateBy { it.baseFqType }
         for (cls in currentClasses.values) {
-            checkDeclarationName(cls.type.kotlinType.pkg, cls.type.kotlinType.plainDeclaredName)
+            declare(cls.type.kotlinType.pkg, cls.type.kotlinType.plainDeclaredName)
             val clsFile =
                 sourceFile(outputDir, cls.type.kotlinType.fullyQualified.replace(".", "_"))
             val builder = KotlinCodeBuilder()
@@ -201,7 +210,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         for (enum in enums) {
             sourceFile(outputDir, enum.fullyQualified.replace(".", "_")).writeText(renderEnum(enum))
         }
-        generateTemplateFacades(outputDir, classes)
+        generateTemplateFacades(outputDir)
         generateBaseInterfaces(outputDir)
         if (needsCCaller) {
             // kotlinx.cinterop.asStableRef
@@ -243,18 +252,46 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     }
 
     /**
-     * [stem], or the first of `stem_`, `stem__`, ... that no other file of this generate()
-     * has (#333). The file of a declaration C++ named (a class binding or an enum) is claimed
-     * before any derived one: a C++ class `p::Functions`, `p::FooApi` or `Box_Facade` keeps
-     * its name, and the namespace's free-functions file, `Foo`'s base interface or `Box`'s
-     * template facade yields, instead of both reaching one file.
+     * [stem], or the first of `stem_`, `stem__`, ... that nothing else of this generate()
+     * has (#333). A stem is a file name or the FQ name of a declaration (see [stemOf]); both
+     * share the set, as a binding's file stem is its FQ name. Claims go in a fixed order, so
+     * the earlier one keeps its name and the later one yields:
+     *  1. class bindings and enums, the names C++ gave (claimed together, never yielding);
+     *  2. the names template facades declare (`Box`, as written in `Box<Int>()`), in the
+     *     order the classes arrive;
+     *  3. base interfaces (`FooApi`), in base order;
+     *  4. the free-function files (`p_Functions`) and facade files (`Box_Facade`), whose
+     *     stems spell no declared name.
+     * So `p::FooApi` keeps its name over `Foo`'s base interface, a class `box` (Kotlin `Box`)
+     * over template `Box`'s facade, and that facade over a base interface `QApi` of `Q`.
      */
     private fun claimStem(stem: String): String =
         generateSequence(stem) { "${it}_" }.first(claimedStems::add)
 
+    // [name], or the `_`-suffixed name claimStem gives the declaration in its place.
+    private fun claimName(pkg: String, name: String): String =
+        claimStem(stemOf(pkg, name)).removePrefix(stemOf(pkg, ""))
+
     // The file stem of Kotlin declaration [name] in [pkg]: its FQ name, `.` -> `_`.
     private fun stemOf(pkg: String, name: String): String =
         if (pkg.isEmpty()) name else pkg.replace(".", "_") + "_" + name
+
+    /**
+     * [name], once checked to be a classifier [pkg] may declare (#339): every generated
+     * class, enum and interface goes through here, so its FQ name must have been claimed
+     * and declared by nothing else of this generate(). A second declaration is a Kotlin
+     * redeclaration, which no file-name check sees when the two land in different files.
+     */
+    private fun declare(pkg: String, name: String): String {
+        checkDeclarationName(pkg, name)
+        val stem = stemOf(pkg, name)
+        check(stem in claimedStems && declaredStems.add(stem)) {
+            "krapper bug: refusing to declare `$name` in package `$pkg`: its name is " +
+                "${if (stem in claimedStems) "already declared" else "unclaimed"}. Please " +
+                "report it with the declarations that produced it."
+        }
+        return name
+    }
 
     /**
      * Every distinct enum surfaced by the generated bindings, each to get an `enum class`
@@ -295,7 +332,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // that alias into this declaration — `enum class AttrKind` while the file/package
         // and every reference use `clang.attr.Kind` -> unresolved (issue #73). The canonical
         // name also strips the use-position `?` (an `enum class X?` is illegal).
-        val name = checkDeclarationName(enum.pkg, enum.plainDeclaredName)
+        val name = declare(enum.pkg, enum.plainDeclaredName)
         val kotlinNames = kotlinEnumEntryNames(enum.enumEntries.map { it.name })
         val entries = enum.enumEntries.zip(kotlinNames).joinToString(", ") { (entry, kotlinName) ->
             "$kotlinName(${literalForUnderlying(entry.value, underlying)})"
@@ -393,7 +430,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         // interface + facade are emitted once per template base in generate().
         val superTypes = buildList {
             templateInstantiationFacade(cls)?.let { facade ->
-                add("${facade.base}<${facade.kotlinArgs.joinToString(", ")}>")
+                val name = templateFacades.getValue(facade.base).name
+                add("$name<${facade.kotlinArgs.joinToString(", ")}>")
             }
             // Comparable<Self> is needed for sorted()/maxOrNull() etc. — a bare
             // compareTo only gives `<`/`>`. (Composes with a template supertype above.)
@@ -859,7 +897,9 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
         val base: String,
         val pkg: String,
         val arity: Int,
-        val kotlinArgs: List<String>
+        val kotlinArgs: List<String>,
+        // The Kotlin name of the interface and factory: [base], `_`-suffixed if taken (#339).
+        val name: String = base
     )
 
     // C++ primitive arg -> Kotlin type; non-primitives handled by cppArgToKotlinType.
@@ -972,6 +1012,15 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
      * omits the whole method — correctness over completeness (a partial interface still
      * lets callers abstract over the methods that are sound).
      */
+    // One facade per user template base, in class order, each claiming its declared name.
+    private fun collectTemplateFacades(): Map<String, TemplateFacade> {
+        val byBase = LinkedHashMap<String, TemplateFacade>()
+        for (cls in currentClasses.values) {
+            templateInstantiationFacade(cls)?.let { byBase.getOrPut(it.base) { it } }
+        }
+        return byBase.mapValues { (_, f) -> f.copy(name = claimName(f.pkg, f.base)) }
+    }
+
     private fun computeTemplateInterfaces(): Map<String, List<TemplateInterfaceMethod>> {
         // base -> instantiations (concrete class + its per-param FQ types).
         val byBase = LinkedHashMap<String, MutableList<Pair<ResolvedClass, List<String>>>>()
@@ -1113,14 +1162,8 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
     // (T-preserving; see computeTemplateInterfaces) so callers can abstract over `Base<X>`;
     // the concrete bindings `override` those methods. `Base<Int>()` resolves to the factory
     // and the plugin refines the call to the concrete binding.
-    private fun generateTemplateFacades(outputDir: File, classes: List<ResolvedElement>) {
-        val facadesByBase = LinkedHashMap<String, TemplateFacade>()
-        classes.filterIsInstance<ResolvedClass>().forEach { cls ->
-            templateInstantiationFacade(cls)?.let { facade ->
-                facadesByBase.getOrPut(facade.base) { facade }
-            }
-        }
-        for (facade in facadesByBase.values) {
+    private fun generateTemplateFacades(outputDir: File) {
+        for (facade in templateFacades.values) {
             // Single param -> the conventional `T`; multi-param -> `T1, T2, …` (safe
             // and unambiguous for the general case, unlike char-arithmetic `T,U,V`).
             val typeParams = if (facade.arity == 1) {
@@ -1130,7 +1173,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             }
             val clsFile = sourceFile(
                 outputDir,
-                claimStem(stemOf(facade.pkg, facade.base + "_Facade"))
+                claimStem(stemOf(facade.pkg, facade.name + "_Facade"))
             )
             clsFile.writeText(
                 buildString {
@@ -1144,12 +1187,13 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     // The generic surface: the template's methods with their param/return
                     // types T-preserved (FQ types render inline, so no imports needed). The
                     // concrete bindings `override` these. Has no constructor, so
-                    // `${facade.base}<...>()` can only be the same-named factory below.
+                    // `${facade.name}<...>()` can only be the same-named factory below.
+                    val name = declare(facade.pkg, facade.name)
                     val methods = templateInterfaces[facade.base].orEmpty()
                     if (methods.isEmpty()) {
-                        appendLine("interface ${facade.base}<$typeParams>")
+                        appendLine("interface $name<$typeParams>")
                     } else {
-                        appendLine("interface ${facade.base}<$typeParams> {")
+                        appendLine("interface $name<$typeParams> {")
                         for (m in methods) {
                             val params = m.renderedParams.joinToString(", ") { (n, t) ->
                                 "$n: $t"
@@ -1169,8 +1213,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     // still resolves under `memScoped { }`; the plugin lowers the call to the
                     // concrete binding.
                     appendLine(
-                        "context(scope: MemScope) fun <$typeParams> ${facade.base}(): " +
-                            "${facade.base}<$typeParams> ="
+                        "context(scope: MemScope) fun <$typeParams> $name(): $name<$typeParams> ="
                     )
                     appendLine(
                         "    throw NotImplementedError(" +
@@ -1244,9 +1287,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
             val baseCls = currentClasses[typeString] ?: continue
             val kotlinName = baseCls.type.kotlinType.plainName
             val pkg = baseCls.type.kotlinType.pkg
-            // The stem spells the interface's FQ name, so a free stem is a free name too.
-            val interfaceName =
-                claimStem(stemOf(pkg, kotlinName + "Api")).removePrefix(stemOf(pkg, ""))
+            val interfaceName = claimName(pkg, kotlinName + "Api")
             val interfaceFqType = if (pkg.isEmpty()) interfaceName else "$pkg.$interfaceName"
             val methods = baseInterfaceMethods(baseCls)
             result[typeString] = BaseInterface(
@@ -1422,7 +1463,7 @@ class KotlinWriter(private val pkg: String, policy: CodeGenerationPolicy = Throw
                     }
                     appendLine()
                     appendLine("// BEGIN KRAPPER GEN for base interface ${bi.interfaceName}")
-                    appendLine("interface ${bi.interfaceName} {")
+                    appendLine("interface ${declare(bi.pkg, bi.interfaceName)} {")
                     // The backing pointer: every implementor exposes it (as `override val
                     // ptr`), so a base-interface-typed value can reach the C boundary.
                     appendLine("    val ptr: COpaquePointer")
