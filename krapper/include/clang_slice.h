@@ -420,21 +420,24 @@ partialPattern(const clang::ClassTemplateSpecializationDecl *spec) {
 // any other's pattern is already settled, so the AST changes only where the answer depends
 // on it. Diagnostics are suppressed (Sema is asked, never required, to complete the type):
 // a body clang cannot instantiate marks [spec] invalid instead of surfacing as an error in
-// the user's header. False when it did.
+// the user's header. False when [spec] cannot be bound: it is invalid, however it got
+// instantiated (an earlier specialization's instantiation may have done it), or the attempt
+// left it incomplete (ambiguous partials, or an undefined primary no partial matches).
 inline bool instantiateSpecialization(clang::ASTUnit *unit,
                                       clang::ClassTemplateSpecializationDecl *spec) {
-    if (!unit || !unit->hasSema() || !spec ||
-        spec->getSpecializationKind() != clang::TSK_Undeclared)
-        return true;
+    if (!spec) return true;
     llvm::SmallVector<clang::ClassTemplatePartialSpecializationDecl *, 4> partials;
     spec->getSpecializedTemplate()->getPartialSpecializations(partials);
-    if (partials.empty()) return true;
-    clang::DiagnosticsEngine &diags = unit->getDiagnostics();
-    bool suppressed = diags.getSuppressAllDiagnostics();
-    diags.setSuppressAllDiagnostics(true);
-    unit->getSema().isCompleteType(spec->getLocation(),
-                                   unit->getASTContext().getCanonicalTagType(spec));
-    diags.setSuppressAllDiagnostics(suppressed);
+    if (unit && unit->hasSema() && spec->getSpecializationKind() == clang::TSK_Undeclared &&
+        !partials.empty()) {
+        clang::DiagnosticsEngine &diags = unit->getDiagnostics();
+        bool suppressed = diags.getSuppressAllDiagnostics();
+        diags.setSuppressAllDiagnostics(true);
+        bool complete = unit->getSema().isCompleteType(
+            spec->getLocation(), unit->getASTContext().getCanonicalTagType(spec));
+        diags.setSuppressAllDiagnostics(suppressed);
+        if (!complete) return false;
+    }
     return !spec->isInvalidDecl();
 }
 

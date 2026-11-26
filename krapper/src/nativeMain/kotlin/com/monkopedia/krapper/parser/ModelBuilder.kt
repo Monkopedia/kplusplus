@@ -213,8 +213,9 @@ private class ModelBuilder(
             ?.let { templates[Decl(it.ptr).cppUsr()] } ?: return
         // #341: clang leaves a specialization named only through a pointer or reference
         // uninstantiated, still naming the primary as its pattern. Instantiating it here,
-        // after the walk, changes no declaration the walk read. One clang cannot instantiate
-        // does not resolve, so its users drop rather than bind the primary's members.
+        // after the walk, changes no declaration the walk read. One clang cannot complete
+        // (invalid, ambiguous, or undefined) does not resolve, so its users drop rather than
+        // bind the primary's members.
         if (!instantiateSpecialization(unit, spec)) {
             onInvalid(InvalidDecl(key, declLocation(Decl(spec.ptr))?.let(SourceLocation::parse)))
             primary.specializations[key] = TemplateSpecialization(null, emptyList())
