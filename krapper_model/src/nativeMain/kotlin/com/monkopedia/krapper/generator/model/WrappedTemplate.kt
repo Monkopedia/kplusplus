@@ -100,9 +100,10 @@ class WrappedTemplate(val name: String) : WrappedElement() {
 /**
  * The members one specialization of a class template binds (#332): [pattern] is an explicit
  * specialization's body (no parameters, no [args]) or a partial specialization's (its own
- * parameters, with the [args] clang deduced for them).
+ * parameters, with the [args] clang deduced for them). A null [pattern] is a specialization
+ * clang could not instantiate (#341): it has no members to bind, so it does not resolve.
  */
-data class TemplateSpecialization(val pattern: WrappedTemplate, val args: List<WrappedType>)
+data class TemplateSpecialization(val pattern: WrappedTemplate?, val args: List<WrappedType>)
 
 class WrappedTemplateParam(val name: String, val usr: String) : WrappedElement() {
     val defaultType: WrappedType?

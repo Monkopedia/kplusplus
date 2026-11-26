@@ -306,6 +306,9 @@ kplusplus {
         // own parameters (ClassTemplatePartialSpecializationDecl is unbound).
         "kppbridge::partialPattern",
         "kppbridge::partialParameters",
+        // #341: have clang instantiate a specialization the parse only named through a
+        // pointer or reference (Sema is unbound).
+        "kppbridge::instantiateSpecialization",
     )
     // FIXUPS (documented generator gaps, #44 brick 5): krapper's operator generation emits
     // invalid Kotlin for four of llvm::APSInt's C++ operators —
