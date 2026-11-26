@@ -61,6 +61,18 @@ class PointerSpecializationTest {
         "template<class T> struct Q;\n" +
         // No `int::nope`: clang cannot instantiate `Tm<int**>`.
         "template<class T> struct Tm<T**> { typename T::nope n; };\n" +
+        // `Tm2<float**>` fails its static_assert; instantiating `O2<float*>` instantiates it.
+        "template<class T> struct Tm2 { int v2; };\n" +
+        "template<class T> struct Tm2<T**> { int ok; static_assert(sizeof(T) == 0, \"no\"); };\n" +
+        "template<class T> struct O2 { int o; };\n" +
+        "template<class T> struct O2<T*> { Tm2<T**> held; int k; };\n" +
+        // `A<int*, int>` matches both partials and neither is more specialized.
+        "template<class T, class U> struct A { int p; };\n" +
+        "template<class T> struct A<T*, int> { int x; };\n" +
+        "template<class U> struct A<int*, U> { int y; };\n" +
+        // An undefined primary whose only partial does not match `U<int>`.
+        "template<class T> struct U;\n" +
+        "template<class T> struct U<T*> { int u; };\n" +
         "struct User { $user };\n" +
         "}\n"
 
@@ -150,4 +162,41 @@ class PointerSpecializationTest {
             "${out.drops}"
         )
     }
+
+    // Asserts [spec] is not bound, the User member [field] that names it is dropped, and
+    // [spec] is ledgered once, at parse.
+    private fun assertDropped(out: Output, spec: String, field: String) {
+        assertPartial(out)
+        assertFalse(out.kotlin.values.any { "@krapper.CppBinding(\"$spec\")" in it })
+        val user = out.bindingOf("p::User")
+        assertFalse("var $field" in user, user)
+        assertEquals(
+            listOf(DiagnosticPhase.PARSE),
+            out.drops.filter { it.symbol == spec }.map { it.phase },
+            "${out.drops}"
+        )
+    }
+
+    private fun ledger(out: Output) = out.drops.map { it.symbol to it.phase }.toSet()
+
+    @Test
+    fun a_specialization_an_earlier_one_left_invalid_is_dropped_in_either_order() {
+        val outerFirst = generate("O2<float*> *outer; Tm2<float**> *bad; Tm<float*> *ptr;")
+        val innerFirst = generate("Tm2<float**> *bad; O2<float*> *outer; Tm<float*> *ptr;")
+        for (out in listOf(outerFirst, innerFirst)) {
+            assertDropped(out, "p::Tm2<float**>", "bad")
+            assertDropped(out, "p::O2<float*>", "outer")
+        }
+        assertEquals(ledger(innerFirst), ledger(outerFirst))
+    }
+
+    @Test
+    fun a_specialization_with_ambiguous_partials_is_dropped_and_ledgered() =
+        assertDropped(generate("A<int*, int> *amb; Tm<float*> *ptr;"), "p::A<int*, int>", "amb")
+
+    @Test
+    fun an_undefined_primary_no_partial_matches_is_dropped_and_ledgered() =
+        // Unlike `Q` (no partials, nothing asked of clang), `U` has a partial, so clang is
+        // asked to complete `U<int>` and cannot: it has no members to bind.
+        assertDropped(generate("U<int> *un; Tm<float*> *ptr;"), "p::U<int>", "un")
 }
