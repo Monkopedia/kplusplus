@@ -56,10 +56,11 @@ fun resolveExecutable(name: String): File? {
         .firstOrNull { it.canExecute() }
 }
 
-// `<exec> <arg>` stdout then stderr, trimmed (e.g. `llvm-config --version`/`--libdir`); the exit
-// status is ignored, as the callers fall back on an empty result. `providers.exec`, not a raw
-// ProcessBuilder: Gradle 9.9 deprecates starting a process at configuration time any other way
-// (#326), and this way the configuration cache tracks the probe's output as an input.
+// `<exec> <arg>`'s trimmed stdout (e.g. `llvm-config --version`/`--libdir`). A non-zero exit or
+// an empty answer fails here naming the command, its exit code and its stderr — stderr is never
+// read as the value (#330). `providers.exec`, not a raw ProcessBuilder: Gradle 9.9 deprecates
+// starting a process at configuration time any other way (#326), and this way the configuration
+// cache tracks the probe's output as an input.
 fun probe(
     exec: File,
     arg: String,
@@ -67,9 +68,27 @@ fun probe(
     val probed =
         providers.exec {
             commandLine(exec.absolutePath, arg)
-            isIgnoreExitValue = true
+            isIgnoreExitValue = true // a failure is reported below, with what the tool said
         }
-    return (probed.standardOutput.asText.get() + probed.standardError.asText.get()).trim()
+    val exitCode = probed.result.get().exitValue
+    val stdout =
+        probed.standardOutput.asText
+            .get()
+            .trim()
+    if (exitCode != 0 || stdout.isEmpty()) {
+        throw GradleException(
+            """
+            |LLVM is REQUIRED to build kplusplus, but probing the toolchain failed:
+            |  `${exec.absolutePath} $arg` exited $exitCode
+            |  stdout: ${stdout.ifEmpty { "(empty)" }}
+            |  stderr: ${probed.standardError.asText.get().trim().ifEmpty { "(empty)" }}
+            |
+            |Fix the install, or point the build at a working one:
+            |    ./gradlew <task> -PllvmConfig=/path/to/llvm-config
+            """.trimMargin(),
+        )
+    }
+    return stdout
 }
 
 // `-PllvmConfig=<exec>` is ONLY a LOCATION OVERRIDE: it points the probe at a specific
@@ -105,8 +124,8 @@ if (llvmConfigProbe == null || clangxx == null) {
 val llvmConfig: File = llvmConfigProbe!!
 // Discover the toolchain shape ONCE (was hardcoded `LLVM-22` + `/usr/lib` in each
 // module): `--version` -> the major (`-lLLVM-<major>`), `--libdir` -> the `-L<dir>`.
-val llvmMajor = probe(llvmConfig, "--version").substringBefore('.').ifEmpty { "22" }
-val llvmLibDir = probe(llvmConfig, "--libdir").ifEmpty { "/usr/lib" }
+val llvmMajor = probe(llvmConfig, "--version").substringBefore('.')
+val llvmLibDir = probe(llvmConfig, "--libdir")
 // Soft check: surface the exact missing `-l` target now (a clearer hint than the
 // linker's), but don't hard-fail — distros name the monolithic lib differently and
 // the linker is the real authority on what it can resolve.

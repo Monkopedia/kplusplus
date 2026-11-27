@@ -125,13 +125,19 @@ fun hostLibrary(name: String): File {
     val printFileName =
         providers.exec {
             commandLine("clang++", "-print-file-name=$name")
-            isIgnoreExitValue = true
+            isIgnoreExitValue = true // a failure is reported below, with what clang++ said
         }
-    val stdout = printFileName.standardOutput.asText.get()
-    val stderr = printFileName.standardError.asText.get()
-    val out = (stdout + stderr).trim()
-    return File(out).canonicalFile.takeIf { it.isFile }
-        ?: error("could not resolve $name from `clang++ -print-file-name=$name` (got: '$out')")
+    // The answer is stdout alone; stderr only explains a failure (#330).
+    val exitCode = printFileName.result.get().exitValue
+    val path =
+        printFileName.standardOutput.asText
+            .get()
+            .trim()
+    return File(path).canonicalFile.takeIf { exitCode == 0 && it.isFile }
+        ?: error(
+            "could not resolve $name from `clang++ -print-file-name=$name` (exit $exitCode, " +
+                "got: '$path', stderr: '${printFileName.standardError.asText.get().trim()}')",
+        )
 }
 
 val systemStdcxxSo = hostLibrary("libstdc++.so")
