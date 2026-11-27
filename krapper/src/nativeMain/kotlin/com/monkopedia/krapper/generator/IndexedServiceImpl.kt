@@ -178,16 +178,16 @@ class IndexedServiceImpl(private val config: KrapperConfig, private val request:
         // (ForcingHeader, :krapper_model): the same bytes are synthesized for the forcing
         // parse, so the specialization is always forced from the same translation unit.
         val forceName = ForcingHeader.forceName(target)
-        // Record only the target spec; writeTo synthesizes the bytes once it knows the output
-        // dir (the consumer #include must be relative to where the header lands — #86).
-        forcingHeaders[forceName] = target
         // Parse the forcing translation unit — the SAME synthesized header, as its own parse.
-        // The forcing header content above is still recorded: writeTo re-materializes it so
-        // the generated wrapper can #include the specialization's declaration. Everything
-        // downstream of obtaining the resolver — the scoping, resolveForcing's 3-pass dance,
-        // cumulative forcedContainerKeys, dedup — is unchanged.
+        // Null when clang cannot complete the target (#340): it is ledgered, and its forcing
+        // header must never reach the wrapper, which #includes every recorded one.
         Log.i("cpp front-end forcing: parsing $target")
-        val resolver = parseForcingModel(target, request.headers, config.cppStandard)
+        val resolver = parseForcingModel(target, request.headers, config.cppStandard) ?: return
+        // Record only the target spec; writeTo synthesizes the bytes once it knows the output
+        // dir (the consumer #include must be relative to where the header lands — #86) and
+        // re-materializes them so the generated wrapper can #include the specialization's
+        // declaration.
+        forcingHeaders[forceName] = target
         // SCOPE THE FORCING COLLECTION. The synthetic header #includes the consumer's
         // own headers, so `findClasses { defaultFilter() }` collects EVERY class in the
         // re-parsed TU — against a large library that is the whole transitive surface

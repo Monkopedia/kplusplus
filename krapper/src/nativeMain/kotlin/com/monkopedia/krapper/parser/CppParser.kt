@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.parser
 
+import clang.ASTUnit
 import com.monkopedia.krapper.generator.ParseDiagnostic
 import com.monkopedia.krapper.generator.decodeParseDiagnostics
 import com.monkopedia.krapper.generator.model.ModelIo
@@ -78,19 +79,20 @@ object CppParser {
      * constructed [WrappedTU] is pure Kotlin data and outlives it.
      *
      * Each declaration clang error-recovered is left out of the tree and passed to
-     * [onInvalid] instead (#252, see [InvalidDecl]).
+     * [onInvalid] instead (#252, see [InvalidDecl]). [inspect] sees the `ASTUnit` before the
+     * walk, while it is still alive.
      */
     fun parse(
         code: String,
         filename: String,
         args: String,
+        inspect: (ASTUnit) -> Unit = {},
         onInvalid: (InvalidDecl) -> Unit = {}
     ): WrappedTU = memScoped {
-        buildWrappedTU(
-            buildASTWithArgs(code, filename, args)
-                ?: fail("clang could not build an AST for $filename"),
-            onInvalid
-        )
+        val unit = buildASTWithArgs(code, filename, args)
+            ?: fail("clang could not build an AST for $filename")
+        inspect(unit)
+        buildWrappedTU(unit, onInvalid)
     }
 
     /**

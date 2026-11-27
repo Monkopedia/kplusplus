@@ -441,6 +441,28 @@ inline bool instantiateSpecialization(clang::ASTUnit *unit,
     return !spec->isInvalidDecl();
 }
 
+// #340 BRIDGE: whether the type a forcing translation unit's `struct [forceName] { T value; }`
+// forces can be bound — 0 when it can, 1 when it is incomplete (declared but never defined, or
+// clang could not pick a definition: an undefined primary, ambiguous partials), 2 when clang
+// marked it invalid (a failed instantiation such as a static_assert) or the struct itself never
+// parsed. The forcing struct's field is the one place the forced type is named, and the field
+// has already made clang try to complete it; the wrapper #includes the same struct, so any
+// answer but 0 is a wrapper that cannot compile.
+inline int forcedTypeState(clang::ASTUnit *unit, const char *forceName) {
+    for (const clang::Decl *decl : unit->getASTContext().getTranslationUnitDecl()->decls()) {
+        const auto *record = llvm::dyn_cast<clang::CXXRecordDecl>(decl);
+        if (!record || record->getName() != forceName || !record->isThisDeclarationADefinition() ||
+            record->field_empty())
+            continue;
+        const clang::FieldDecl *value = *record->field_begin();
+        const clang::TagDecl *tag = value->getType()->getAsTagDecl();
+        const clang::TagDecl *definition = tag ? tag->getDefinition() : nullptr;
+        if (definition && definition->isInvalidDecl()) return 2;
+        return value->isInvalidDecl() || value->getType()->isIncompleteType() ? 1 : 0;
+    }
+    return 2;
+}
+
 // #332 BRIDGE: a partial specialization's own template parameters (the `T` of `Tm<T*>`); null
 // for any other record. They live on ClassTemplatePartialSpecializationDecl, which is unbound.
 inline const clang::TemplateParameterList *
