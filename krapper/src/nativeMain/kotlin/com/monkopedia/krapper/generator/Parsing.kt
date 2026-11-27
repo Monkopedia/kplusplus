@@ -15,6 +15,7 @@
  */
 package com.monkopedia.krapper.generator
 
+import clang.ASTUnit
 import com.monkopedia.krapper.AllowListFilter
 import com.monkopedia.krapper.AndFilter
 import com.monkopedia.krapper.DefaultFilter
@@ -80,6 +81,7 @@ import com.monkopedia.krapper.generator.resolvedmodel.ResolvedNamespace
 import com.monkopedia.krapper.generator.resolvedmodel.type.ResolvedType
 import com.monkopedia.krapper.parser.CppParser
 import kotlin.math.min
+import kppbridge.forcedTypeState
 
 typealias ElementFilter = WrappedElement.() -> Boolean
 
@@ -129,12 +131,18 @@ private suspend fun prepareParsed(tu: WrappedTU): ParsedResolver {
  * looks at is indistinguishable from a clean one — which is what made `--strict-diagnostics`
  * a flag that read nothing.
  */
-private suspend fun parseTu(code: String, filename: String, std: String): WrappedTU {
+private suspend fun parseTu(
+    code: String,
+    filename: String,
+    std: String,
+    inspect: (ASTUnit) -> Unit = {}
+): WrappedTU {
     val run = KrapperRun.current
     // #252: a declaration clang error-recovered is SKIPPED by the walk (binding it would emit
     // clang's `int` substitute), and ledgered here by name so the ledger lists exactly what
     // the output lacks. Recorded before the policy below, which may abort.
-    val tu = CppParser.parse(code, filename, CppParser.driverArgs(std, run.includeDirs)) {
+    val args = CppParser.driverArgs(std, run.includeDirs)
+    val tu = CppParser.parse(code, filename, args, inspect) {
         run.drops.record(
             symbol = it.symbol,
             reason = "invalid declaration: clang could not parse all of it, or a declaration " +
@@ -177,14 +185,35 @@ private suspend fun dumpModel(name: String, tu: WrappedTU) {
  * ForcingHeader prepends a std include (e.g. `#include <vector>` pulls <new> in front of the
  * user header's <cwchar>), so a tree taken as-parsed would emit that round's std functions in a
  * SPEC-DEPENDENT order. First-seen base order is the spec-invariant choice.
+ *
+ * Null when clang cannot complete [target] (#340): its forcing struct, #included by the
+ * wrapper, could never compile, so the target is ledgered and nothing is forced.
  */
 internal suspend fun parseForcingModel(
     target: String,
     userHeaders: List<String>,
     std: String
-): ParsedResolver {
+): ParsedResolver? {
     val forceName = ForcingHeader.forceName(target)
-    val tu = parseTu(ForcingHeader.contentFor(target, userHeaders), "$forceName.cc", std)
+    var state = 0
+    val tu = parseTu(ForcingHeader.contentFor(target, userHeaders), "$forceName.cc", std) {
+        state = forcedTypeState(it, forceName)
+    }
+    if (state != 0) {
+        KrapperRun.current.drops.record(
+            symbol = target,
+            reason = if (state == 1) {
+                "incomplete type: $target is declared but not defined, or clang could not " +
+                    "pick its definition (an undefined primary, ambiguous partial " +
+                    "specializations), so no forcing struct can hold one"
+            } else {
+                "invalid type: clang could not instantiate $target (see the parse error " +
+                    "ledgered beside it), so no forcing struct can hold one"
+            },
+            phase = DropPhase.PARSE
+        )
+        return null
+    }
     dumpModel("$forceName.json", tu)
     val resolver = prepareParsed(tu)
     KrapperRun.current.baseModelTu?.let { base -> reorderToFirstSeen(resolver.tu, base) }
