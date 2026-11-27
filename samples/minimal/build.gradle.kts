@@ -81,13 +81,14 @@ val systemStdcxxSo: File = run {
         commandLine("clang++", "-print-file-name=libstdc++.so")
         isIgnoreExitValue = true // a bad answer is reported below, with what clang++ said
     }
-    val stdout = printFileName.standardOutput.asText.get()
-    val stderr = printFileName.standardError.asText.get()
-    val out = (stdout + stderr).trim()
-    File(out).canonicalFile.takeIf { it.isFile }
+    // The answer is stdout alone; stderr only explains a failure.
+    val exitCode = printFileName.result.get().exitValue
+    val path = printFileName.standardOutput.asText.get().trim()
+    File(path).canonicalFile.takeIf { exitCode == 0 && it.isFile }
         ?: error(
             "could not resolve the system libstdc++.so from " +
-                "`clang++ -print-file-name=libstdc++.so` (got: '$out')"
+                "`clang++ -print-file-name=libstdc++.so` (exit $exitCode, got: '$path', " +
+                "stderr: '${printFileName.standardError.asText.get().trim()}')"
         )
 }
 val systemStdcxxLibDir = systemStdcxxSo.parentFile.absolutePath
