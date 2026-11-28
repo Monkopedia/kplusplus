@@ -57,6 +57,8 @@ class PointerSpecializationTest {
         "namespace p {\n" +
         "template<class T> struct Tm { int v; int get() const { return v; } };\n" +
         "template<> struct Tm<b::X> { long w; long twice() const { return w * 2; } };\n" +
+        // #348: an explicit specialization declared but never defined.
+        "template<> struct Tm<short>;\n" +
         "template<class T> struct Tm<T*> { T *q; short s; };\n" +
         "template<class T> struct Q;\n" +
         // No `int::nope`: clang cannot instantiate `Tm<int**>`.
@@ -199,4 +201,31 @@ class PointerSpecializationTest {
         // Unlike `Q` (no partials, nothing asked of clang), `U` has a partial, so clang is
         // asked to complete `U<int>` and cannot: it has no members to bind.
         assertDropped(generate("U<int> *un; Tm<float*> *ptr;"), "p::U<int>", "un")
+
+    // #348: a declared-only explicit specialization has no members to bind. It is dropped and
+    // ledgered once, at parse, and the User member naming it goes with it, while the defined
+    // explicit specialization and the partial beside it still bind.
+    private fun assertDeclaredOnlyDropped(user: String, member: String) {
+        val out = generate("$user Tm<b::X> *ok; Tm<float*> *ptr;")
+        assertPartial(out)
+        val explicit = out.bindingOf("p::Tm<b::X>")
+        assertTrue("var w: Long" in explicit && "fun twice(): Long" in explicit, explicit)
+        assertFalse(out.kotlin.values.any { "@krapper.CppBinding(\"p::Tm<short>\")" in it })
+        val bound = out.bindingOf("p::User")
+        assertTrue("var ok" in bound, bound)
+        assertFalse(member in bound, bound)
+        assertEquals(
+            listOf(DiagnosticPhase.PARSE),
+            out.drops.filter { it.symbol == "p::Tm<short>" }.map { it.phase },
+            "${out.drops}"
+        )
+    }
+
+    @Test
+    fun a_declared_only_explicit_specialization_seen_through_a_pointer_is_dropped() =
+        assertDeclaredOnlyDropped("Tm<short> *get();", "fun get")
+
+    @Test
+    fun a_declared_only_explicit_specialization_seen_through_a_reference_is_dropped() =
+        assertDeclaredOnlyDropped("void use(Tm<short> &ref);", "fun use")
 }
