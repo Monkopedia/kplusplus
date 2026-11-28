@@ -141,4 +141,11 @@ class ForcedIncompleteTest {
         InstantiationRequest("p::A", listOf("int*", "int")),
         "incomplete type"
     )
+
+    @Test
+    fun an_undeclared_template_is_ledgered_as_undeclared() = assertDropped(
+        "p::Nope<int>",
+        InstantiationRequest("p::Nope", listOf("int")),
+        "undeclared type: the template or an argument p::Nope<int> names is not declared"
+    )
 }
