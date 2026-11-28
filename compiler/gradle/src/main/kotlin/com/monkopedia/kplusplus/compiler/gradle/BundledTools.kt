@@ -22,7 +22,8 @@ internal sealed interface BundledTool {
     /** An unbundled (in-tree/dev) jar: no binary for ANY host, so resolution falls through. */
     object None : BundledTool
 
-    class Found(val resource: URL) : BundledTool
+    /** [resource] is the binary for host [target], the Kotlin/Native target naming this host. */
+    class Found(val target: String, val resource: URL) : BundledTool
 
     /** The jar bundles the tool, but not for this host — running it would exec a foreign binary. */
     class UnsupportedHost(val message: String) : BundledTool
@@ -43,7 +44,7 @@ internal class BundledTools(
         val bundled = HOST_TARGETS.filter { resource(path(it, tool)) != null }
         if (bundled.isEmpty()) return BundledTool.None
         val host = hostTarget()
-        if (host in bundled) return BundledTool.Found(resource(path(host!!, tool))!!)
+        if (host in bundled) return BundledTool.Found(host!!, resource(path(host, tool))!!)
         return BundledTool.UnsupportedHost(
             "kplusplus: this plugin bundles $tool for ${bundled.joinToString()} only, but this " +
                 "host is $osName $osArch (${host ?: "no Kotlin/Native host target"}). Supply " +

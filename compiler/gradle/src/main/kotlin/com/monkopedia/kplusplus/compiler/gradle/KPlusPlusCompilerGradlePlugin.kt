@@ -6,7 +6,6 @@ import com.monkopedia.krapper.IndexRequest
 import com.monkopedia.krapper.KrapperConfig
 import com.monkopedia.krapper.ReferencePolicy
 import java.io.File
-import java.net.URL
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.concurrent.Callable
@@ -646,12 +645,12 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
      * released plugin carries its own `krapper` binary on its classpath at
      * `/com/monkopedia/kplusplus/tools/<host>/<tool>` ([BundledTools]), so a consumer NEVER
      * resolves a separate tool Maven coordinate (that coordinate resolution is what collided
-     * with an in-build `:krapper` project). Copy the binary to a per-plugin-version cache under the Gradle user
-     * home, chmod +x (jar entries carry no exec bit), and return it. Null when the jar carries
-     * no bundled binary (an unbundled in-tree/dev jar) so the caller can fall through to the
-     * sibling/includedBuild/published paths. A jar that bundles the tool for OTHER hosts only
-     * resolves to [ResolvedKrapper.unavailable] (#208): reported when the tool is first needed,
-     * so configuration (`./gradlew tasks`) still works on that host.
+     * with an in-build `:krapper` project). Copy the binary to a per-plugin-version, per-host
+     * cache under the Gradle user home, chmod +x (jar entries carry no exec bit), and return it.
+     * Null when the jar carries no bundled binary (an unbundled in-tree/dev jar) so the caller
+     * can fall through to the sibling/includedBuild/published paths. A jar that bundles the tool
+     * for OTHER hosts only resolves to [ResolvedKrapper.unavailable] (#208): reported when the
+     * tool is first needed, so configuration (`./gradlew tasks`) still works on that host.
      */
     private fun bundledKrapper(target: Project): ResolvedKrapper? =
         when (val bundled = bundledTools.find(TOOL_NAME)) {
@@ -661,15 +660,19 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 ResolvedKrapper(null, null, unavailable = bundled.message)
 
             is BundledTool.Found ->
-                extractBundledTool(target, TOOL_NAME, bundled.resource)?.let {
-                    ResolvedKrapper(null, it)
-                }
+                extractBundledTool(target, TOOL_NAME, bundled)?.let { ResolvedKrapper(null, it) }
         }
 
-    private fun extractBundledTool(target: Project, tool: String, resource: URL): File? {
+    // Keyed by host target as well as version (#302): a Gradle user home shared across hosts
+    // must not hand one host another's binary. The old `tools/<version>/<tool>` is abandoned.
+    private fun extractBundledTool(
+        target: Project,
+        tool: String,
+        bundled: BundledTool.Found
+    ): File? {
         val cache = File(
             target.gradle.gradleUserHomeDir,
-            "kplusplus/tools/$PLUGIN_VERSION/$tool"
+            "kplusplus/tools/$PLUGIN_VERSION/${bundled.target}/$tool"
         )
         if (cache.exists() && cache.length() > 0L) return cache
         return try {
@@ -681,7 +684,7 @@ class KPlusPlusCompilerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             val tmp = java.nio.file.Files.createTempFile(cache.parentFile.toPath(), tool, ".part")
                 .toFile()
             try {
-                resource.openStream().use { input ->
+                bundled.resource.openStream().use { input ->
                     tmp.outputStream().use { out -> input.copyTo(out) }
                 }
                 tmp.copyTo(cache, overwrite = true)

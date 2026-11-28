@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.gradle.api.GradleException
@@ -163,4 +164,27 @@ class BundledToolsTest {
 
     @Test
     fun a_non_executable_override_is_refused() = assertRefused(tool(executable = false).path)
+
+    // One Gradle user home shared by two hosts (an NFS home, a cache mounted into CI
+    // containers of different architectures) must hand each host its own binary (#302).
+    @Test
+    fun hosts_sharing_a_gradle_home_each_extract_their_own_binary() {
+        val home = File(tmp, "shared-gradle-home")
+        val urls = listOf("linuxX64", "linuxArm64").associate {
+            val binary = File(tmp, "jar/$it/krapper").apply {
+                parentFile.mkdirs()
+                writeText("krapper for $it")
+            }
+            "/com/monkopedia/kplusplus/tools/$it/krapper" to binary.toURI().toURL()
+        }
+        for ((arch, target) in listOf("amd64" to "linuxX64", "aarch64" to "linuxArm64")) {
+            val project = ProjectBuilder.builder().withGradleUserHomeDir(home).build()
+            project.pluginManager.apply(KPlusPlusCompilerGradlePlugin::class.java)
+            val plugin = project.plugins.getPlugin(KPlusPlusCompilerGradlePlugin::class.java)
+            plugin.bundledTools = BundledTools("Linux", arch, urls::get)
+            val binary = assertNotNull(plugin.resolveKrapper(project).binary, target)
+            assertEquals("krapper for $target", binary.readText(), target)
+            assertTrue(binary.canExecute(), target)
+        }
+    }
 }
