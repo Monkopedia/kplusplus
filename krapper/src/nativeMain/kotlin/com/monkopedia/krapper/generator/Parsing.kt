@@ -202,13 +202,19 @@ internal suspend fun parseForcingModel(
     if (state != 0) {
         KrapperRun.current.drops.record(
             symbol = target,
-            reason = if (state == 1) {
-                "incomplete type: $target is declared but not defined, or clang could not " +
-                    "pick its definition (an undefined primary, ambiguous partial " +
-                    "specializations), so no forcing struct can hold one"
-            } else {
-                "invalid type: clang could not instantiate $target (see the parse error " +
-                    "ledgered beside it), so no forcing struct can hold one"
+            reason = when (state) {
+                1 ->
+                    "incomplete type: $target is declared but not defined, or clang could " +
+                        "not pick its definition (an undefined primary, ambiguous partial " +
+                        "specializations), so no forcing struct can hold one"
+
+                3 ->
+                    "undeclared type: the template or an argument $target names is not " +
+                        "declared, so there is nothing to force"
+
+                else ->
+                    "invalid type: clang could not instantiate $target (see the parse error " +
+                        "ledgered beside it), so no forcing struct can hold one"
             },
             phase = DropPhase.PARSE
         )

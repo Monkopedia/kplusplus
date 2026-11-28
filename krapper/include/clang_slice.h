@@ -412,6 +412,17 @@ partialPattern(const clang::ClassTemplateSpecializationDecl *spec) {
         .dyn_cast<clang::ClassTemplatePartialSpecializationDecl *>();
 }
 
+// Whether [type] can be bound by value — 0 when it can, 1 when it is incomplete (declared but
+// never defined, or clang could not pick a definition: an undefined primary, ambiguous
+// partials), 2 when clang marked its definition invalid (a failed instantiation such as a
+// static_assert). Reads only what clang already concluded; it never asks Sema to complete it.
+inline int bindableState(clang::QualType type) {
+    const clang::TagDecl *tag = type->getAsTagDecl();
+    const clang::TagDecl *definition = tag ? tag->getDefinition() : nullptr;
+    if (definition && definition->isInvalidDecl()) return 2;
+    return type->isIncompleteType() ? 1 : 0;
+}
+
 // #341 BRIDGE: have clang instantiate [spec] when the parse never did, so partialPattern
 // reports the partial specialization clang's partial ordering picks for it. A specialization
 // named only through a pointer or reference (`Tm<float*> *`) is left uninstantiated, and an
@@ -421,33 +432,40 @@ partialPattern(const clang::ClassTemplateSpecializationDecl *spec) {
 // on it. Diagnostics are suppressed (Sema is asked, never required, to complete the type):
 // a body clang cannot instantiate marks [spec] invalid instead of surfacing as an error in
 // the user's header. False when [spec] cannot be bound: it is invalid, however it got
-// instantiated (an earlier specialization's instantiation may have done it), or the attempt
-// left it incomplete (ambiguous partials, or an undefined primary no partial matches).
+// instantiated (an earlier specialization's instantiation may have done it), or its own body
+// is missing -- the instantiation left it incomplete (ambiguous partials, or an undefined
+// primary no partial matches), or (#348) it is an explicit specialization declared but never
+// defined. An instantiation's body is its pattern's, so only those two are asked.
 inline bool instantiateSpecialization(clang::ASTUnit *unit,
                                       clang::ClassTemplateSpecializationDecl *spec) {
     if (!spec) return true;
-    llvm::SmallVector<clang::ClassTemplatePartialSpecializationDecl *, 4> partials;
-    spec->getSpecializedTemplate()->getPartialSpecializations(partials);
-    if (unit && unit->hasSema() && spec->getSpecializationKind() == clang::TSK_Undeclared &&
-        !partials.empty()) {
+    clang::QualType type = spec->getASTContext().getCanonicalTagType(spec);
+    switch (spec->getSpecializationKind()) {
+    case clang::TSK_Undeclared: {
+        llvm::SmallVector<clang::ClassTemplatePartialSpecializationDecl *, 4> partials;
+        spec->getSpecializedTemplate()->getPartialSpecializations(partials);
+        if (partials.empty() || !unit || !unit->hasSema()) return !spec->isInvalidDecl();
         clang::DiagnosticsEngine &diags = unit->getDiagnostics();
         bool suppressed = diags.getSuppressAllDiagnostics();
         diags.setSuppressAllDiagnostics(true);
-        bool complete = unit->getSema().isCompleteType(
-            spec->getLocation(), unit->getASTContext().getCanonicalTagType(spec));
+        unit->getSema().isCompleteType(spec->getLocation(), type);
         diags.setSuppressAllDiagnostics(suppressed);
-        if (!complete) return false;
+        break;
     }
-    return !spec->isInvalidDecl();
+    case clang::TSK_ExplicitSpecialization:
+        break;
+    default:
+        return !spec->isInvalidDecl();
+    }
+    return !spec->isInvalidDecl() && bindableState(type) == 0;
 }
 
 // #340 BRIDGE: whether the type a forcing translation unit's `struct [forceName] { T value; }`
-// forces can be bound — 0 when it can, 1 when it is incomplete (declared but never defined, or
-// clang could not pick a definition: an undefined primary, ambiguous partials), 2 when clang
-// marked it invalid (a failed instantiation such as a static_assert) or the struct itself never
-// parsed. The forcing struct's field is the one place the forced type is named, and the field
-// has already made clang try to complete it; the wrapper #includes the same struct, so any
-// answer but 0 is a wrapper that cannot compile.
+// forces can be bound — bindableState's answer, or 3 when the field names no declared type
+// (`p::Nope<int>` for an undeclared `Nope`: clang recovered the field as an `int`), or 2 when
+// the struct itself never parsed. The forcing struct's field is the one place the forced type
+// is named, and the field has already made clang try to complete it; the wrapper #includes the
+// same struct, so any answer but 0 is a wrapper that cannot compile.
 inline int forcedTypeState(clang::ASTUnit *unit, const char *forceName) {
     for (const clang::Decl *decl : unit->getASTContext().getTranslationUnitDecl()->decls()) {
         const auto *record = llvm::dyn_cast<clang::CXXRecordDecl>(decl);
@@ -455,10 +473,9 @@ inline int forcedTypeState(clang::ASTUnit *unit, const char *forceName) {
             record->field_empty())
             continue;
         const clang::FieldDecl *value = *record->field_begin();
-        const clang::TagDecl *tag = value->getType()->getAsTagDecl();
-        const clang::TagDecl *definition = tag ? tag->getDefinition() : nullptr;
-        if (definition && definition->isInvalidDecl()) return 2;
-        return value->isInvalidDecl() || value->getType()->isIncompleteType() ? 1 : 0;
+        if (value->isInvalidDecl() && !value->getType()->getAsTagDecl()) return 3;
+        int state = bindableState(value->getType());
+        return state == 0 && value->isInvalidDecl() ? 1 : state;
     }
     return 2;
 }
